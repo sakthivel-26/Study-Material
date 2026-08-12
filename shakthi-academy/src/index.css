@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-appbg text-ink antialiased font-sans;
+  margin: 0;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-black/15 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-black/25;
+}
+
+@layer components {
+  /* Glassmorphism card */
+  .glass {
+    @apply bg-white/75 backdrop-blur-xl border border-white/50;
+  }
+  .glass-dark {
+    @apply bg-white/10 backdrop-blur-xl border border-white/20;
+  }
+  .card {
+    @apply bg-surface rounded-card shadow-card border border-black/[0.04];
+  }
+  .card-hover {
+    @apply transition-all duration-300 hover:-translate-y-0.5 hover:shadow-soft hover:border-brand-200;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-semibold rounded-xl transition-all duration-200 active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply btn bg-brand-700 text-white hover:bg-brand-800 shadow-lift;
+  }
+  .btn-ghost {
+    @apply btn bg-brand-50 text-brand-700 hover:bg-brand-100;
+  }
+  .btn-soft {
+    @apply btn bg-black/[0.04] text-ink-soft hover:bg-black/[0.08];
+  }
+  .input {
+    @apply w-full rounded-xl border border-black/10 bg-white px-3.5 py-2.5 text-sm outline-none transition-all focus:border-brand-400 focus:ring-4 focus:ring-brand-100 placeholder:text-ink-faint;
+  }
+  .progress-track {
+    @apply w-full h-2 rounded-full bg-black/[0.06] overflow-hidden;
+  }
+  .nav-item {
+    @apply flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-ink-soft transition-all duration-200 hover:bg-brand-50 hover:text-brand-700 cursor-pointer;
+  }
+  .nav-item-active {
+    @apply bg-brand-700 text-white shadow-lift hover:bg-brand-800 hover:text-white;
+  }
+}
+
+/* Gradient text */
+.grad-text {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-brand-600 to-fuchsia-500;
+}
+
+/* Subtle grid background */
+.bg-grid {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(109, 40, 217, 0.06) 1px, transparent 0);
+  background-size: 26px 26px;
+}
+
+.bg-hero {
+  background:
+    radial-gradient(1200px 500px at 100% -20%, rgba(255, 255, 255, 0.22), transparent 60%),
+    radial-gradient(900px 500px at -10% 120%, rgba(240, 171, 252, 0.35), transparent 55%),
+    linear-gradient(135deg, #6D28D9 0%, #7C3AED 45%, #9333EA 100%);
+}
