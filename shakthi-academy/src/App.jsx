@@ -12,7 +12,8 @@ import ProfilePage from "./pages/ProfilePage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import AdminDashboard from "./pages/admin/AdminDashboard.jsx";
 import UploadPage from "./pages/admin/UploadPage.jsx";
-import { CreateMockTestPage, ManageStudentsPage, AnnouncementsPage, AnalyticsPage, ManageCoursesPage } from "./pages/admin/AdminManagePages.jsx";
+import { CreateMockTestPage, ManageStudentsPage, AnnouncementsPage, ManageCoursesPage, PlansPage } from "./pages/admin/AdminManagePages.jsx";
+import AdminAccountPage from "./pages/admin/AdminAccountPage.jsx";
 
 export default function App() {
   return (
@@ -42,8 +43,9 @@ export default function App() {
         <Route path="/admin/mock-test" element={<CreateMockTestPage />} />
         <Route path="/admin/students" element={<ManageStudentsPage />} />
         <Route path="/admin/announcements" element={<AnnouncementsPage />} />
-        <Route path="/admin/analytics" element={<AnalyticsPage />} />
         <Route path="/admin/courses" element={<ManageCoursesPage />} />
+        <Route path="/admin/plans" element={<PlansPage />} />
+        <Route path="/admin/account" element={<AdminAccountPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

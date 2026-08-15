@@ -552,7 +552,10 @@ async function callLLMChain(prompt) {
     }
     
     const parsed = JSON.parse(cleaned);
-    return Array.isArray(parsed) ? parsed : parsed.questions || [];
+    // Extraction returns { questions: [...] }, while the background verifier
+    // returns one verification object. Keep that object instead of converting
+    // it to an empty array (which caused "failed to return structured JSON").
+    return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed;
   } catch (err) {
     console.error("Backend LLMChain error:", err);
     return [];
@@ -693,12 +696,18 @@ export async function verifyQuestionsBackground(questions, onProgress) {
             q.verification_explanation = v.verification_explanation;
             q.needs_review = v.needs_review;
           } else {
-             q.answer_status = "NEEDS_REVIEW";
-             q.review_reason = "Verification LLM failed to return structured JSON.";
+             q.answer_status = q.source_answer ? "NEEDS_REVIEW" : "NO_SOURCE_ANSWER";
+             q.review_reason = q.source_answer
+               ? "Source answer retained. Automated verification did not return a result; review when convenient."
+               : "No answer key was found in the uploaded PDF.";
           }
         } catch (err) {
-          q.answer_status = "NEEDS_REVIEW";
-          q.review_reason = "Verification API error.";
+          // Do not block publishing a usable mock when the optional background
+          // verifier is offline. The extracted PDF answer is retained.
+          q.answer_status = q.source_answer ? "NEEDS_REVIEW" : "NO_SOURCE_ANSWER";
+          q.review_reason = q.source_answer
+            ? "Source answer retained. Automated verification is currently unavailable."
+            : "No answer key was found in the uploaded PDF.";
         }
       }
       verifiedQuestions[i] = q; // Preserve order

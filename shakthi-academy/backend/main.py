@@ -5,10 +5,12 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from dotenv import load_dotenv
+from payments import router as payments_router
 
 load_dotenv()
 
 app = FastAPI()
+app.include_router(payments_router)
 
 # Allow CORS for local dev
 app.add_middleware(
@@ -20,9 +22,12 @@ app.add_middleware(
 )
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-client = OpenAI(
-    base_url="https://integrate.api.nvidia.com/v1",
-    api_key=NVIDIA_API_KEY
+# Keep the API server online even before an AI key is configured. The extraction
+# endpoints return a clear configuration error instead of crashing at startup.
+client = (
+    OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=NVIDIA_API_KEY)
+    if NVIDIA_API_KEY
+    else None
 )
 
 SYSTEM_PROMPT = """
@@ -52,6 +57,33 @@ def extract_text_from_pdf(file_content: bytes):
         pages.append({"page_number": page_num + 1, "text": text})
     return pages
 
+def regex_extract_questions(pages):
+    """Best-effort, layout-tolerant MCQ parser for selectable-text PDFs."""
+    import re
+    found, seen = [], set()
+    option_start = r"(?:\(?[A-Da-d]\)?\s*[.)\]:-])"
+    question_re = re.compile(
+        r"(?ms)^\s*(?:Q(?:uestion)?\s*)?(\d{1,3})(?:\s*[.)\]:-]|\s{2,})(.*?)(?=^\s*(?:Q(?:uestion)?\s*)?\d{1,3}(?:\s*[.)\]:-]|\s{2,})|\Z)"
+    )
+    option_re = re.compile(r"(?m)^\s*\(?([A-Da-d])\)?\s*[.)\]:-]\s*(.*)$")
+    answer_re = re.compile(r"(?im)(?:answer|ans)\s*[:\-]?\s*\(?([A-D])\)?")
+    for page in pages:
+        text = page["text"].replace("\r", "\n")
+        text = re.sub(r"(?<!^)(?<!\n)\s+(?=" + option_start + r")", "\n", text)
+        for number, block in question_re.findall(text):
+            options = {}
+            for letter, value in option_re.findall(block):
+                value = re.sub(r"\s+", " ", value).strip()
+                if value: options[letter.upper()] = value
+            if len(options) < 2: continue
+            question = re.sub(r"\s+", " ", option_re.split(block, maxsplit=1)[0]).strip()
+            identity = (question.lower(), tuple(options.items()))
+            if not question or identity in seen: continue
+            seen.add(identity)
+            answer = answer_re.search(block)
+            found.append({"question_number": int(number), "question_text": question, "options": {key: options[key] for key in sorted(options)}, "source_answer": answer.group(1) if answer else None, "page_number": page["page_number"], "extraction_method": "offline-parser"})
+    return found
+
 def chunk_pages(pages):
     chunks = []
     current_chunk = []
@@ -75,9 +107,6 @@ async def extract_questions(file: UploadFile = File(...)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Must be a PDF file")
 
-    if not NVIDIA_API_KEY:
-        raise HTTPException(status_code=500, detail="NVIDIA_AUTH_ERROR: API key missing")
-
     try:
         content = await file.read()
         pages = extract_text_from_pdf(content)
@@ -86,6 +115,13 @@ async def extract_questions(file: UploadFile = File(...)):
         total_text = sum(len(p["text"].strip()) for p in pages)
         if total_text < 50:
             raise HTTPException(status_code=400, detail="PDF_EXTRACTION_ERROR: No selectable text found (Scanned PDFs not supported yet).")
+
+        # Allow basic MCQ extraction even when no AI key is configured.
+        if not NVIDIA_API_KEY:
+            offline_questions = regex_extract_questions(pages)
+            if offline_questions:
+                return {"success": True, "questions": offline_questions, "warning": "Extracted with offline parser; review all questions and answers before publishing."}
+            raise HTTPException(status_code=503, detail="AI extraction is not configured and this PDF could not be parsed offline.")
 
         chunks = chunk_pages(pages)
         all_questions = []
@@ -97,7 +133,7 @@ async def extract_questions(file: UploadFile = File(...)):
             
             try:
                 response = client.chat.completions.create(
-                    model="meta/llama-3.1-70b-instruct",
+                    model="nvidia/nemotron-3.5-lightning-30b-a3b",
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": chunk_text}
@@ -136,6 +172,11 @@ async def extract_questions(file: UploadFile = File(...)):
                     all_questions.extend(data)
                 
             except Exception as e:
+                # Network/provider errors should not prevent simple text-based
+                # question papers from being converted into a reviewable draft.
+                offline_questions = regex_extract_questions(pages)
+                if offline_questions:
+                    return {"success": True, "questions": offline_questions, "warning": "AI unavailable; extracted with offline parser. Review before publishing."}
                 err_str = str(e).lower()
                 if "429" in err_str or "rate limit" in err_str:
                     raise HTTPException(status_code=429, detail="NVIDIA_RATE_LIMIT")
@@ -149,6 +190,14 @@ async def extract_questions(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
+        # If the provider times out or is unreachable, still try the offline
+        # parser rather than failing immediately.
+        try:
+            fallback = regex_extract_questions(pages)
+            if fallback:
+                return {"success": True, "questions": fallback, "warning": "AI unavailable; extracted with offline parser. Review before publishing."}
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"PDF_EXTRACTION_ERROR: {str(e)}")
 
 from pydantic import BaseModel
@@ -162,10 +211,11 @@ async def ai_chat(req: ChatRequest):
         raise HTTPException(status_code=500, detail="NVIDIA_AUTH_ERROR: API key missing")
     try:
         response = client.chat.completions.create(
-            model="meta/llama-3.1-70b-instruct",
+            model="nvidia/nemotron-3.5-lightning-30b-a3b",
             messages=[{"role": "user", "content": req.prompt}],
-            temperature=0.3,
+            temperature=0.1,
             max_tokens=2000,
+            response_format={"type": "json_object"},
         )
         
         output = response.choices[0].message.content

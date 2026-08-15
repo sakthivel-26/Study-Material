@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, UploadCloud, Youtube, ClipboardPlus, Users, Megaphone,
-  TrendingUp, BookOpen, ArrowLeft, Menu, X,
+  TrendingUp, BookOpen, Tags, Settings, ArrowLeft, Menu, X,
 } from "lucide-react";
 import { Logo, Avatar } from "./ui.jsx";
 import Toast from "./Toast.jsx";
@@ -16,8 +16,9 @@ const NAV = [
   { to: "/admin/mock-test", label: "Create Mock Test", icon: ClipboardPlus },
   { to: "/admin/students", label: "Manage Students", icon: Users },
   { to: "/admin/announcements", label: "Notifications", icon: Megaphone },
-  { to: "/admin/analytics", label: "Analytics", icon: TrendingUp },
   { to: "/admin/courses", label: "Manage Courses", icon: BookOpen },
+  { to: "/admin/plans", label: "Plans & Offers", icon: Tags },
+  { to: "/admin/account", label: "Admin Profile & Payments", icon: Settings },
 ];
 
 export default function AdminLayout() {
