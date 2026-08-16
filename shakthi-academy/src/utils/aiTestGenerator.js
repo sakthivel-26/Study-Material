@@ -30,7 +30,7 @@ Return ONLY raw valid JSON array of objects without markdown formatting or backt
   {
     "section": "Quantitative Aptitude / Logical Reasoning / English / General Awareness",
     "question": "Question text...",
-    "options": ["Option A", "Option B", "Option C", "Option D", "Option E"],
+    "options": ["Option A", "Option B", "Option C", "Option D"],
     "correctAnswerIndex": 0,
     "explanation": "Step-by-step solution..."
   }

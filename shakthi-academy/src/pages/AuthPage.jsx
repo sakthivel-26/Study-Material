@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Mail, Lock, User, Eye, EyeOff, ArrowRight, ArrowLeft, CheckCircle2,
+  Mail, Lock, User, Phone, Eye, EyeOff, ArrowRight, ArrowLeft, CheckCircle2,
   Loader2, ShieldCheck, GraduationCap, BookOpen, Award, Sparkles,
 } from "lucide-react";
 import { Logo, Avatar } from "../components/ui.jsx";
@@ -49,9 +49,7 @@ function BrandPanel() {
 
           <div className="space-y-3">
             {[
-              { icon: BookOpen, text: "8,000+ study materials & PDFs" },
-              { icon: GraduationCap, text: "Real-pattern mock tests" },
-              { icon: Award, text: "Track progress & daily streaks" },
+              { icon: Sparkles, text: "If this army loses, which army will win?" },
             ].map((f, i) => (
               <motion.div
                 key={f.text}
@@ -193,6 +191,7 @@ export function LoginPage() {
               <div className="h-px flex-1 bg-black/10" /><span className="text-xs text-ink-faint">or</span><div className="h-px flex-1 bg-black/10" />
             </div>
             <GoogleButton />
+            <button type="button" onClick={() => navigate("/mobile-login")} className="btn-ghost w-full mt-3 py-2.5 text-sm"><Phone size={16} /> Log in with mobile OTP</button>
             <div className="mt-3 text-center">
               <button type="button" onClick={() => navigate("/signup")} className="text-sm font-semibold text-brand-700 hover:text-brand-800">
                 New here? Create an account
@@ -212,6 +211,15 @@ export function LoginPage() {
       <AuthToast msg={toastMsg} />
     </div>
   );
+}
+
+/* ---------------------------- MOBILE OTP LOGIN ---------------------------- */
+export function MobileLoginPage() {
+  const { sendPhoneOtp, verifyPhoneOtp, loading, error, toastMsg, isFirebaseConfigured } = useAuth();
+  const navigate = useNavigate(); const [name,setName]=useState(""); const [phone,setPhone]=useState(""); const [otp,setOtp]=useState(""); const [sent,setSent]=useState(false); const [localError,setLocalError]=useState("");
+  const send=async(e)=>{ e.preventDefault(); setLocalError(""); try { if (!name.trim()) throw new Error("Enter your full name."); await sendPhoneOtp(phone); setSent(true); } catch(err) { setLocalError(err.message || "Could not send OTP."); } };
+  const verify=async(e)=>{e.preventDefault();setLocalError("");try{const u=await verifyPhoneOtp(otp, name);navigate(u.role==="admin"?"/admin":"/",{replace:true})}catch(err){setLocalError(err.message||"OTP verification failed.")}};
+  return <div className="min-h-screen flex bg-appbg"><BrandPanel/><div className="flex-1 flex items-center justify-center p-6"><div className="w-full max-w-md"><div className="lg:hidden mb-6"><Logo/></div><motion.div initial={{opacity:0,y:16}} animate={{opacity:1,y:0}} className="card p-7 sm:p-9 shadow-soft"><button onClick={()=>navigate("/login")} className="flex items-center gap-1.5 text-sm text-ink-muted hover:text-brand-700 mb-5"><ArrowLeft size={15}/>Back to login</button><h1 className="text-2xl font-extrabold text-ink">Login with mobile OTP</h1><p className="text-sm text-ink-muted mt-1 mb-6">We will verify your mobile number with a one-time password.</p><ErrorBanner message={localError||error}/>{!sent?<form onSubmit={send} className="space-y-4 mt-4"><Field icon={User} label="Full name" value={name} onChange={setName} placeholder="Your full name" autoComplete="name"/><Field icon={Phone} label="Indian mobile number" type="tel" value={phone} onChange={setPhone} placeholder="98765 43210" autoComplete="tel"/><button className="btn-primary w-full py-3" disabled={loading}>{loading?<Loader2 className="animate-spin" size={16}/>:<><Phone size={16}/>Send OTP</>}</button></form>:<form onSubmit={verify} className="space-y-4 mt-4"><Field icon={Lock} label="Enter OTP" value={otp} onChange={setOtp} placeholder="6-digit OTP" autoComplete="one-time-code"/><div id="otp-recaptcha"/><button className="btn-primary w-full py-3" disabled={loading}>{loading?<Loader2 className="animate-spin" size={16}/>:<>Verify & login <ArrowRight size={16}/></>}</button><button type="button" onClick={()=>setSent(false)} className="w-full text-sm font-semibold text-brand-700">Change mobile number</button>{!isFirebaseConfigured&&<p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Demo mode: enter OTP <b>123456</b>. Configure Firebase Phone Authentication for real SMS OTP.</p>}</form>}</motion.div></div></div><AuthToast msg={toastMsg}/></div>;
 }
 
 /* ------------------------------- SIGN UP --------------------------------- */

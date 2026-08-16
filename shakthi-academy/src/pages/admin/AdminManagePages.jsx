@@ -3,13 +3,14 @@ import { motion } from "framer-motion";
 import {
   ClipboardPlus, Users, Megaphone, TrendingUp, BookOpen, Plus, Search,
   Trash2, Send, Bell, Sparkles, Loader2, CheckCircle2, Eye, HelpCircle, X,
-  FileUp, FileText, Upload
+  FileUp, FileText, Upload, Download, ShieldCheck
 } from "lucide-react";
 import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
 import { CATEGORIES, COURSE_PROGRESS } from "../../data.js";
 import { Badge, ProgressBar } from "../../components/ui.jsx";
 import { verifyQuestionsBackground } from "../../utils/aiTestGenerator.js";
+import { setStudentAccess } from "../../auth.jsx";
 
 /* ---------------------------- Create Mock Test ---------------------------- */
 export function CreateMockTestPage() {
@@ -248,7 +249,7 @@ export function CreateMockTestPage() {
         throw new Error(responseData.detail || "Server failed to process the PDF");
       }
 
-      const extractedQuestions = responseData.questions || [];
+      const extractedQuestions = (responseData.questions || []).slice(0, Math.max(1, Math.min(200, Number(f.questions) || 20)));
       if (extractedQuestions.length === 0) {
         throw new Error("NO_QUESTIONS_FOUND: AI failed to extract any questions.");
       }
@@ -258,7 +259,9 @@ export function CreateMockTestPage() {
       const result = {
         title: f.title.trim() || `${f.category} PYQ - ${file.name.replace(".pdf", "")}`,
         category: f.category,
-        timeLimit: f.time,
+        time: f.time,
+        durationMinutes: Math.max(1, parseInt(f.time) || 30),
+        questions: extractedQuestions.length,
         rawExtractedQuestions: extractedQuestions,
       };
 
@@ -269,7 +272,7 @@ export function CreateMockTestPage() {
       result.rawExtractedQuestions.forEach((q, idx) => {
           const finalLetter = q.source_answer || "A";
           const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
-          const optKeys = Object.keys(q.options || {});
+          const optKeys = Object.keys(q.options || {}).sort();
           const optionsArray = optKeys.length > 0 
             ? optKeys.map(k => q.options[k]) 
             : ["Option A", "Option B", "Option C", "Option D"];
@@ -641,7 +644,7 @@ export function CreateMockTestPage() {
                         ))}
                       </div>
 
-                      {(q.answer_status === "MISMATCH" || q.answer_status === "NEEDS_REVIEW") && (
+                      {true && (
                         <div className="mt-3 p-3 rounded-lg bg-white border border-rose-100 shadow-sm space-y-2">
                           <p className="text-[10px] font-bold text-rose-600 uppercase tracking-wider">{q.review_reason}</p>
                           <div className="flex gap-4 text-[11px]">
@@ -830,58 +833,19 @@ export function CreateMockTestPage() {
 
 /* ------------------------------ Manage Students ---------------------------- */
 export function ManageStudentsPage() {
-  const { students = [], deleteStudent } = useApp();
+  const { students = [] } = useApp();
   const [q, setQ] = useState("");
-  const list = students.filter((s) => (s.name + (s.enrolled || "") + s.email).toLowerCase().includes(q.toLowerCase()));
-  return (
-    <>
-      <PageHeader icon={<Users size={22} />} title="Manage Students" subtitle={`${students.length} registered student${students.length === 1 ? "" : "s"}`} />
-      <div className="card overflow-hidden">
-        <div className="p-4 border-b border-black/5">
-          <div className="relative max-w-sm">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" />
-            <input className="input pl-9" placeholder="Search students by name or email..." value={q} onChange={(e)=>setQ(e.target.value)} />
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[640px]">
-            <thead>
-              <tr className="text-left text-xs text-ink-muted uppercase tracking-wide border-b border-black/5">
-                <th className="px-5 py-3 font-semibold">Student</th>
-                <th className="px-5 py-3 font-semibold">Course</th>
-                <th className="px-5 py-3 font-semibold">Progress</th>
-                <th className="px-5 py-3 font-semibold">Joined</th>
-                <th className="px-5 py-3 font-semibold">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-black/5">
-              {list.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center text-ink-muted">
-                    No registered students found. When students create an account or sign in, they will appear here live.
-                  </td>
-                </tr>
-              ) : (
-                list.map((s)=>(
-                  <tr key={s.email} className="hover:bg-black/[0.02] transition-colors">
-                    <td className="px-5 py-3"><p className="font-semibold text-ink">{s.name}</p><p className="text-xs text-ink-muted">{s.email}</p></td>
-                    <td className="px-5 py-3"><Badge color="#6D28D9">{s.enrolled || "UPSC Civil Services"}</Badge></td>
-                    <td className="px-5 py-3 w-40"><div className="flex items-center gap-2"><div className="flex-1"><ProgressBar value={s.progress || 0}/></div><span className="text-xs font-bold text-brand-700">{s.progress || 0}%</span></div></td>
-                    <td className="px-5 py-3 text-ink-muted">{s.joined}</td>
-                    <td className="px-5 py-3 text-right">
-                      <button onClick={()=>deleteStudent(s.email)} title="Remove student" className="p-2 rounded-lg hover:bg-rose-50 text-ink-faint hover:text-rose-500 transition-colors">
-                        <Trash2 size={15}/>
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
-  );
+  const [, refresh] = useState(0);
+  const list = students.filter((s) => `${s.name || ""} ${s.phone || ""}`.toLowerCase().includes(q.toLowerCase()));
+  const exportCsv = () => {
+    const quote = (value) => `"${String(value || "").replaceAll('"', '""')}"`;
+    const rows = ["Student Name,Mobile Number,Joining Date,Access", ...list.map(s => [s.name, s.phone, s.joined, s.access === "academy" ? "Academy permitted" : "Payment required"].map(quote).join(","))];
+    const url = URL.createObjectURL(new Blob(["\ufeff" + rows.join("\n")], { type:"text/csv;charset=utf-8" }));
+    const a=document.createElement("a"); a.href=url; a.download=`ken-academy-students-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
+  const permit = (student) => { setStudentAccess(student.id, student.access === "academy" ? "payment_required" : "academy"); refresh(v=>v+1); };
+  return <><PageHeader icon={<Users size={22}/>} title="Manage Students" subtitle={`${students.length} registered student${students.length === 1 ? "" : "s"}`} action={<button onClick={exportCsv} className="btn-primary text-sm px-4 py-2.5"><Download size={16}/>Download Excel CSV</button>}/>
+    <div className="card overflow-hidden"><div className="p-4 border-b border-black/5"><div className="relative max-w-sm"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"/><input className="input pl-9" placeholder="Search student name or mobile number..." value={q} onChange={e=>setQ(e.target.value)}/></div></div><div className="overflow-x-auto"><table className="w-full text-sm min-w-[690px]"><thead><tr className="text-left text-xs text-ink-muted uppercase tracking-wide border-b border-black/5"><th className="px-5 py-3 font-semibold">Student name</th><th className="px-5 py-3 font-semibold">Mobile number</th><th className="px-5 py-3 font-semibold">Joining date</th><th className="px-5 py-3 font-semibold">Mock access</th></tr></thead><tbody className="divide-y divide-black/5">{list.length===0?<tr><td colSpan={4} className="px-5 py-8 text-center text-ink-muted">No registered students found yet.</td></tr>:list.map(s=><tr key={s.id||s.phone} className="hover:bg-black/[0.02]"><td className="px-5 py-3 font-semibold text-ink">{s.name||"Student"}</td><td className="px-5 py-3 text-ink-soft">{s.phone||"Not provided"}</td><td className="px-5 py-3 text-ink-muted">{s.joined}</td><td className="px-5 py-3"><button onClick={()=>permit(s)} className={s.access==="academy"?"btn-primary text-xs px-3 py-2 bg-emerald-600 hover:bg-emerald-700":"btn-ghost text-xs px-3 py-2"}><ShieldCheck size={14}/>{s.access==="academy"?"Academy permitted":"Permit academy access"}</button></td></tr>)}</tbody></table></div></div><p className="text-xs text-ink-muted mt-3">Academy permitted students receive staff access. Public students should receive access automatically only after a server-verified Razorpay payment.</p></>;
 }
 
 /* -------------------------------- Announcements ---------------------------- */

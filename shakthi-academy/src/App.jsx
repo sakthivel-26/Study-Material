@@ -2,7 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import AdminLayout from "./components/AdminLayout.jsx";
 import { RequireAuth, RequireAdmin, PublicOnly } from "./components/Guards.jsx";
-import { LoginPage, SignupPage, ForgotPasswordPage } from "./pages/AuthPage.jsx";
+import { LoginPage, SignupPage, ForgotPasswordPage, MobileLoginPage } from "./pages/AuthPage.jsx";
 import StudentDashboard from "./pages/StudentDashboard.jsx";
 import { CoursesPage, VideosPage, MaterialsPage } from "./pages/SectionPages.jsx";
 import MockTestsPage from "./pages/MockTestsPage.jsx";
@@ -20,6 +20,7 @@ export default function App() {
     <Routes>
       {/* Public auth screens (redirect away if signed in) */}
       <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
+      <Route path="/mobile-login" element={<PublicOnly><MobileLoginPage /></PublicOnly>} />
       <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
       <Route path="/forgot-password" element={<PublicOnly><ForgotPasswordPage /></PublicOnly>} />
 

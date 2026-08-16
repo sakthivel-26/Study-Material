@@ -7,6 +7,7 @@ export default function MockTestRunner({ test, onClose }) {
   const { pushToast } = useApp();
 
   // Test state
+  // Preserve every option supplied by the PDF: some competitive exams use 4, 5, or 6 choices.
   const questions = test?.questionsList || [];
   const totalDurationSeconds = (test?.durationMinutes || parseInt(test?.time) || 30) * 60;
   const [timeLeft, setTimeLeft] = useState(totalDurationSeconds);

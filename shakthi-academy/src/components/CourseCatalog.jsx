@@ -1,20 +1,30 @@
-import { motion } from "framer-motion";
-import { ArrowRight, CheckCircle2, LockKeyhole, PlayCircle } from "lucide-react";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowRight, CheckCircle2, ChevronDown, LockKeyhole, PlayCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../auth.jsx";
+
+export const packageForEnrollment = (enrolled = "") => {
+  const value = enrolled.toLowerCase();
+  if (value.includes("tnpsc")) return "tnpsc";
+  if (value.includes("bank") || value.includes("sbi") || value.includes("ibps") || value.includes("rrb")) return "banking";
+  if (value.includes("railway")) return "railway";
+  if (value.includes("ssc")) return "ssc";
+  if (value.includes("navy") || value.includes("nda") || value.includes("agniveer") || value.includes("cds")) return "navy";
+  return null;
+};
 
 const COURSES = [
-  { id: "banking", group: "Banking", title: "Banking Exam Package", exams: "IBPS PO · Clerk · SBI PO · Clerk · RRB", color: "#0F5D7A", icon: "🏦", lessons: "120+ classes" },
-  { id: "tnpsc", group: "TNPSC", title: "TNPSC Complete Course", exams: "Group I · Group II · Group IV · VAO", color: "#D93A2B", icon: "🏛️", lessons: "160+ classes" },
-  { id: "ssc", group: "SSC", title: "SSC Exam Package", exams: "CGL · CHSL · MTS · GD · CPO", color: "#6B4E9B", icon: "📝", lessons: "140+ classes" },
-  { id: "railway", group: "Railway", title: "Railway Exam Package", exams: "RRB NTPC · Group D · ALP · Technician", color: "#147A5A", icon: "🚆", lessons: "110+ classes" },
-  { id: "navy", group: "Navy", title: "Defence & Navy Package", exams: "Indian Navy · Agniveer · NDA · CDS", color: "#063D5A", icon: "⚓", lessons: "100+ classes" },
+  { id:"banking", title:"Banking Exam Package", color:"#0F5D7A", icon:"🏦", exams:["IBPS PO","IBPS Clerk","SBI PO","SBI Clerk","RRB PO / Clerk"] },
+  { id:"tnpsc", title:"TNPSC Complete Course", color:"#D93A2B", icon:"🏛️", exams:["TNPSC Group I","TNPSC Group II","TNPSC Group IIA","TNPSC Group IV","VAO"] },
+  { id:"ssc", title:"SSC Exam Package", color:"#6B4E9B", icon:"📝", exams:["SSC CGL","SSC CHSL","SSC MTS","SSC GD","SSC CPO"] },
+  { id:"railway", title:"Railway Exam Package", color:"#147A5A", icon:"🚆", exams:["RRB NTPC","RRB Group D","RRB ALP","RRB Technician"] },
+  { id:"navy", title:"Defence & Navy Package", color:"#063D5A", icon:"⚓", exams:["Indian Navy","Agniveer","NDA","CDS"] },
 ];
 
-export default function CourseCatalog({ compact = false }) {
-  const navigate = useNavigate();
-  const courses = compact ? COURSES.slice(0, 3) : COURSES;
-  return <section>
-    <div className="flex flex-wrap items-end justify-between gap-3 mb-5"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-brand-600">Exam preparation</p><h2 className="text-xl font-extrabold text-ink mt-1">Choose your exam course</h2><p className="text-sm text-ink-muted mt-1">Start with one free mock test. Unlock the complete package when you are ready.</p></div>{compact && <button onClick={() => navigate("/courses")} className="text-sm font-bold text-brand-700 inline-flex gap-1 items-center">View all courses <ArrowRight size={15}/></button>}</div>
-    <div className={`grid gap-4 ${compact ? "md:grid-cols-3" : "sm:grid-cols-2 xl:grid-cols-3"}`}>{courses.map((course, i) => <motion.article key={course.id} initial={{opacity:0,y:12}} whileInView={{opacity:1,y:0}} viewport={{once:true}} transition={{delay:i*.05}} className="card card-hover overflow-hidden"><div className="h-2" style={{background:course.color}}/><div className="p-5"><div className="flex justify-between gap-3"><span className="text-3xl">{course.icon}</span><span className="chip bg-emerald-50 text-emerald-700"><PlayCircle size={13}/> 1 mock free</span></div><h3 className="font-extrabold text-ink mt-4">{course.title}</h3><p className="text-xs text-ink-muted mt-1 min-h-[34px]">{course.exams}</p><div className="flex gap-3 text-xs text-ink-muted border-y border-black/5 py-3 my-4"><span className="flex gap-1 items-center"><CheckCircle2 size={14} style={{color:course.color}}/>{course.lessons}</span><span className="flex gap-1 items-center"><LockKeyhole size={13}/>Full test series</span></div><button onClick={()=>navigate(`/mock-tests?package=${course.id}`)} className="btn-primary w-full text-sm py-2.5" style={{background:course.color}}>Try free mock <ArrowRight size={15}/></button></div></motion.article>)}</div>
-  </section>;
+export default function CourseCatalog() {
+  const navigate=useNavigate(); const { user,isAdmin }=useAuth(); const [open,setOpen]=useState(null);
+  const enrolledPackage=packageForEnrollment(user?.enrolled);
+  const courses=(!isAdmin&&enrolledPackage)?COURSES.filter(c=>c.id===enrolledPackage):COURSES;
+  return <section><div className="mb-5"><p className="text-xs font-bold uppercase tracking-[0.16em] text-brand-600">Mock test preparation</p><h2 className="text-xl font-extrabold text-ink mt-1">{enrolledPackage?"Your selected exam package":"Choose your exam package"}</h2><p className="text-sm text-ink-muted mt-1">Choose the exact exam. Every exam includes 1 free mock and 50+ paid mocks.</p></div><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{courses.map((course,i)=>{const expanded=open===course.id;return <motion.article key={course.id} initial={{opacity:0,y:12}} whileInView={{opacity:1,y:0}} viewport={{once:true}} transition={{delay:i*.05}} className="card overflow-hidden"><div className="h-2" style={{background:course.color}}/><div className="p-5"><div className="flex justify-between gap-3"><span className="text-3xl">{course.icon}</span><span className="chip bg-emerald-50 text-emerald-700"><PlayCircle size={13}/>1 mock free</span></div><h3 className="font-extrabold text-ink mt-4">{course.title}</h3><p className="text-xs text-ink-muted mt-1">Paid full mock-test series · 50+ tests</p><div className="flex gap-3 text-xs text-ink-muted border-y border-black/5 py-3 my-4"><span className="flex gap-1 items-center"><CheckCircle2 size={14} style={{color:course.color}}/>50+ mock tests</span><span className="flex gap-1 items-center"><LockKeyhole size={13}/>Paid access</span></div><button onClick={()=>setOpen(expanded?null:course.id)} className="btn-primary w-full text-sm py-2.5" style={{background:course.color}}>Choose exam <ChevronDown size={15} className={expanded?"rotate-180 transition-transform":"transition-transform"}/></button><AnimatePresence>{expanded&&<motion.div initial={{height:0,opacity:0}} animate={{height:"auto",opacity:1}} exit={{height:0,opacity:0}} className="overflow-hidden"><div className="pt-3 space-y-2">{course.exams.map(exam=><button key={exam} onClick={()=>navigate(`/mock-tests?package=${course.id}&exam=${encodeURIComponent(exam)}`)} className="flex w-full items-center justify-between rounded-lg border border-black/5 px-3 py-2 text-left text-sm font-semibold text-ink hover:border-brand-300 hover:bg-brand-50"><span>{exam}</span><span className="text-[10px] text-brand-700">Free mock <ArrowRight size={11} className="inline"/></span></button>)}</div></motion.div>}</AnimatePresence></div></motion.article>})}</div></section>;
 }

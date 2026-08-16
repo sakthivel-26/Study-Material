@@ -61,12 +61,12 @@ def regex_extract_questions(pages):
     """Best-effort, layout-tolerant MCQ parser for selectable-text PDFs."""
     import re
     found, seen = [], set()
-    option_start = r"(?:\(?[A-Da-d]\)?\s*[.)\]:-])"
+    option_start = r"(?:\(?[A-Fa-f]\)?\s*[.)\]:-])"
     question_re = re.compile(
         r"(?ms)^\s*(?:Q(?:uestion)?\s*)?(\d{1,3})(?:\s*[.)\]:-]|\s{2,})(.*?)(?=^\s*(?:Q(?:uestion)?\s*)?\d{1,3}(?:\s*[.)\]:-]|\s{2,})|\Z)"
     )
-    option_re = re.compile(r"(?m)^\s*\(?([A-Da-d])\)?\s*[.)\]:-]\s*(.*)$")
-    answer_re = re.compile(r"(?im)(?:answer|ans)\s*[:\-]?\s*\(?([A-D])\)?")
+    option_re = re.compile(r"(?m)^\s*\(?([A-Fa-f])\)?\s*[.)\]:-]\s*(.*)$")
+    answer_re = re.compile(r"(?im)(?:answer|ans)\s*[:\-]?\s*\(?([A-F])\)?")
     for page in pages:
         text = page["text"].replace("\r", "\n")
         text = re.sub(r"(?<!^)(?<!\n)\s+(?=" + option_start + r")", "\n", text)

@@ -22,6 +22,8 @@ import {
 const AuthCtx = createContext(null);
 const STORAGE_KEY = "kenias_session";
 const USERS_KEY = "kenias_users";
+let phoneConfirmation = null;
+const formatIndianPhone = (phone) => { const value=String(phone||"").replace(/[^\d+]/g,""); return value.startsWith("+") ? value : `+91${value.replace(/^0+/, "")}`; };
 
 const initialsOf = (name) =>
   (name || "U")
@@ -80,7 +82,9 @@ export const getRegisteredStudents = () => {
     .map((u) => ({
       id: u.id,
       name: u.name,
-      email: u.email,
+      email: u.email || "",
+      phone: u.phone || "",
+      access: u.access || "payment_required",
       enrolled: u.enrolled || "UPSC Civil Services",
       progress: u.progress || 0,
       joined: new Date(u.createdAt || Date.now()).toLocaleDateString("en-IN", {
@@ -89,6 +93,12 @@ export const getRegisteredStudents = () => {
         year: "numeric",
       }),
     }));
+};
+
+export const setStudentAccess = (id, access) => {
+  const users = loadUsers().map((u) => u.id === id ? { ...u, access } : u);
+  persistUsers(users);
+  return getRegisteredStudents();
 };
 
 export const removeStudentByEmail = (email) => {
@@ -102,11 +112,12 @@ export const removeStudentByEmail = (email) => {
 // Map a Firebase user object to our app user shape.
 const fbToUser = (fb) => {
   const email = (fb.email || "").toLowerCase();
-  const name = fb.displayName || email.split("@")[0];
+  const name = fb.displayName || fb.phoneNumber || email.split("@")[0] || "Student";
   return {
     id: fb.uid,
     name,
     email,
+    phone: fb.phoneNumber || "",
     role: ADMIN_EMAILS.includes(email) ? "admin" : "student",
     initials: initialsOf(name),
     photo: fb.photoURL || null,
@@ -322,6 +333,40 @@ export function AuthProvider({ children }) {
     );
   };
 
+  /* ----------------------------- PHONE OTP ------------------------------ */
+  const sendPhoneOtp = async (phone) => {
+    const mobile = formatIndianPhone(phone);
+    if (!/^\+91[6-9]\d{9}$/.test(mobile)) throw new Error("Enter a valid 10-digit Indian mobile number.");
+    setLoading(true); setError(null);
+    try {
+      if (!isFirebaseConfigured) { phoneConfirmation = { demo: true, phone: mobile }; notify("Demo OTP sent. Use 123456."); return; }
+      const { RecaptchaVerifier, signInWithPhoneNumber } = await import("firebase/auth");
+      const auth = await getFirebaseAuth();
+      if (!window.kenAcademyRecaptcha) window.kenAcademyRecaptcha = new RecaptchaVerifier(auth, "otp-recaptcha", { size: "invisible" });
+      phoneConfirmation = await signInWithPhoneNumber(auth, mobile, window.kenAcademyRecaptcha);
+      notify("OTP sent to your mobile number.");
+    } finally { setLoading(false); }
+  };
+  const verifyPhoneOtp = async (code, displayName = "") => {
+    if (!phoneConfirmation) throw new Error("Request an OTP first.");
+    setLoading(true); setError(null);
+    try {
+      let user;
+      if (phoneConfirmation.demo) {
+        if (code !== "123456") throw new Error("Incorrect demo OTP.");
+        let existing = loadUsers().find(u => u.phone === phoneConfirmation.phone);
+        if (!existing) { existing = { id:`u_${Date.now()}`, name:displayName.trim() || "Mobile Student", phone:phoneConfirmation.phone, email:"", password:"", role:"student", initials:initialsOf(displayName.trim() || "Mobile Student"), createdAt:new Date().toISOString() }; persistUsers([...loadUsers(), existing]); }
+        user = { ...existing, provider:"phone", emailVerified:true };
+        setSession(user);
+      } else {
+        const cred = await phoneConfirmation.confirm(code);
+        if (displayName.trim() && !cred.user.displayName) { const { updateProfile } = await import("firebase/auth"); await updateProfile(cred.user, { displayName: displayName.trim() }); }
+        user = fbToUser(cred.user); setSession(user);
+      }
+      phoneConfirmation = null; notify("Mobile number verified successfully."); return user;
+    } finally { setLoading(false); }
+  };
+
   /* --------------------------- PUBLIC WRAPPERS ---------------------------- */
   const signUp = async (data) => {
     setLoading(true);
@@ -437,6 +482,8 @@ export function AuthProvider({ children }) {
       signInWithGoogle,
       signOut,
       requestReset,
+      sendPhoneOtp,
+      verifyPhoneOtp,
       isFirebaseConfigured,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
