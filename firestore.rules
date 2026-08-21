@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Only the admin email can write content.
+    function isAdmin() {
+      return signedIn() && request.auth.token.email == 'salthivelvenkat2619@gmail.com';
+    }
+
+    // Public content — all signed-in students can read; only the admin can write.
+    match /uploads/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+    match /mockTests/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+    match /notifications/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}
