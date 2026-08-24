@@ -12,20 +12,34 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email == 'sakthivelvenkat2619@gmail.com';
     }
 
-    // Users can only read and write their OWN user document
+    // Helper function: Check if the current user has premium/paid status
+    function isPremium() {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return userDoc.access != 'payment_required' || userDoc.paid == true || userDoc.premium == true;
+    }
+
+    // 1. Users can only read and write their OWN user document
     match /users/{userId} {
       allow read, write: if signedIn() && request.auth.uid == userId;
     }
 
-    // Public content — all signed-in students can read; only the admin can write.
-    match /uploads/{id} {
-      allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
-    }
+    // 2. Mock Tests Collection
     match /mockTests/{id} {
-      allow read: if signedIn();
       allow create, update, delete: if isAdmin();
+      allow read: if signedIn() && (
+        resource.data.isFree == true || isPremium() || isAdmin()
+      );
     }
+
+    // 3. Uploads (Study Materials)
+    match /uploads/{id} {
+      allow create, update, delete: if isAdmin();
+      allow read: if signedIn() && (
+        resource.data.isFree == true || isPremium() || isAdmin()
+      );
+    }
+
+    // 4. Notifications
     match /notifications/{id} {
       allow read: if signedIn();
       allow create, update, delete: if isAdmin();

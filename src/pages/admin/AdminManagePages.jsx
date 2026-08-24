@@ -284,8 +284,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       const formData = new FormData();
       formData.append("file", file);
 
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || "";
-      const response = await fetch(`${backendUrl}/api/ai/extract-questions`, {
+      const response = await fetch(`/api/extract-questions`, {
         method: "POST",
         body: formData
       });

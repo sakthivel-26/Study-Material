@@ -118,7 +118,7 @@ export function AppProvider({ children }) {
     if (!isFirebaseConfigured || !isAuthed) return;
     let unsub = () => {};
     (async () => {
-      unsub = await subscribeBackend({
+      unsub = await subscribeBackend(user, {
         onUploads: setUploads,
         onTests: setMockTests,
         onNotifications: setNotifications,

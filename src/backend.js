@@ -31,19 +31,28 @@ const mapDoc = (doc) => ({ ...doc.data(), id: doc.id });
 
 /* --------------------------- SUBSCRIBE (realtime) ------------------------- */
 // Sets up onSnapshot listeners so all logged-in devices update live.
-export async function subscribeBackend({ onUploads, onTests, onNotifications, onStudents }) {
-  const { onSnapshot, collection, query, orderBy } = await import("firebase/firestore");
+export async function subscribeBackend(user, { onUploads, onTests, onNotifications, onStudents }) {
+  const { onSnapshot, collection, query, orderBy, where } = await import("firebase/firestore");
   const db = await getFirebaseDb();
   const unsubs = [];
+  
+  const isAdmin = user?.role === "admin";
+  const isPremium = user?.paid === true || user?.premium === true || (user?.access && user?.access !== "payment_required");
+
+  let uploadsQuery = query(collection(db, COLLECTIONS.uploads), orderBy("createdAt", "desc"));
+  if (!isAdmin && !isPremium) {
+    uploadsQuery = query(collection(db, COLLECTIONS.uploads), where("isFree", "==", true), orderBy("createdAt", "desc"));
+  }
   unsubs.push(
-    onSnapshot(query(collection(db, COLLECTIONS.uploads), orderBy("createdAt", "desc")), (snap) =>
-      onUploads(snap.docs.map(mapDoc))
-    )
+    onSnapshot(uploadsQuery, (snap) => onUploads(snap.docs.map(mapDoc)))
   );
+
+  let testsQuery = query(collection(db, COLLECTIONS.mockTests), orderBy("createdAt", "desc"));
+  if (!isAdmin && !isPremium) {
+    testsQuery = query(collection(db, COLLECTIONS.mockTests), where("isFree", "==", true), orderBy("createdAt", "desc"));
+  }
   unsubs.push(
-    onSnapshot(query(collection(db, COLLECTIONS.mockTests), orderBy("createdAt", "desc")), (snap) =>
-      onTests(snap.docs.map(mapDoc))
-    )
+    onSnapshot(testsQuery, (snap) => onTests(snap.docs.map(mapDoc)))
   );
   unsubs.push(
     onSnapshot(query(collection(db, COLLECTIONS.notifications), orderBy("createdAt", "desc")), (snap) =>
