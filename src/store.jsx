@@ -7,6 +7,8 @@ import {
   fsAddMockTest,
   fsNotify,
   fsMarkAllRead,
+  fsDeleteMockTest,
+  fsDeleteUpload,
   useRealtimeBackend,
 } from "./backend.js";
 
@@ -208,13 +210,14 @@ export function AppProvider({ children }) {
   };
 
   const addMockTest = async (test) => {
+    const title = test.isFree ? "New Free Mock Test Available" : "New Mock Test Available";
     if (isFirebaseConfigured) {
       try {
         const timeout = new Promise((_, reject) =>
           setTimeout(() => reject(new Error("Firestore write timeout")), 2500)
         );
         const full = await Promise.race([fsAddMockTest(test), timeout]);
-        fsNotify("mock", "New Mock Test Available", `“${test.title}” is live now.`).catch(() => {});
+        fsNotify("mock", title, `“${test.title}” is live now.`).catch(() => {});
         pushToast("Mock test created & students notified 📝");
         return full;
       } catch (err) {
@@ -223,7 +226,7 @@ export function AppProvider({ children }) {
     }
     const full = { ...test, id: test.id || Date.now() };
     setMockTests((prev) => [full, ...prev]);
-    pushNotification("mock", "New Mock Test Available", `“${test.title}” is live now.`);
+    pushNotification("mock", title, `“${test.title}” is live now.`);
     pushToast("Mock test created & students notified 📝");
     return full;
   };
@@ -232,6 +235,34 @@ export function AppProvider({ children }) {
     setMockTests((prev) => prev.map(t => t.id === id ? { ...t, ...updatedTest } : t));
     pushToast("Mock test updated successfully ✅");
     return updatedTest;
+  };
+
+  const deleteMockTest = async (id) => {
+    if (isFirebaseConfigured) {
+      try {
+        await fsDeleteMockTest(id);
+        pushToast("Mock test deleted successfully 🗑️");
+        return;
+      } catch (err) {
+        console.warn("Firestore delete failed", err);
+      }
+    }
+    setMockTests((prev) => prev.filter(t => t.id !== id));
+    pushToast("Mock test deleted successfully 🗑️");
+  };
+
+  const deleteUpload = async (id) => {
+    if (isFirebaseConfigured) {
+      try {
+        await fsDeleteUpload(id);
+        pushToast("Upload deleted successfully 🗑️");
+        return;
+      } catch (err) {
+        console.warn("Firestore delete failed", err);
+      }
+    }
+    setUploads((prev) => prev.filter(u => u.id !== id));
+    pushToast("Upload deleted successfully 🗑️");
   };
 
   const announce = async (title, body) => {
@@ -294,6 +325,8 @@ export function AppProvider({ children }) {
       addUpload,
       addMockTest,
       updateMockTest,
+      deleteMockTest,
+      deleteUpload,
       announce,
       toggleBookmark,
       markAllRead,

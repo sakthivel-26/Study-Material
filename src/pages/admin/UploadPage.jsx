@@ -13,7 +13,7 @@ export default function UploadPage() {
   const [params] = useSearchParams();
   const mode = params.get("type") === "video" ? "video" : "pdf";
   const navigate = useNavigate();
-  const { addUpload, pushToast } = useApp();
+  const { uploads = [], addUpload, deleteUpload, pushToast } = useApp();
 
   const [form, setForm] = useState({
     type: mode,
@@ -392,6 +392,39 @@ export default function UploadPage() {
           </div>
         </div>
       )}
+
+      {/* Manage Existing Materials */}
+      <div className="mt-10 card p-6">
+        <h3 className="font-bold text-ink mb-4 flex items-center gap-2">
+          <Trash2 size={18} className="text-rose-500" /> Manage Existing {mode === "video" ? "Videos" : "PDFs"}
+        </h3>
+        <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+          {uploads.filter(u => u.type === mode).length === 0 ? (
+            <p className="text-sm text-ink-muted text-center py-4">No materials found.</p>
+          ) : (
+            uploads
+              .filter(u => u.type === mode)
+              .map((upload) => (
+                <div key={upload.id} className="flex items-center justify-between p-4 rounded-xl border border-black/5 bg-black/[0.02]">
+                  <div>
+                    <h4 className="font-bold text-sm text-ink">{upload.title}</h4>
+                    <p className="text-xs text-ink-muted mt-1">{upload.category}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Are you sure you want to delete this ${mode}? This action cannot be undone.`)) {
+                        deleteUpload(upload.id);
+                      }
+                    }}
+                    className="btn-soft px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <Trash2 size={14} /> Delete
+                  </button>
+                </div>
+              ))
+          )}
+        </div>
+      </div>
     </>
   );
 }

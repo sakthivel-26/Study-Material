@@ -15,7 +15,7 @@ import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from 
 
 /* ---------------------------- Create Mock Test ---------------------------- */
 export function CreateMockTestPage({ isFreeByDefault = false }) {
-  const { addMockTest, updateMockTest, pushToast } = useApp();
+  const { mockTests = [], addMockTest, updateMockTest, deleteMockTest, pushToast } = useApp();
   const [mode, setMode] = useState("ai"); // "ai" | "manual" | "pdf"
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfStatus, setPdfStatus] = useState(""); // "extracting" | "analyzing" | "done" | ""
@@ -1019,6 +1019,39 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           </div>
         </div>
       )}
+
+      {/* Manage Existing Mock Tests */}
+      <div className="mt-10 card p-6">
+        <h3 className="font-bold text-ink mb-4 flex items-center gap-2">
+          <Trash2 size={18} className="text-rose-500" /> Manage Existing {isFreeByDefault ? "Free" : "Premium"} Mock Tests
+        </h3>
+        <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+          {mockTests.filter(t => !!t.isFree === isFreeByDefault).length === 0 ? (
+            <p className="text-sm text-ink-muted text-center py-4">No tests found.</p>
+          ) : (
+            mockTests
+              .filter(t => !!t.isFree === isFreeByDefault)
+              .map((test) => (
+                <div key={test.id} className="flex items-center justify-between p-4 rounded-xl border border-black/5 bg-black/[0.02]">
+                  <div>
+                    <h4 className="font-bold text-sm text-ink">{test.title}</h4>
+                    <p className="text-xs text-ink-muted mt-1">{test.category} · {test.questions} Qs · {test.time}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (window.confirm("Are you sure you want to delete this mock test? This action cannot be undone.")) {
+                        deleteMockTest(test.id);
+                      }
+                    }}
+                    className="btn-soft px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-bold"
+                  >
+                    Delete Test
+                  </button>
+                </div>
+              ))
+          )}
+        </div>
+      </div>
     </>
   );
 }

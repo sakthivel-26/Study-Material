@@ -84,6 +84,18 @@ export async function fsAddMockTest(test) {
   return { ...test, id: ref.id };
 }
 
+export async function fsDeleteMockTest(id) {
+  const { doc, deleteDoc } = await import("firebase/firestore");
+  const db = await getFirebaseDb();
+  await deleteDoc(doc(db, COLLECTIONS.mockTests, id));
+}
+
+export async function fsDeleteUpload(id) {
+  const { doc, deleteDoc } = await import("firebase/firestore");
+  const db = await getFirebaseDb();
+  await deleteDoc(doc(db, COLLECTIONS.uploads, id));
+}
+
 export async function fsNotify(type, title, body) {
   const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
   const db = await getFirebaseDb();
