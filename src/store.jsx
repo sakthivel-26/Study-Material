@@ -13,7 +13,6 @@ import {
   useRealtimeBackend,
 } from "./backend.js";
 
-import { getRegisteredStudents, removeStudentByEmail } from "./auth.jsx";
 
 // ------------------------------------------------------------------
 // Global store bridging the Admin panel and Student dashboard.
