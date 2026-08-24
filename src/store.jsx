@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { UPLOADS, NOTIFICATIONS, MOCK_TESTS, MOCK_TESTS_HISTORY } from "./data";
+import { UPLOADS, NOTIFICATIONS, MOCK_TESTS, MOCK_TESTS_HISTORY, CATEGORIES } from "./data.js";
+import { useAuth, getRegisteredStudents, removeStudentByEmail } from "./auth.jsx";
 import { isFirebaseConfigured } from "./firebase.js";
 import {
   subscribeBackend,
@@ -21,6 +22,7 @@ import { getRegisteredStudents, removeStudentByEmail } from "./auth.jsx";
 const AppCtx = createContext(null);
 
 export function AppProvider({ children }) {
+  const { isAuthed } = useAuth();
   const [uploads, setUploads] = useState(() => {
     if (useRealtimeBackend) return [];
     try {
@@ -114,7 +116,7 @@ export function AppProvider({ children }) {
 
   // Real-time Firestore subscription (realtime mode only).
   useEffect(() => {
-    if (!isFirebaseConfigured) return;
+    if (!isFirebaseConfigured || !isAuthed) return;
     let unsub = () => {};
     (async () => {
       unsub = await subscribeBackend({
@@ -141,7 +143,7 @@ export function AppProvider({ children }) {
       setReady(true);
     })();
     return () => unsub();
-  }, []);
+  }, [isAuthed]);
 
   const pushToast = (msg) => {
     setToast(msg);
