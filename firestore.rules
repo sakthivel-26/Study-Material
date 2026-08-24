@@ -12,6 +12,11 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email == 'sakthivelvenkat2619@gmail.com';
     }
 
+    // Users can only read and write their OWN user document
+    match /users/{userId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+    }
+
     // Public content — all signed-in students can read; only the admin can write.
     match /uploads/{id} {
       allow read: if signedIn();
