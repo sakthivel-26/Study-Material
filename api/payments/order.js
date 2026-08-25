@@ -40,6 +40,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ order_id: order.id, amount: amount * 100, key: KEY_ID });
   } catch (error) {
     console.error("Razorpay Order Error:", error);
-    return res.status(500).json({ detail: "Failed to create payment order." });
+    const msg = error?.error?.description || error?.description || error?.message || "Invalid keys or configuration.";
+    return res.status(500).json({ detail: `Razorpay Error: ${msg}` });
   }
 }
