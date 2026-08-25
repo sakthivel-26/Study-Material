@@ -13,12 +13,15 @@ import ProfilePage from "./pages/ProfilePage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import AdminDashboard from "./pages/admin/AdminDashboard.jsx";
 import UploadPage from "./pages/admin/UploadPage.jsx";
-import { CreateMockTestPage, ManageStudentsPage, AnnouncementsPage, ManageCoursesPage, PlansPage } from "./pages/admin/AdminManagePages.jsx";
+import { CreateMockTestPage, ManageStudentsPage, AnnouncementsPage, ManageCoursesPage, PlansPage, AdmissionsPage } from "./pages/admin/AdminManagePages.jsx";
 import AdminAccountPage from "./pages/admin/AdminAccountPage.jsx";
+import { AdmissionModal } from "./components/AdmissionModal.jsx";
 
 export default function App() {
   return (
-    <Routes>
+    <>
+      <AdmissionModal />
+      <Routes>
       {/* Public auth screens (redirect away if signed in) */}
       <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
       <Route path="/mobile-login" element={<PublicOnly><MobileLoginPage /></PublicOnly>} />
@@ -47,6 +50,7 @@ export default function App() {
         <Route path="/admin/mock-test" element={<CreateMockTestPage />} />
         <Route path="/admin/free-mock-test" element={<CreateMockTestPage isFreeByDefault={true} />} />
         <Route path="/admin/students" element={<ManageStudentsPage />} />
+        <Route path="/admin/admissions" element={<AdmissionsPage />} />
         <Route path="/admin/announcements" element={<AnnouncementsPage />} />
         <Route path="/admin/courses" element={<ManageCoursesPage />} />
         <Route path="/admin/plans" element={<PlansPage />} />
@@ -55,5 +59,6 @@ export default function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }

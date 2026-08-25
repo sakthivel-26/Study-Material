@@ -22,6 +22,7 @@ const COLLECTIONS = {
   uploads: "uploads",
   mockTests: "mockTests",
   notifications: "notifications",
+  admissions: "admissions",
 };
 
 const NOTIF_ICONS = { pdf: "📄", video: "🎥", mock: "📝", announcement: "📢" };
@@ -31,7 +32,7 @@ const mapDoc = (doc) => ({ ...doc.data(), id: doc.id });
 
 /* --------------------------- SUBSCRIBE (realtime) ------------------------- */
 // Sets up onSnapshot listeners so all logged-in devices update live.
-export async function subscribeBackend(user, { onUploads, onTests, onNotifications, onStudents }) {
+export async function subscribeBackend(user, { onUploads, onTests, onNotifications, onStudents, onAdmissions }) {
   const { onSnapshot, collection, query, orderBy, where } = await import("firebase/firestore");
   const db = await getFirebaseDb();
   const unsubs = [];
@@ -63,6 +64,13 @@ export async function subscribeBackend(user, { onUploads, onTests, onNotificatio
       })
     );
   }
+  if (onAdmissions && isAdmin) {
+    unsubs.push(
+      onSnapshot(query(collection(db, COLLECTIONS.admissions), orderBy("createdAt", "desc")), (snap) => {
+        onAdmissions(snap.docs.map(mapDoc));
+      })
+    );
+  }
   return () => unsubs.forEach((u) => u());
 }
 
@@ -78,6 +86,17 @@ export async function fsAddUpload(item) {
     createdAt: serverTimestamp(),
   });
   return { ...cleanItem, id: ref.id, createdAt: Date.now() };
+}
+
+export async function fsAddAdmission(data) {
+  const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
+  const db = await getFirebaseDb();
+  const ref = await addDoc(collection(db, COLLECTIONS.admissions), {
+    ...data,
+    status: "new", // Can be 'new', 'contacted'
+    createdAt: serverTimestamp(),
+  });
+  return { ...data, id: ref.id };
 }
 
 export async function fsAddMockTest(test) {

@@ -47,5 +47,11 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create, update, delete: if isAdmin();
     }
+
+    // 5. Admissions (Leads)
+    match /admissions/{id} {
+      allow create: if true; // Anyone can submit an inquiry
+      allow read, update, delete: if isAdmin(); // Only admin can view/manage
+    }
   }
 }

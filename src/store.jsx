@@ -62,6 +62,8 @@ export function AppProvider({ children }) {
     }
   });
 
+  const [admissions, setAdmissions] = useState([]);
+
   const [toast, setToast] = useState(null);
   const [ready, setReady] = useState(!useRealtimeBackend);
   const [students, setStudents] = useState(getRegisteredStudents);
@@ -137,7 +139,8 @@ export function AppProvider({ children }) {
             })
           }));
           setStudents(studentUsers);
-        }
+        },
+        onAdmissions: setAdmissions
       });
       setReady(true);
     })();
@@ -318,6 +321,7 @@ export function AppProvider({ children }) {
       toast,
       ready,
       students,
+      admissions,
       deleteStudent,
       refreshStudents,
       addDownloadRecord,
@@ -333,7 +337,7 @@ export function AppProvider({ children }) {
       markAllRead,
       resetAllData,
     }),
-    [uploads, notifications, mockTests, testHistory, bookmarks, downloads, toast, ready, students]
+    [uploads, notifications, mockTests, testHistory, bookmarks, downloads, toast, ready, students, admissions]
   );
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

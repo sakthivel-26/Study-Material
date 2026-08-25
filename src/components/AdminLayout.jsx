@@ -11,6 +11,7 @@ import { useAuth } from "../auth.jsx";
 
 const NAV = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/admin/admissions", label: "Admissions (Leads)", icon: Users },
   { to: "/admin/upload?type=pdf", label: "Upload Materials", icon: UploadCloud },
   { to: "/admin/upload?type=video", label: "Add YouTube Video", icon: Youtube },
   { to: "/admin/mock-test", label: "Create Mock Test", icon: ClipboardPlus },
