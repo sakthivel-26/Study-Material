@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { UploadCloud, Youtube, Eye, Save, Send, FileText, Play, X, ImagePlus, Loader2, Clock } from "lucide-react";
+import { UploadCloud, Youtube, Eye, Save, Send, FileText, Play, X, ImagePlus, Loader2, Clock, Trash2 } from "lucide-react";
 import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
 import { useAuth } from "../../auth.jsx";
