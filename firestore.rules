@@ -14,8 +14,12 @@ service cloud.firestore {
 
     // Helper function: Check if the current user has premium/paid status
     function isPremium() {
-      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      return userDoc.access != 'payment_required' || userDoc.paid == true || userDoc.premium == true;
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(userPath) && (
+        get(userPath).data.access != 'payment_required' || 
+        get(userPath).data.paid == true || 
+        get(userPath).data.premium == true
+      );
     }
 
     // 1. Users can only read and write their OWN user document

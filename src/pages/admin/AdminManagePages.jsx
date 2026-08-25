@@ -292,19 +292,19 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       // The API can return an empty/proxy error page if the FastAPI service is
       // offline. Parse safely so admins see the real setup error rather than a
       // browser JSON parsing exception.
-      const rawResponse = await response.text();
+      let rawResponse = "";
       let responseData = {};
       try {
-        responseData = rawResponse ? JSON.parse(rawResponse) : {};
-      } catch {
-        if (!response.ok) {
-          throw new Error("Question-extraction service is unavailable. Start the backend on port 8000, then try again.");
+        rawResponse = await response.text();
+        if (rawResponse) {
+          responseData = JSON.parse(rawResponse);
         }
+      } catch {
         throw new Error("The extraction service returned an invalid response. Please try again.");
       }
 
       if (!response.ok) {
-        throw new Error(responseData.detail || "Server failed to process the PDF");
+        throw new Error(responseData.error || responseData.detail || "Server failed to process the PDF");
       }
 
       const extractedQuestions = (responseData.questions || []).slice(0, Math.max(1, Math.min(200, Number(f.questions) || 20)));
