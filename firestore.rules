@@ -9,7 +9,7 @@ service cloud.firestore {
 
     // Only the admin email can write content.
     function isAdmin() {
-      return signedIn() && request.auth.token.email == 'sakthivelvenkat2619@gmail.com';
+      return signedIn() && request.auth.token.email == 'sakthivelvenket26@gmail.com';
     }
 
     // Helper function: Check if the current user has premium/paid status
