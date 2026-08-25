@@ -73,7 +73,7 @@ export default function StudentDashboard() {
         <CourseCatalog compact />
         <div className="mt-12 mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
           <a 
-            href="https://www.google.com/maps/search/?api=1&query=4c,+opposite+govt+girls+hr+sec+school,+PTV+Colony,+Thiruvalluvar+Nagar,+Krishnagiri,+Tamil+Nadu+635001" 
+            href="https://maps.app.goo.gl/Md5dth47WfXubmm3A" 
             target="_blank" 
             rel="noreferrer"
             className="block p-5 rounded-2xl bg-white border border-slate-200 hover:border-brand-300 hover:shadow-md transition-all cursor-pointer group"
