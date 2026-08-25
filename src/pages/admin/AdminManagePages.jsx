@@ -14,14 +14,14 @@ import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
 
 /* ---------------------------- Create Mock Test ---------------------------- */
-export function CreateMockTestPage() {
+export function CreateMockTestPage({ isFreeByDefault = false }) {
   const { mockTests = [], addMockTest, updateMockTest, deleteMockTest, pushToast } = useApp();
   const [mode, setMode] = useState("ai"); // "ai" | "manual" | "pdf"
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfStatus, setPdfStatus] = useState(""); // "extracting" | "analyzing" | "done" | ""
   const [pdfPageInfo, setPdfPageInfo] = useState("");
   const pdfInputRef = useRef(null);
-  const [f, setF] = useState({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: false });
+  const [f, setF] = useState({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault });
   const [generating, setGenerating] = useState(false);
   const [generatedTest, setGeneratedTest] = useState(null);
   const [approvedQuestions, setApprovedQuestions] = useState({});
@@ -70,6 +70,10 @@ export function CreateMockTestPage() {
     pushToast("LLM API Keys saved successfully! 🤖");
     setShowKeyModal(false);
   };
+
+  useEffect(() => {
+    setF(prev => ({ ...prev, isFree: isFreeByDefault }));
+  }, [isFreeByDefault]);
 
   const [manualQuestions, setManualQuestions] = useState([
     {
@@ -253,7 +257,7 @@ export function CreateMockTestPage() {
       await addMockTest(testToPublish);
       pushToast("Mock test created & published to all students! 📝");
       setGeneratedTest(null);
-      setF({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: false });
+      setF({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault });
     } finally {
       setIsPublishing(false);
     }
@@ -462,7 +466,7 @@ export function CreateMockTestPage() {
 
   return (
     <>
-      <PageHeader icon={<ClipboardPlus size={22} />} title="Create Mock Test" subtitle="Design a test manually or generate automatically using AI (Past 5-Yr PYQs)" />
+      <PageHeader icon={<ClipboardPlus size={22} />} title={isFreeByDefault ? "Create Free Mock Test" : "Create Mock Test"} subtitle="Design a test manually or generate automatically using AI (Past 5-Yr PYQs)" />
 
       {/* Mode Selector Tabs */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
@@ -531,6 +535,12 @@ export function CreateMockTestPage() {
             </div>
           </div>
           
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="isFreeMock" checked={f.isFree} onChange={(e) => set("isFree", e.target.checked)} className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 border-black/20" />
+            <label htmlFor="isFreeMock" className="text-sm font-semibold text-ink-soft select-none cursor-pointer">
+              Mark as <span className="text-brand-600 font-bold">Free Mock Test</span> (Shows in Free Mocks section)
+            </label>
+          </div>
 
           {/* PDF Upload Zone */}
           {mode === "pdf" && (
@@ -1036,13 +1046,14 @@ export function CreateMockTestPage() {
       {/* Manage Existing Mock Tests */}
       <div className="mt-10 card p-6">
         <h3 className="font-bold text-ink mb-4 flex items-center gap-2">
-          <Trash2 size={18} className="text-rose-500" /> Manage Existing Mock Tests
+          <Trash2 size={18} className="text-rose-500" /> Manage Existing {isFreeByDefault ? "Free" : "Premium"} Mock Tests
         </h3>
         <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-          {mockTests.length === 0 ? (
+          {mockTests.filter(t => !!t.isFree === isFreeByDefault).length === 0 ? (
             <p className="text-sm text-ink-muted text-center py-4">No tests found.</p>
           ) : (
             mockTests
+              .filter(t => !!t.isFree === isFreeByDefault)
               .map((test) => (
                 <div key={test.id} className="flex items-center justify-between p-4 rounded-xl border border-black/5 bg-black/[0.02]">
                   <div>

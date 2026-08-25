@@ -96,6 +96,15 @@ export default function HeroBanner() {
             <motion.button
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
+              onClick={() => navigate("/free-mocks")}
+              className="btn bg-amber-400 text-amber-950 hover:bg-amber-500 shadow-xl px-6 py-3 border-none"
+            >
+              <Flame size={18} />
+              Free Mock Tests
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
               onClick={() => navigate("/courses")}
               className="btn bg-white/10 text-white hover:bg-white/20 border border-white/20 shadow-xl px-6 py-3"
             >

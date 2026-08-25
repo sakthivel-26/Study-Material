@@ -14,6 +14,7 @@ const NAV = [
   { to: "/admin/upload?type=pdf", label: "Upload Materials", icon: UploadCloud },
   { to: "/admin/upload?type=video", label: "Add YouTube Video", icon: Youtube },
   { to: "/admin/mock-test", label: "Create Mock Test", icon: ClipboardPlus },
+  { to: "/admin/free-mock-test", label: "Create Free Mock Test", icon: ClipboardPlus },
   { to: "/admin/students", label: "Manage Students", icon: Users },
   { to: "/admin/announcements", label: "Notifications", icon: Megaphone },
   { to: "/admin/courses", label: "Manage Courses", icon: BookOpen },

@@ -6,6 +6,7 @@ import { LoginPage, SignupPage, ForgotPasswordPage, MobileLoginPage } from "./pa
 import StudentDashboard from "./pages/StudentDashboard.jsx";
 import { CoursesPage, VideosPage, MaterialsPage } from "./pages/SectionPages.jsx";
 import MockTestsPage from "./pages/MockTestsPage.jsx";
+import FreeMocksPage from "./pages/FreeMocksPage.jsx";
 import DailyPracticePage from "./pages/DailyPracticePage.jsx";
 import NotificationsPage from "./pages/NotificationsPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/videos" element={<VideosPage />} />
         <Route path="/materials" element={<MaterialsPage />} />
         <Route path="/mock-tests" element={<MockTestsPage />} />
+        <Route path="/free-mocks" element={<FreeMocksPage />} />
         <Route path="/daily-practice" element={<DailyPracticePage />} />
         {/* Protected specific routes */}
         <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
@@ -43,6 +45,7 @@ export default function App() {
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin/upload" element={<UploadPage />} />
         <Route path="/admin/mock-test" element={<CreateMockTestPage />} />
+        <Route path="/admin/free-mock-test" element={<CreateMockTestPage isFreeByDefault={true} />} />
         <Route path="/admin/students" element={<ManageStudentsPage />} />
         <Route path="/admin/announcements" element={<AnnouncementsPage />} />
         <Route path="/admin/courses" element={<ManageCoursesPage />} />
