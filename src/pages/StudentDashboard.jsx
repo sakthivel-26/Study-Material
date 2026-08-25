@@ -5,7 +5,7 @@ import { useApp } from "../store.jsx";
 import { Clock, Play, HelpCircle, TrendingUp, Zap, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { MapPin, Phone } from "lucide-react";
+import { MapPin, Phone, Mail } from "lucide-react";
 
 function FeaturedFreeMocks() {
   const { mockTests } = useApp();
@@ -71,42 +71,51 @@ export default function StudentDashboard() {
         <HeroBanner />
         <FeaturedFreeMocks />
         <CourseCatalog compact />
-        <div className="mt-12 mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="mt-12 mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
           <a 
-            href="https://www.google.com/maps/search/?api=1&query=4c,Ptv+colony+opposite+govt+girls'+hr+sec+school+krishnagiri" 
+            href="https://www.google.com/maps/search/?api=1&query=4c,+opposite+govt+girls+hr+sec+school,+PTV+Colony,+Thiruvalluvar+Nagar,+Krishnagiri,+Tamil+Nadu+635001" 
             target="_blank" 
             rel="noreferrer"
             className="block p-5 rounded-2xl bg-white border border-slate-200 hover:border-brand-300 hover:shadow-md transition-all cursor-pointer group"
           >
-            <div className="flex items-center gap-4 text-ink-muted group-hover:text-brand-700">
-              <div className="w-10 h-10 rounded-full bg-slate-100 group-hover:bg-brand-50 flex items-center justify-center shrink-0">
+            <div className="flex items-start gap-4 text-ink-muted group-hover:text-brand-700">
+              <div className="w-10 h-10 rounded-full bg-slate-100 group-hover:bg-brand-50 flex items-center justify-center shrink-0 mt-0.5">
                 <MapPin size={20} />
               </div>
               <div>
-                <h4 className="font-bold text-ink group-hover:text-brand-900 mb-0.5">Visit Our Academy</h4>
-                <p className="text-sm leading-snug">4c, Ptv colony, opposite govt girls' hr sec school, krishnagiri</p>
+                <h4 className="font-bold text-ink group-hover:text-brand-900 mb-1">Visit Our Academy</h4>
+                <p className="text-sm leading-relaxed">4c, opposite govt girls hr sec school, PTV Colony, Thiruvalluvar Nagar, Krishnagiri, Tamil Nadu 635001</p>
               </div>
             </div>
           </a>
 
           <div className="p-5 rounded-2xl bg-white border border-slate-200 flex flex-col justify-center">
-            <div className="flex items-center gap-4 text-ink-muted mb-2">
+            <div className="flex items-center gap-4 text-ink-muted mb-3">
               <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
                 <Phone size={20} />
               </div>
               <div>
                 <h4 className="font-bold text-ink mb-0.5">Contact Us</h4>
-                <p className="text-sm">Call us for inquiries and support</p>
+                <p className="text-sm">Call or email us for inquiries</p>
               </div>
             </div>
-            <div className="flex items-center gap-4 ml-14 mt-1">
-              <a href="tel:7530015494" className="text-sm font-semibold text-brand-700 hover:underline">
-                7530015494
-              </a>
-              <span className="text-slate-300">|</span>
-              <a href="tel:7530015495" className="text-sm font-semibold text-brand-700 hover:underline">
-                7530015495
-              </a>
+            
+            <div className="flex flex-col gap-2 ml-[3.5rem]">
+              <div className="flex items-center gap-3">
+                <a href="tel:7530015494" className="text-sm font-semibold text-brand-700 hover:underline">
+                  7530015494
+                </a>
+                <span className="text-slate-300">|</span>
+                <a href="tel:7530015495" className="text-sm font-semibold text-brand-700 hover:underline">
+                  7530015495
+                </a>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Mail size={14} className="text-ink-muted" />
+                <a href="mailto:kenacademy7@gmail.com" className="font-medium text-ink hover:text-brand-700 hover:underline">
+                  kenacademy7@gmail.com
+                </a>
+              </div>
             </div>
           </div>
         </div>
