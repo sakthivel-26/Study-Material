@@ -8,6 +8,8 @@ import { useNavigate } from "react-router-dom";
 
 const CHART = [40, 65, 48, 80, 60, 92, 74, 88, 56, 96, 70, 84];
 
+import CategoryGrid from "../../components/CategoryGrid.jsx";
+
 export default function AdminDashboard() {
   const { uploads = [], mockTests = [], students = [] } = useApp();
   const navigate = useNavigate();
@@ -79,6 +81,10 @@ export default function AdminDashboard() {
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="mt-8">
+        <CategoryGrid adminMode={true} onSelectCategory={(cat) => navigate(`/admin/upload?type=pdf&category=${encodeURIComponent(cat)}`)} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6 mt-6">

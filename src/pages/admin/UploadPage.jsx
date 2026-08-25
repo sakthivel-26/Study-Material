@@ -15,10 +15,11 @@ export default function UploadPage() {
   const navigate = useNavigate();
   const { uploads = [], addUpload, deleteUpload, pushToast } = useApp();
 
+  const initialCategory = params.get("category") || CATEGORIES[0].name;
   const [form, setForm] = useState({
     type: mode,
     title: "",
-    category: CATEGORIES[0].name,
+    category: CATEGORIES.find(c => c.name === initialCategory) ? initialCategory : CATEGORIES[0].name,
     description: "",
     youtube: "",
     file: null,
