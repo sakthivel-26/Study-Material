@@ -378,6 +378,8 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
 
   const openRouterKey = getEnvKey("VITE_OPENROUTER_API_KEY") || getEnvKey("OPENROUTER_API_KEY");
   const openRouterModel = getEnvKey("VITE_OPENROUTER_MODEL") || getEnvKey("OPENROUTER_MODEL") || "google/gemma-4-31b-it:free";
+  const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
+  const nvidiaModel = getEnvKey("VITE_NVIDIA_MODEL") || "nvidia/nemotron-ocr-v2";
   const gemmaKey = getEnvKey("VITE_GEMMA_API_KEY") || getEnvKey("GEMMA_API_KEY");
   const gemmaEndpoint = getEnvKey("VITE_GEMMA_ENDPOINT") || getEnvKey("GEMMA_ENDPOINT");
   const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
@@ -386,8 +388,19 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
 
   let lastError = null;
 
-  // 0. Try OpenRouter (google/gemma-4-31b-it:free) — TOP PRIORITY
-  if (openRouterKey) {
+  // 0. Try NVIDIA LLM
+  if (nvidiaKey) {
+    try {
+      console.log(`🤖 Generating mock test via NVIDIA (${nvidiaModel})...`);
+      questions = await callNvidia(nvidiaKey, prompt, nvidiaModel);
+    } catch (err) {
+      lastError = err;
+      console.warn("Nvidia LLM error:", err);
+    }
+  }
+
+  // 1. Try OpenRouter (google/gemma-4-31b-it:free)
+  if ((!questions || questions.length === 0) && openRouterKey) {
     try {
       console.log(`🤖 Generating mock test via OpenRouter (${openRouterModel})...`);
       questions = await callOpenRouter(openRouterKey, prompt, openRouterModel);
@@ -397,7 +410,7 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
     }
   }
 
-  // 1. Try Google Gemma (HuggingFace / Groq / Ollama)
+  // 2. Try Google Gemma (HuggingFace / Groq / Ollama)
   if ((!questions || questions.length === 0) && (gemmaKey || gemmaEndpoint)) {
     try {
       console.log("🤖 Generating mock test via Google Gemma...");

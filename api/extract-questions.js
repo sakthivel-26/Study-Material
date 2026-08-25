@@ -53,7 +53,7 @@ export default async function handler(req, res) {
           Authorization: `Bearer ${nvidiaKey}`,
         },
         body: JSON.stringify({
-          model: "nvidia/llama-3.1-nemotron-70b-instruct", // A fast, high-quality model
+          model: process.env.VITE_NVIDIA_MODEL || "nvidia/nemotron-ocr-v2",
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: `Extract questions from the following text:\n\n${truncatedText}` }
