@@ -117,7 +117,7 @@ export function AppProvider({ children }) {
 
   // Real-time Firestore subscription (realtime mode only).
   useEffect(() => {
-    if (!isFirebaseConfigured || !isAuthed) return;
+    if (!isFirebaseConfigured) return;
     let unsub = () => {};
     (async () => {
       unsub = await subscribeBackend(user, {

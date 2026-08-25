@@ -31,20 +31,18 @@ service cloud.firestore {
     // 2. Mock Tests Collection
     match /mockTests/{id} {
       allow create, update, delete: if isAdmin();
-      allow read: if signedIn() && (
-        resource.data.isFree == true || isPremium() || isAdmin()
-      );
+      allow read: if resource.data.isFree == true || (signedIn() && isPremium()) || isAdmin();
     }
 
     // 3. Uploads (Study Materials)
     match /uploads/{id} {
       allow create, update, delete: if isAdmin();
-      allow read: if signedIn();
+      allow read: if true;
     }
 
     // 4. Notifications
     match /notifications/{id} {
-      allow read: if signedIn();
+      allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 
