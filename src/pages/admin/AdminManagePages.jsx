@@ -300,7 +300,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           responseData = JSON.parse(rawResponse);
         }
       } catch {
-        throw new Error("The extraction service returned an invalid response. Please try again.");
+        console.error("Vercel returned a non-JSON response:", rawResponse);
+        throw new Error("The extraction service returned an invalid response. Please try again. Check the browser console for the raw response.");
       }
 
       if (!response.ok) {
