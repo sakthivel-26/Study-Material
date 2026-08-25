@@ -69,7 +69,7 @@ export function AdmissionModal() {
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-2xl shadow-xl z-[101] overflow-hidden"
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[92%] sm:w-full max-w-md bg-white rounded-2xl shadow-xl z-[101] overflow-hidden"
           >
             <button
               onClick={handleClose}
@@ -107,7 +107,7 @@ export function AdmissionModal() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-ink mb-1.5">Mobile number <span className="text-red-500">*</span></label>
                       <input
@@ -135,7 +135,7 @@ export function AdmissionModal() {
                     <label className="block text-sm font-medium text-ink mb-1.5">Mode of learning <span className="text-red-500">*</span></label>
                     <select
                       required
-                      className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring-2 focus:ring-brand-200 outline-none transition-all appearance-none bg-white"
+                      className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring-2 focus:ring-brand-200 outline-none transition-all bg-white"
                       value={formData.modeOfLearning}
                       onChange={(e) => setFormData({...formData, modeOfLearning: e.target.value})}
                     >
