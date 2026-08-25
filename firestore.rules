@@ -22,9 +22,10 @@ service cloud.firestore {
       );
     }
 
-    // 1. Users can only read and write their OWN user document
+    // 1. Users can only read and write their OWN user document, admins can read all
     match /users/{userId} {
       allow read, write: if signedIn() && request.auth.uid == userId;
+      allow read: if isAdmin();
     }
 
     // 2. Mock Tests Collection

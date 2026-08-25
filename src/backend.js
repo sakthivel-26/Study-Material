@@ -59,7 +59,7 @@ export async function subscribeBackend(user, { onUploads, onTests, onNotificatio
       onNotifications(snap.docs.map(mapDoc))
     )
   );
-  if (onStudents) {
+  if (onStudents && isAdmin) {
     unsubs.push(
       onSnapshot(collection(db, "users"), (snap) => {
         onStudents(snap.docs.map(mapDoc));

@@ -278,15 +278,37 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     try {
       setPdfStatus("analyzing");
       setExtractionStartTime(Date.now());
-      setPdfPageInfo("Uploading PDF to AI processing server...");
+      setPdfPageInfo("Extracting text from PDF locally...");
+      
+      // Dynamically load PDF.js to avoid Vite worker bundling issues
+      if (!window.pdfjsLib) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
+          script.onload = resolve;
+          script.onerror = reject;
+          document.body.appendChild(script);
+        });
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+      }
 
-      // Send to FastAPI Backend
-      const formData = new FormData();
-      formData.append("file", file);
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+      }
+
+      setPdfPageInfo("Sending text to AI processing server...");
 
       const response = await fetch(`/api/extract-questions`, {
         method: "POST",
-        body: formData
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ text: fullText })
       });
 
       // The API can return an empty/proxy error page if the FastAPI service is
