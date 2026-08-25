@@ -40,9 +40,6 @@ export async function subscribeBackend(user, { onUploads, onTests, onNotificatio
   const isPremium = user?.paid === true || user?.premium === true || (user?.access && user?.access !== "payment_required");
 
   let uploadsQuery = query(collection(db, COLLECTIONS.uploads), orderBy("createdAt", "desc"));
-  if (!isAdmin && !isPremium) {
-    uploadsQuery = query(collection(db, COLLECTIONS.uploads), where("isFree", "==", true), orderBy("createdAt", "desc"));
-  }
   unsubs.push(
     onSnapshot(uploadsQuery, (snap) => onUploads(snap.docs.map(mapDoc)))
   );

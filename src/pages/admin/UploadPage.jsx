@@ -24,7 +24,6 @@ export default function UploadPage() {
     youtube: "",
     file: null,
     thumb: null,
-    isFree: true,
   });
   const [drag, setDrag] = useState(false);
   const [preview, setPreview] = useState(false);
@@ -166,7 +165,6 @@ export default function UploadPage() {
         date: uploadTimeString,
         uploadTime: formattedTime,
         uploadedAt: Date.now(),
-        isFree: form.isFree,
       };
 
       if (isAbortedRef.current) return;
@@ -242,10 +240,6 @@ export default function UploadPage() {
             <div>
               <label className="text-sm font-medium text-ink-soft mb-1.5 block">Description</label>
               <textarea className="input min-h-[90px] resize-none" placeholder="Short description shown to students..." value={form.description} onChange={(e)=>set("description",e.target.value)} />
-            </div>
-            <div className="flex items-center gap-2">
-              <input type="checkbox" id="isFreeUpload" checked={form.isFree} onChange={(e) => set("isFree", e.target.checked)} className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 border-black/20" />
-              <label htmlFor="isFreeUpload" className="text-sm font-semibold text-ink-soft select-none cursor-pointer">Available for Free Users</label>
             </div>
           </div>
 
