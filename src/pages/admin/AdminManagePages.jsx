@@ -531,7 +531,6 @@ export function CreateMockTestPage() {
             </div>
           </div>
           
-          <div className="pt-2">
 
           {/* PDF Upload Zone */}
           {mode === "pdf" && (
