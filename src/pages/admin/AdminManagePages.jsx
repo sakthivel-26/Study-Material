@@ -301,38 +301,46 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         fullText += textContent.items.map(item => item.str).join(" ") + "\n";
       }
 
-      setPdfPageInfo("Sending text to AI processing server...");
+      setPdfPageInfo("Parsing questions from text locally using regex...");
 
-      const response = await fetch(`/api/ai/extract-questions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ text: fullText })
-      });
-
-      // The API can return an empty/proxy error page if the FastAPI service is
-      // offline. Parse safely so admins see the real setup error rather than a
-      // browser JSON parsing exception.
-      let rawResponse = "";
-      let responseData = {};
-      try {
-        rawResponse = await response.text();
-        if (rawResponse) {
-          responseData = JSON.parse(rawResponse);
+      const extractedQuestions = (() => {
+        const questions = [];
+        const normalized = " " + fullText.replace(/\n+/g, ' ').replace(/\s+/g, ' ');
+        const parts = normalized.split(/\s(?:Q-?)?\d+[\.\)]\s/i);
+        
+        for (let i = 1; i < parts.length; i++) {
+            let block = parts[i].trim();
+            if (!block) continue;
+            
+            const optRegex = /(?:\b|\s|\()([A-E])[\.\)]\s+(.*?)(?=(?:\s*(?:\b|\s|\()[A-E][\.\)]\s+)|$)/gi;
+            let options = {};
+            let questionText = block;
+            
+            let firstOptIndex = -1;
+            let optMatch;
+            while ((optMatch = optRegex.exec(block)) !== null) {
+               if (firstOptIndex === -1) firstOptIndex = optMatch.index;
+               options[optMatch[1].toUpperCase()] = optMatch[2].trim();
+            }
+            
+            if (firstOptIndex !== -1) {
+                questionText = block.substring(0, firstOptIndex).trim();
+            }
+            
+            if (questionText && Object.keys(options).length >= 2) {
+                questions.push({
+                    question_text: questionText,
+                    options: options,
+                    source_answer: "A",
+                    explanation: "Answer not detected. Verification needed."
+                });
+            }
         }
-      } catch {
-        console.error("Vercel returned a non-JSON response:", rawResponse);
-        throw new Error("The extraction service returned an invalid response. Please try again. Check the browser console for the raw response.");
-      }
+        return questions.slice(0, Math.max(1, Math.min(200, Number(f.questions) || 20)));
+      })();
 
-      if (!response.ok) {
-        throw new Error(responseData.error || responseData.detail || "Server failed to process the PDF");
-      }
-
-      const extractedQuestions = (responseData.questions || []).slice(0, Math.max(1, Math.min(200, Number(f.questions) || 20)));
       if (extractedQuestions.length === 0) {
-        throw new Error("NO_QUESTIONS_FOUND: AI failed to extract any questions.");
+        throw new Error("NO_QUESTIONS_FOUND: Could not extract any questions using regex. Make sure the PDF contains standard numbered questions (e.g. '1. Question...') and options (e.g. 'A. Option...').");
       }
 
       setPdfPageInfo(`Successfully extracted ${extractedQuestions.length} questions`);
