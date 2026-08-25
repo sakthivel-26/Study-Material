@@ -312,14 +312,6 @@ export function AuthProvider({ children }) {
     const auth = await getFirebaseAuth();
     const cred = await signInWithPopup(auth, new GoogleAuthProvider());
     
-    // Restrict Google Login to admin only
-    const userEmail = cred.user.email?.toLowerCase();
-    if (!ADMIN_EMAILS.includes(userEmail)) {
-      await signOut(auth);
-      setError("Unauthorized. Google login is restricted to the official admin email only.");
-      throw new Error("unauthorized-google-login");
-    }
-
     const user = fbToUser(cred.user);
     const { fsSyncUser } = await import("./backend.js");
     await fsSyncUser(user);
