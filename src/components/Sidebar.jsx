@@ -15,7 +15,6 @@ const NAV = [
   { to: "/videos", label: "Videos", icon: PlaySquare },
   { to: "/materials", label: "Study Materials", icon: FileText },
   { to: "/mock-tests", label: "Mock Tests", icon: ClipboardList },
-  { to: "/free-mocks", label: "Free Mocks", icon: Zap },
   { to: "/daily-practice", label: "Speed Math", icon: Zap },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/profile", label: "Profile", icon: User },

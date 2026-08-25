@@ -39,9 +39,7 @@ service cloud.firestore {
     // 3. Uploads (Study Materials)
     match /uploads/{id} {
       allow create, update, delete: if isAdmin();
-      allow read: if signedIn() && (
-        resource.data.isFree == true || isPremium() || isAdmin()
-      );
+      allow read: if signedIn();
     }
 
     // 4. Notifications
