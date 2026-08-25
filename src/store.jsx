@@ -21,7 +21,7 @@ import {
 const AppCtx = createContext(null);
 
 export function AppProvider({ children }) {
-  const { isAuthed } = useAuth();
+  const { isAuthed, user } = useAuth();
   const [uploads, setUploads] = useState(() => {
     if (useRealtimeBackend) return [];
     try {
