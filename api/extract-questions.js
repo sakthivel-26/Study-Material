@@ -60,6 +60,10 @@ export default async function handler(req, res) {
           ],
         }),
       });
+      if (!apiRes.ok) {
+        const errText = await apiRes.text();
+        return res.status(500).json({ error: `NVIDIA API Error: ${apiRes.status} - ${errText}` });
+      }
       const result = await apiRes.json();
       completionText = result.choices?.[0]?.message?.content || "";
     } else if (openRouterKey) {

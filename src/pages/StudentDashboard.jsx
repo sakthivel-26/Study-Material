@@ -1,5 +1,4 @@
 import HeroBanner from "../components/HeroBanner.jsx";
-import CategoryGrid from "../components/CategoryGrid.jsx";
 import CourseCatalog from "../components/CourseCatalog.jsx";
 import { RightSidebar } from "../components/RightSidebar.jsx";
 import { useApp } from "../store.jsx";
@@ -71,7 +70,6 @@ export default function StudentDashboard() {
         <HeroBanner />
         <FeaturedFreeMocks />
         <CourseCatalog compact />
-        <CategoryGrid />
       </div>
       <aside className="hidden xl:block"><div className="sticky top-[88px]"><RightSidebar /></div></aside>
     </div>
