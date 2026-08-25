@@ -38,13 +38,31 @@ export default async function handler(req, res) {
     // Truncate if too long (AI token limit)
     const truncatedText = text.substring(0, 30000); 
 
-    // Call OpenRouter or Gemini
+    // Call OpenRouter, Gemini, or NVIDIA
     const openRouterKey = process.env.VITE_OPENROUTER_API_KEY;
     const geminiKey = process.env.VITE_GEMINI_API_KEY;
+    const nvidiaKey = process.env.VITE_NVIDIA_API_KEY;
 
     let completionText = "";
 
-    if (openRouterKey) {
+    if (nvidiaKey) {
+      const apiRes = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${nvidiaKey}`,
+        },
+        body: JSON.stringify({
+          model: "nvidia/llama-3.1-nemotron-70b-instruct", // A fast, high-quality model
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: `Extract questions from the following text:\n\n${truncatedText}` }
+          ],
+        }),
+      });
+      const result = await apiRes.json();
+      completionText = result.choices?.[0]?.message?.content || "";
+    } else if (openRouterKey) {
       const apiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -73,7 +91,7 @@ export default async function handler(req, res) {
       const result = await apiRes.json();
       completionText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
     } else {
-      return res.status(500).json({ error: "No AI API Key configured in Vercel Environment Variables. Please add VITE_GEMINI_API_KEY or VITE_OPENROUTER_API_KEY." });
+      return res.status(500).json({ error: "No AI API Key configured. Please add VITE_NVIDIA_API_KEY, VITE_GEMINI_API_KEY, or VITE_OPENROUTER_API_KEY in Vercel Environment Variables." });
     }
 
     if (!completionText) {

@@ -17,10 +17,25 @@ export default async function handler(req, res) {
 
     const openRouterKey = process.env.VITE_OPENROUTER_API_KEY;
     const geminiKey = process.env.VITE_GEMINI_API_KEY;
+    const nvidiaKey = process.env.VITE_NVIDIA_API_KEY;
 
     let completionText = "";
 
-    if (openRouterKey) {
+    if (nvidiaKey) {
+      const apiRes = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${nvidiaKey}`,
+        },
+        body: JSON.stringify({
+          model: "nvidia/llama-3.1-nemotron-70b-instruct",
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const result = await apiRes.json();
+      completionText = result.choices?.[0]?.message?.content || "";
+    } else if (openRouterKey) {
       const apiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
