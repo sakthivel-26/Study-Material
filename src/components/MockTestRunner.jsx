@@ -22,6 +22,30 @@ export default function MockTestRunner({ test, onClose }) {
   const [results, setResults] = useState(null);
   const [solutionFilter, setSolutionFilter] = useState("all");
 
+  const [touchStart, setTouchStart] = useState(null);
+  const [touchEnd, setTouchEnd] = useState(null);
+  const minSwipeDistance = 50;
+
+  const onTouchStart = (e) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e) => setTouchEnd(e.targetTouches[0].clientX);
+
+  const onTouchEndHandler = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+    if (isLeftSwipe) {
+      saveAndNext();
+    }
+    if (isRightSwipe) {
+      goPrev();
+    }
+  };
+
   const currentQ = questions[currentIndex] || {};
 
   // Countdown Timer
@@ -206,7 +230,12 @@ export default function MockTestRunner({ test, onClose }) {
             </div>
 
             {/* Question Body */}
-            <div className="flex-1 px-6 pb-6 overflow-y-auto space-y-6 max-w-4xl">
+            <div 
+              className="flex-1 px-6 pb-6 overflow-y-auto space-y-6 max-w-4xl"
+              onTouchStart={onTouchStart}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEndHandler}
+            >
               {currentQ.passage && (
                 <div className="space-y-2 pb-2">
                   {/* Instructions Header */}
@@ -278,12 +307,12 @@ export default function MockTestRunner({ test, onClose }) {
                     <div
                       key={optIdx}
                       onClick={() => selectOption(optIdx)}
-                      className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center gap-4 ${isSelected ? "bg-slate-800/80 border-slate-500 text-white shadow-sm" : "bg-slate-800/30 border-slate-800/80 text-slate-300 hover:bg-slate-800/60 hover:border-slate-700"}`}
+                      className={`p-2 sm:p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 sm:gap-4 ${isSelected ? "bg-slate-800/80 border-slate-500 text-white shadow-sm" : "bg-slate-800/30 border-slate-800/80 text-slate-300 hover:bg-slate-800/60 hover:border-slate-700"}`}
                     >
-                      <span className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[11px] shrink-0 ${isSelected ? "bg-slate-600 text-white" : "bg-slate-700/60 text-slate-400"}`}>
+                      <span className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center font-bold text-[10px] sm:text-[11px] shrink-0 ${isSelected ? "bg-slate-600 text-white" : "bg-slate-700/60 text-slate-400"}`}>
                         {String.fromCharCode(65 + optIdx)}
                       </span>
-                      <span className="text-[14px] leading-relaxed">{opt}</span>
+                      <span className="text-xs sm:text-[14px] leading-relaxed">{opt}</span>
                     </div>
                   );
                 })}
@@ -291,7 +320,7 @@ export default function MockTestRunner({ test, onClose }) {
             </div>
 
             {/* Action Bar Footer */}
-            <div className="h-16 px-6 bg-slate-950 border-t border-slate-800 flex items-center justify-between shrink-0">
+            <div className="h-16 px-6 bg-slate-950 border-t border-slate-800 hidden sm:flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <button onClick={clearResponse} className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-xs font-semibold text-slate-300">
                   Clear Response

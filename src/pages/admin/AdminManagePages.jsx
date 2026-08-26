@@ -217,9 +217,34 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     // Filter out any unapproved questions
     finalQuestions = finalQuestions.filter((_, idx) => approvedIndices.includes(idx));
 
-    // Update the question count
-    const testToPublish = { ...generatedTest, questionsList: finalQuestions, questions: finalQuestions.length };
-    await updateMockTest(generatedTest.id, { questionsList: finalQuestions, questions: finalQuestions.length });
+    // Update the test metadata from the latest form state (f)
+    const testToPublish = { 
+       ...generatedTest, 
+       title: f.title.trim() || generatedTest.title,
+       category: f.category,
+       subject: f.subject,
+       topic: f.topic,
+       time: f.time,
+       durationMinutes: Math.max(1, parseInt(f.time) || 30),
+       questionsList: finalQuestions, 
+       questions: finalQuestions.length 
+    };
+
+    if (testToPublish.id && testToPublish.id.startsWith("draft_")) {
+        delete testToPublish.id;
+        await addMockTest(testToPublish);
+    } else {
+        await updateMockTest(generatedTest.id, { 
+            questionsList: finalQuestions, 
+            questions: finalQuestions.length,
+            title: testToPublish.title,
+            category: testToPublish.category,
+            subject: testToPublish.subject,
+            topic: testToPublish.topic,
+            time: testToPublish.time,
+            durationMinutes: testToPublish.durationMinutes
+        });
+    }
     
     setGeneratedTest(null);
     setPdfStatus("");
@@ -394,10 +419,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             explanation: q.explanation || "Verification pending.",
           });
       });
-      const testToPublish = { ...result, questionsList: finalQuestions };
-      const publishedTest = await addMockTest(testToPublish); // Publish to students immediately
+      const draftTest = { ...result, questionsList: finalQuestions, id: "draft_" + Date.now() };
       
-      setGeneratedTest(publishedTest);
+      setGeneratedTest(draftTest);
       setVerificationProgress("");
       setPdfStatus("done");
       pushToast(`✅ Mock test extracted successfully! Background verification started.`);
