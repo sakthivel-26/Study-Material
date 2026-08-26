@@ -178,33 +178,48 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     if (!generatedTest) return;
 
     // Apply approved fixes to the already created test
-    const finalQuestions = generatedTest.questionsList ? [...generatedTest.questionsList] : [];
+    let finalQuestions = generatedTest.questionsList ? [...generatedTest.questionsList] : [];
     
+    // We only keep questions that the teacher has explicitly approved
+    const approvedIndices = [];
+
     generatedTest.rawExtractedQuestions.forEach((q, idx) => {
       const approvalStatus = approvedQuestions[idx];
-      if (approvalStatus) {
-        if (approvalStatus.isApproved) {
-          const finalLetter = approvalStatus.editedAnswer || q.ai_verified_answer || q.source_answer || "A";
-          const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
-          if (finalQuestions[idx]) {
-            finalQuestions[idx].correctAnswerIndex = ansIndex;
-            finalQuestions[idx].explanation = q.verification_explanation || "Verified by teacher.";
-          }
-        }
+      // Only process if it is approved
+      if (approvalStatus && approvalStatus.isApproved) {
+        approvedIndices.push(idx);
+
+        const finalLetter = approvalStatus.editedAnswer || q.ai_verified_answer || q.source_answer || "A";
+        const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
         
         if (finalQuestions[idx]) {
+          finalQuestions[idx].correctAnswerIndex = ansIndex;
+          finalQuestions[idx].explanation = q.verification_explanation || "Verified by teacher.";
+
           if (approvalStatus.imageUrl !== undefined) {
             finalQuestions[idx].imageUrl = approvalStatus.imageUrl;
           }
           if (approvalStatus.passage !== undefined) {
             finalQuestions[idx].passage = approvalStatus.passage;
           }
+          if (approvalStatus.questionText !== undefined) {
+            finalQuestions[idx].question = approvalStatus.questionText;
+          }
+          if (approvalStatus.options !== undefined) {
+            const mergedOptions = { ...q.options, ...approvalStatus.options };
+            const optKeys = Object.keys(mergedOptions).sort();
+            finalQuestions[idx].options = optKeys.length > 0 ? optKeys.map(k => mergedOptions[k]) : finalQuestions[idx].options;
+          }
         }
       }
     });
 
-    const testToPublish = { ...generatedTest, questionsList: finalQuestions };
-    await updateMockTest(generatedTest.id, { questionsList: finalQuestions });
+    // Filter out any unapproved questions
+    finalQuestions = finalQuestions.filter((_, idx) => approvedIndices.includes(idx));
+
+    // Update the question count
+    const testToPublish = { ...generatedTest, questionsList: finalQuestions, questions: finalQuestions.length };
+    await updateMockTest(generatedTest.id, { questionsList: finalQuestions, questions: finalQuestions.length });
     
     setGeneratedTest(null);
     setPdfStatus("");
@@ -440,6 +455,29 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       [idx]: {
         ...prev[idx],
         passage: passageText
+      }
+    }));
+  };
+
+  const editQuestionText = (idx, text) => {
+    setApprovedQuestions(prev => ({
+      ...prev,
+      [idx]: {
+        ...prev[idx],
+        questionText: text
+      }
+    }));
+  };
+
+  const editOptionText = (idx, optKey, text) => {
+    setApprovedQuestions(prev => ({
+      ...prev,
+      [idx]: {
+        ...prev[idx],
+        options: {
+          ...(prev[idx]?.options || {}),
+          [optKey]: text
+        }
       }
     }));
   };
@@ -829,13 +867,23 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         </label>
                       </div>
 
-                      <p className="font-semibold text-ink text-xs mb-2 leading-relaxed">{q.question_text}</p>
+                      <textarea
+                        className="input font-semibold text-ink text-xs mb-2 min-h-[60px]"
+                        value={approvedQuestions[idx]?.questionText ?? q.question_text}
+                        onChange={(e) => editQuestionText(idx, e.target.value)}
+                      />
                       
                       <div className="grid sm:grid-cols-2 gap-1.5 text-[11px] text-ink-muted mb-3">
                         {Object.entries(q.options || {}).map(([key, opt]) => (
-                          <span key={key} className={`px-2 py-1 rounded ${key === finalAnswer ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-black/5"}`}>
-                            {key}: {opt} {key === finalAnswer ? "✓" : ""}
-                          </span>
+                          <div key={key} className={`flex items-center gap-1.5 px-2 py-1 rounded ${key === finalAnswer ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-black/5"}`}>
+                            <span>{key}:</span>
+                            <input 
+                              className="input text-[11px] py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 w-full"
+                              value={approvedQuestions[idx]?.options?.[key] ?? opt}
+                              onChange={(e) => editOptionText(idx, key, e.target.value)}
+                            />
+                            {key === finalAnswer && <span>✓</span>}
+                          </div>
                         ))}
                       </div>
 
