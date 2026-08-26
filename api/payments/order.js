@@ -18,7 +18,9 @@ export default async function handler(req, res) {
     return res.status(503).json({ detail: "Payments are not configured. Add Razorpay backend keys." });
   }
 
-  const base = PRICES[package_id];
+  // Use the dynamic amount from the frontend (since plan prices can be updated by admin)
+  // Fallback to the default hardcoded PRICES if not provided.
+  const base = reqAmount || PRICES[package_id];
   if (!base) {
     return res.status(400).json({ detail: "Unknown course package." });
   }
