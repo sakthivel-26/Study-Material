@@ -139,27 +139,55 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
 
-  // Keep the Firebase session in sync with React state.
+  // Keep the Firebase session in sync with React state & Firestore user document.
   useEffect(() => {
     if (!isFirebaseConfigured) return;
-    let unsub = () => {};
+    let unsubAuth = () => {};
+    let unsubSnap = () => {};
+
     (async () => {
       const { onAuthStateChanged } = await import("firebase/auth");
+      const { doc, onSnapshot } = await import("firebase/firestore");
+      const { getFirebaseDb } = await import("./firebase.js");
+      const { fsSyncUser } = await import("./backend.js");
+
       const auth = await getFirebaseAuth();
-      unsub = onAuthStateChanged(auth, async (fb) => {
+      const db = await getFirebaseDb();
+
+      unsubAuth = onAuthStateChanged(auth, async (fb) => {
+        unsubSnap(); // unsubscribe previous snap listener
         if (fb) {
           const user = fbToUser(fb);
           setSession(user);
           setError(null);
-          // Sync existing users so they appear in Admin panel
-          const { fsSyncUser } = await import("./backend.js");
+
+          // Realtime listener for student Firestore doc (for permissions, paid status, tuition access)
+          unsubSnap = onSnapshot(doc(db, "users", fb.uid), (snap) => {
+            if (snap.exists()) {
+              const p = snap.data();
+              const isPaidUser = p.paid === true || p.premium === true || p.hasFullAccess === true || (p.access && p.access !== "payment_required");
+              setSession((prev) => ({
+                ...(prev || user),
+                ...p,
+                access: p.access || (isPaidUser ? "academy" : "payment_required"),
+                paid: isPaidUser,
+                premium: isPaidUser,
+                hasFullAccess: isPaidUser,
+              }));
+            }
+          });
+
           fsSyncUser(user).catch(err => console.warn("Background sync failed", err));
         } else {
           setSession(null);
         }
       });
     })();
-    return () => unsub();
+
+    return () => {
+      unsubAuth();
+      unsubSnap();
+    };
   }, []);
 
   // Persist demo-mode session.

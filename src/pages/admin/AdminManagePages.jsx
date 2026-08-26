@@ -1419,11 +1419,23 @@ export function ManageStudentsPage() {
 
     if (useRealtimeBackend) {
       try {
+        const { doc, setDoc } = await import("firebase/firestore");
+        const { getFirebaseDb } = await import("../../firebase.js");
+        const db = await getFirebaseDb();
+
         if (hasAccess) {
           await fsRemoveUserPurchase(student.id, packageId);
         } else {
           await fsUpdateUserPurchases(student.id, packageId);
         }
+
+        const isPaid = nextAccess !== "payment_required";
+        await setDoc(doc(db, "users", student.id), {
+          access: nextAccess,
+          paid: isPaid,
+          premium: isPaid,
+          hasFullAccess: nextAccess === "academy"
+        }, { merge: true });
       } catch (err) {
         console.error("Failed to sync access to Firebase", err);
       }
@@ -1435,8 +1447,24 @@ export function ManageStudentsPage() {
     setStudentAccess(student.id, "academy");
     refresh(v => v + 1);
     if (useRealtimeBackend) {
-      for (const e of EXAMS) {
-        await fsUpdateUserPurchases(student.id, e.id).catch(()=>{});
+      try {
+        const { doc, setDoc } = await import("firebase/firestore");
+        const { getFirebaseDb } = await import("../../firebase.js");
+        const db = await getFirebaseDb();
+
+        for (const e of EXAMS) {
+          await fsUpdateUserPurchases(student.id, e.id).catch(()=>{});
+        }
+
+        await setDoc(doc(db, "users", student.id), {
+          access: "academy",
+          paid: true,
+          premium: true,
+          hasFullAccess: true,
+          tuitionFeePaid: true
+        }, { merge: true });
+      } catch (err) {
+        console.error("Failed to sync grantAll to Firebase", err);
       }
     }
     pushToast(`Full Academy access granted to ${student.name || "Student"}`);
