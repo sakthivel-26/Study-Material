@@ -12,7 +12,8 @@ const FILTER_TABS = [
   { id: "tnpsc", label: "TNPSC", group: "TNPSC" },
   { id: "ssc", label: "SSC (CGL/CHSL)", group: "SSC" },
   { id: "railway", label: "Railway (NTPC/Group D)", group: "Railway" },
-  { id: "defence", label: "Defence & NDA", group: "Defence" }
+  { id: "defence", label: "Defence & NDA", group: "Defence" },
+  { id: "current-affairs", label: "Current Affairs & GK", group: "Common Subjects" }
 ];
 
 export default function UploadList({ type, empty }) {
