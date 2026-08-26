@@ -21,7 +21,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [pdfStatus, setPdfStatus] = useState(""); // "extracting" | "analyzing" | "done" | ""
   const [pdfPageInfo, setPdfPageInfo] = useState("");
   const pdfInputRef = useRef(null);
-  const [f, setF] = useState({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault });
+  const [f, setF] = useState({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault, isSectionalTimed: false });
   const [generating, setGenerating] = useState(false);
   const [generatedTest, setGeneratedTest] = useState(null);
   const [approvedQuestions, setApprovedQuestions] = useState({});
@@ -226,6 +226,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
        topic: f.topic,
        time: f.time,
        durationMinutes: Math.max(1, parseInt(f.time) || 30),
+       isSectionalTimed: !!f.isSectionalTimed,
        questionsList: finalQuestions, 
        questions: finalQuestions.length 
     };
@@ -605,11 +606,19 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             </div>
           </div>
           
-          <div className="flex items-center gap-2">
-            <input type="checkbox" id="isFreeMock" checked={f.isFree} onChange={(e) => set("isFree", e.target.checked)} className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 border-black/20" />
-            <label htmlFor="isFreeMock" className="text-sm font-semibold text-ink-soft select-none cursor-pointer">
-              Mark as <span className="text-brand-600 font-bold">Free Mock Test</span> (Shows in Free Mocks section)
-            </label>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="isFreeMock" checked={f.isFree} onChange={(e) => set("isFree", e.target.checked)} className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 border-black/20" />
+              <label htmlFor="isFreeMock" className="text-sm font-semibold text-ink-soft select-none cursor-pointer">
+                Mark as <span className="text-brand-600 font-bold">Free Mock Test</span> (Shows in Free Mocks section)
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="isSectionalTimed" checked={f.isSectionalTimed || false} onChange={(e) => set("isSectionalTimed", e.target.checked)} className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 border-black/20" />
+              <label htmlFor="isSectionalTimed" className="text-sm font-semibold text-ink-soft select-none cursor-pointer">
+                Enable <span className="text-amber-600 font-bold">Banking Sectional Timers</span> (English 20m, Reasoning 20m, Quants 20m)
+              </label>
+            </div>
           </div>
 
           {/* PDF Upload Zone */}

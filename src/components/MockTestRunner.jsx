@@ -208,16 +208,26 @@ export default function MockTestRunner({ test, onClose }) {
           <div className="flex-1 flex flex-col bg-slate-900 overflow-y-auto">
             {/* Section Switcher Tabs */}
             {sections.length > 1 && (
-              <div className="flex items-center gap-2 px-6 py-2.5 bg-slate-950/60 border-b border-slate-800 text-xs overflow-x-auto shrink-0">
-                <span className="text-slate-400 font-medium mr-2">Sections:</span>
+              <div className="flex items-center gap-2 px-4 sm:px-6 py-2.5 bg-slate-950/60 border-b border-slate-800 text-xs overflow-x-auto shrink-0">
+                <span className="text-slate-400 font-medium mr-1 text-[11px] sm:text-xs">Sections:</span>
                 {sections.map((sec) => (
-                  <span
+                  <button
                     key={sec}
-                    className={`px-3 py-1 rounded-lg font-semibold cursor-pointer transition-colors ${currentQ.section === sec ? "bg-brand-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+                    type="button"
+                    onClick={() => {
+                      const firstIdx = questions.findIndex(q => (q.section || "General") === sec);
+                      if (firstIdx !== -1) setCurrentIndex(firstIdx);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all whitespace-nowrap ${currentQ.section === sec ? "bg-brand-600 text-white shadow-sm ring-1 ring-brand-400" : "bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white"}`}
                   >
                     {sec}
-                  </span>
+                  </button>
                 ))}
+                {test?.isSectionalTimed && (
+                  <span className="ml-auto bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 hidden sm:inline-block">
+                    ⚡ Banking Sectional Timer Enabled (20m / Section)
+                  </span>
+                )}
               </div>
             )}
 
