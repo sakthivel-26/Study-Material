@@ -146,32 +146,32 @@ export default function MockTestRunner({ test, onClose }) {
   return (
     <div className="fixed inset-0 z-[80] bg-slate-900 text-slate-100 flex flex-col font-sans overflow-hidden">
       {/* Header Bar */}
-      <header className="h-16 bg-slate-950 border-b border-slate-800 px-6 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="w-9 h-9 rounded-xl bg-brand-600 flex items-center justify-center font-bold text-white shadow">
+      <header className="h-16 bg-slate-950 border-b border-slate-800 px-3 sm:px-6 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 mr-2">
+          <span className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-xl bg-brand-600 flex items-center justify-center font-bold text-white shadow">
             KEN
           </span>
-          <div>
-            <h2 className="font-bold text-sm text-white truncate max-w-xs sm:max-w-md">{test?.title || "Online CBT Exam"}</h2>
-            <p className="text-[11px] text-slate-400">{test?.category} · Official CBT Exam Pattern</p>
+          <div className="min-w-0">
+            <h2 className="font-bold text-xs sm:text-sm text-white truncate">{test?.title || "Online CBT Exam"}</h2>
+            <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">{test?.category} · Official CBT Exam Pattern</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           {!submitted && (
-            <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl border text-sm font-bold transition-all ${timeLeft < 300 ? "bg-rose-950/80 border-rose-600 text-rose-300 animate-pulse" : "bg-slate-900 border-slate-700 text-amber-400"}`}>
-              <Clock size={16} />
-              <span>Time Left: {formatTimer(timeLeft)}</span>
+            <div className={`flex flex-col sm:flex-row items-center sm:gap-2 px-2 sm:px-3.5 py-1 sm:py-1.5 rounded-xl border text-[10px] sm:text-sm font-bold transition-all ${timeLeft < 300 ? "bg-rose-950/80 border-rose-600 text-rose-300 animate-pulse" : "bg-slate-900 border-slate-700 text-amber-400"}`}>
+              <Clock size={14} className="hidden sm:block" />
+              <span className="text-center leading-tight">Time<span className="hidden sm:inline"> Left</span>:<br className="sm:hidden" />{formatTimer(timeLeft)}</span>
             </div>
           )}
 
           {!submitted ? (
-            <button onClick={() => setConfirmSubmit(true)} className="btn-primary text-xs px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white">
-              <Send size={14} /> Submit Test
+            <button onClick={() => setConfirmSubmit(true)} className="btn-primary text-[10px] sm:text-xs px-2.5 sm:px-4 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 whitespace-nowrap">
+              <Send size={12} className="sm:w-[14px] sm:h-[14px]" /> <span className="hidden sm:inline">Submit Test</span><span className="sm:hidden">Submit</span>
             </button>
           ) : (
-            <button onClick={onClose} className="btn-soft text-xs px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white">
-              <X size={14} /> Exit Test
+            <button onClick={onClose} className="btn-soft text-[10px] sm:text-xs px-2.5 sm:px-4 py-1.5 sm:py-2 bg-slate-800 hover:bg-slate-700 text-white flex items-center gap-1 whitespace-nowrap">
+              <X size={12} className="sm:w-[14px] sm:h-[14px]" /> Exit
             </button>
           )}
         </div>
