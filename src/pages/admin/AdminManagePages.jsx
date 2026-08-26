@@ -30,6 +30,13 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [extractionStartTime, setExtractionStartTime] = useState(null);
   const [extractionElapsed, setExtractionElapsed] = useState(0);
 
+  // 3-Section Full Mock State
+  const [multiPdfFiles, setMultiPdfFiles] = useState({
+    quants: { file: null, name: "Quantitative Aptitude", time: "20 min", count: 35 },
+    reasoning: { file: null, name: "Reasoning Ability", time: "20 min", count: 35 },
+    english: { file: null, name: "English Language", time: "20 min", count: 30 },
+  });
+
   useEffect(() => {
     let interval;
     if (pdfStatus === "analyzing" && extractionStartTime) {
@@ -342,22 +349,134 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         fullText += textContent.items.map(item => item.str).join(" ") + "\n";
       }
 
-      setPdfPageInfo("Parsing questions from text locally using regex...");
-
-      const extractedQuestions = (() => {
-        const questions = [];
-        const normalized = " " + fullText.replace(/\n+/g, ' ').replace(/\s+/g, ' ');
-        const parts = normalized.split(/\s(?:Q-?)?\d+[\.\)]\s/i);
+  const parseQuestionsFromPDFText = (fullText, sectionName = "General", targetCount = 35) => {
+    const questions = [];
+    const normalized = " " + fullText.replace(/\n+/g, ' ').replace(/\s+/g, ' ');
+    const parts = normalized.split(/\s(?:Q-?)?\d+[\.\)]\s/i);
+    
+    for (let i = 1; i < parts.length; i++) {
+        let block = parts[i].trim();
+        if (!block) continue;
         
-        for (let i = 1; i < parts.length; i++) {
-            let block = parts[i].trim();
-            if (!block) continue;
-            
-            const optRegex = /(?:\b|\s|\()([A-E])[\.\)]\s+(.*?)(?=(?:\s*(?:\b|\s|\()[A-E][\.\)]\s+)|$)/gi;
-            let options = {};
-            let questionText = block;
-            
-            let firstOptIndex = -1;
+        const optRegex = /(?:\b|\s|\()([A-E])[\.\)]\s+(.*?)(?=(?:\s*(?:\b|\s|\()[A-E][\.\)]\s+)|$)/gi;
+        let options = {};
+        let questionText = block;
+        
+        let firstOptIndex = -1;
+        let optMatch;
+        while ((optMatch = optRegex.exec(block)) !== null) {
+           if (firstOptIndex === -1) firstOptIndex = optMatch.index;
+           options[optMatch[1].toUpperCase()] = optMatch[2].trim();
+        }
+        
+        if (firstOptIndex !== -1) {
+            questionText = block.substring(0, firstOptIndex).trim();
+        }
+        
+        if (questionText && Object.keys(options).length >= 2) {
+            questions.push({
+                section: sectionName,
+                question_text: questionText,
+                options: options,
+                source_answer: "A",
+                explanation: "Answer not detected. Verification needed."
+            });
+        }
+    }
+    return questions.slice(0, Math.max(1, Math.min(200, Number(targetCount) || 35)));
+  };
+
+  const handleMultiPDFUpload = async () => {
+    const activeSlots = Object.values(multiPdfFiles).filter((s) => s.file);
+    if (activeSlots.length === 0) {
+      return pushToast("Please upload at least 1 section PDF (Quants, Reasoning, or English).");
+    }
+
+    setPdfStatus("extracting");
+    setPdfPageInfo("Processing multi-section PDFs...");
+    setGeneratedTest(null);
+    setApprovedQuestions({});
+
+    try {
+      setPdfStatus("analyzing");
+      setExtractionStartTime(Date.now());
+
+      if (!window.pdfjsLib) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
+          script.onload = resolve;
+          script.onerror = reject;
+          document.body.appendChild(script);
+        });
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+      }
+
+      let combinedRawQuestions = [];
+      let totalTimeMinutes = 0;
+
+      for (const slot of activeSlots) {
+        setPdfPageInfo(`Extracting section: ${slot.name}...`);
+        const arrayBuffer = await slot.file.arrayBuffer();
+        const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let fullText = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+        }
+
+        const sectionQuestions = parseQuestionsFromPDFText(fullText, slot.name, slot.count);
+        combinedRawQuestions.push(...sectionQuestions);
+        totalTimeMinutes += parseInt(slot.time) || 20;
+      }
+
+      if (combinedRawQuestions.length === 0) {
+        throw new Error("No questions could be extracted from the uploaded section PDFs.");
+      }
+
+      const result = {
+        title: f.title.trim() || `${f.category} Full Mock (3-Section)`,
+        category: f.category,
+        subject: "Full Mock",
+        topic: "All 3 Sections",
+        time: `${totalTimeMinutes} min`,
+        durationMinutes: totalTimeMinutes,
+        isSectionalTimed: true,
+        questions: combinedRawQuestions.length,
+        rawExtractedQuestions: combinedRawQuestions,
+        color,
+        isFree: f.isFree,
+      };
+
+      const finalQuestions = combinedRawQuestions.map((q, idx) => {
+        const finalLetter = q.source_answer || "A";
+        const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
+        const optKeys = Object.keys(q.options || {}).sort();
+        const optionsArray = optKeys.length > 0 ? optKeys.map(k => q.options[k]) : ["Option A", "Option B", "Option C", "Option D"];
+
+        return {
+          id: `pdf_q_${Date.now()}_${idx}`,
+          section: q.section || "General",
+          passage: q.passage || "",
+          question: q.question_text || `Question ${idx + 1}`,
+          options: optionsArray,
+          correctAnswerIndex: ansIndex < optionsArray.length ? ansIndex : 0,
+          explanation: q.explanation || "Verification pending."
+        };
+      });
+
+      const draftTest = { ...result, questionsList: finalQuestions, id: "draft_" + Date.now() };
+      setGeneratedTest(draftTest);
+      setPdfStatus("done");
+      pushToast(`✅ Multi-Section Mock extracted! ${combinedRawQuestions.length} questions ready to review.`);
+    } catch (err) {
+      console.error(err);
+      setPdfStatus("error");
+      setPdfPageInfo(err.message || "Error processing multi-section PDFs.");
+      pushToast(err.message || "Error processing multi-section PDFs.");
+    }
+  };
             let optMatch;
             while ((optMatch = optRegex.exec(block)) !== null) {
                if (firstOptIndex === -1) firstOptIndex = optMatch.index;
@@ -552,7 +671,13 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             onClick={() => setMode("pdf")}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === "pdf" ? "bg-white shadow-card text-brand-700" : "text-ink-muted hover:text-ink-soft"}`}
           >
-            <FileUp size={16} className="text-emerald-600" /> 📄 Upload PYQ Paper (PDF)
+            <FileUp size={16} className="text-emerald-600" /> 📄 Single PDF PYQ
+          </button>
+          <button
+            onClick={() => setMode("multipdf")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === "multipdf" ? "bg-white shadow-card text-amber-700 font-bold" : "text-ink-muted hover:text-ink-soft"}`}
+          >
+            <FileUp size={16} className="text-amber-500" /> 🏆 Full 3-Section Mock (3 PDFs)
           </button>
           <button
             onClick={() => setMode("manual")}
@@ -682,6 +807,99 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               </div>
 
               {/* Removed redundant publish button, PDF auto-publishes and updates via Review Panel */}
+            </div>
+          )}
+
+          {mode === "multipdf" && (
+            <div className="pt-4 border-t border-black/5 space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 leading-relaxed">
+                <p className="font-bold text-amber-950 text-sm mb-1">🏆 3-Section Full Mock Builder</p>
+                Upload individual section PDF papers below (e.g. Quants, Reasoning, English). The system will extract and combine them into a single Full Mock test with sectional timers.
+              </div>
+
+              <div className="space-y-3">
+                {[
+                  { key: "quants", title: "1. Quantitative Aptitude PDF", color: "border-blue-200 bg-blue-50/30" },
+                  { key: "reasoning", title: "2. Reasoning Ability PDF", color: "border-purple-200 bg-purple-50/30" },
+                  { key: "english", title: "3. English Language PDF", color: "border-emerald-200 bg-emerald-50/30" },
+                ].map((sec) => (
+                  <div key={sec.key} className={`border rounded-2xl p-4 ${sec.color} space-y-3`}>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-ink text-xs">{sec.title}</span>
+                      {multiPdfFiles[sec.key].file && (
+                        <span className="text-[10px] bg-emerald-600 text-white font-bold px-2 py-0.5 rounded-full">✓ Loaded</span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-semibold text-ink-muted block mb-1">Section Time</label>
+                        <input
+                          type="text"
+                          className="input text-xs py-1"
+                          value={multiPdfFiles[sec.key].time}
+                          onChange={(e) => setMultiPdfFiles(prev => ({
+                            ...prev,
+                            [sec.key]: { ...prev[sec.key], time: e.target.value }
+                          }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-ink-muted block mb-1">Target Questions</label>
+                        <input
+                          type="number"
+                          className="input text-xs py-1"
+                          value={multiPdfFiles[sec.key].count}
+                          onChange={(e) => setMultiPdfFiles(prev => ({
+                            ...prev,
+                            [sec.key]: { ...prev[sec.key], count: +e.target.value }
+                          }))}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <input
+                        type="file"
+                        accept=".pdf"
+                        id={`multi_pdf_${sec.key}`}
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setMultiPdfFiles(prev => ({
+                              ...prev,
+                              [sec.key]: { ...prev[sec.key], file }
+                            }));
+                          }
+                        }}
+                      />
+                      <label
+                        htmlFor={`multi_pdf_${sec.key}`}
+                        className="btn-soft w-full text-xs py-2 cursor-pointer flex items-center justify-center gap-1.5 bg-white border border-black/10 hover:bg-black/5 text-ink-soft font-semibold"
+                      >
+                        <FileUp size={14} className="text-brand-600" />
+                        {multiPdfFiles[sec.key].file ? multiPdfFiles[sec.key].file.name : `Select ${sec.title.split(" ")[1]} PDF`}
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleMultiPDFUpload}
+                disabled={pdfStatus === "extracting" || pdfStatus === "analyzing"}
+                className="btn-primary w-full py-3.5 bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-sm shadow-amber-500/20 flex items-center justify-center gap-2"
+              >
+                {pdfStatus === "extracting" || pdfStatus === "analyzing" ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" /> Extracting 3-Section Mock...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={18} /> Process & Build Full 3-Section Mock Test
+                  </>
+                )}
+              </button>
             </div>
           )}
 
