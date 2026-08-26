@@ -311,44 +311,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     }
   };
 
-  const handlePDFUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      return pushToast("Please upload a PDF file only.");
-    }
-    setPdfFile(file);
-    setPdfStatus("extracting");
-    setPdfPageInfo("");
-    setGeneratedTest(null);
-    setApprovedQuestions({});
-
-    try {
-      setPdfStatus("analyzing");
-      setExtractionStartTime(Date.now());
-      setPdfPageInfo("Extracting text from PDF locally...");
-      
-      // Dynamically load PDF.js to avoid Vite worker bundling issues
-      if (!window.pdfjsLib) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
-          script.onload = resolve;
-          script.onerror = reject;
-          document.body.appendChild(script);
-        });
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
-      }
-
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      let fullText = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        fullText += textContent.items.map(item => item.str).join(" ") + "\n";
-      }
-
   const parseQuestionsFromPDFText = (fullText, sectionName = "General", targetCount = 35) => {
     const questions = [];
     const normalized = " " + fullText.replace(/\n+/g, ' ').replace(/\s+/g, ' ');
@@ -477,27 +439,48 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       pushToast(err.message || "Error processing multi-section PDFs.");
     }
   };
-            let optMatch;
-            while ((optMatch = optRegex.exec(block)) !== null) {
-               if (firstOptIndex === -1) firstOptIndex = optMatch.index;
-               options[optMatch[1].toUpperCase()] = optMatch[2].trim();
-            }
-            
-            if (firstOptIndex !== -1) {
-                questionText = block.substring(0, firstOptIndex).trim();
-            }
-            
-            if (questionText && Object.keys(options).length >= 2) {
-                questions.push({
-                    question_text: questionText,
-                    options: options,
-                    source_answer: "A",
-                    explanation: "Answer not detected. Verification needed."
-                });
-            }
-        }
-        return questions.slice(0, Math.max(1, Math.min(200, Number(f.questions) || 20)));
-      })();
+
+  const handlePDFUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      return pushToast("Please upload a PDF file only.");
+    }
+    setPdfFile(file);
+    setPdfStatus("extracting");
+    setPdfPageInfo("");
+    setGeneratedTest(null);
+    setApprovedQuestions({});
+
+    try {
+      setPdfStatus("analyzing");
+      setExtractionStartTime(Date.now());
+      setPdfPageInfo("Extracting text from PDF locally...");
+      
+      // Dynamically load PDF.js to avoid Vite worker bundling issues
+      if (!window.pdfjsLib) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
+          script.onload = resolve;
+          script.onerror = reject;
+          document.body.appendChild(script);
+        });
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+      }
+
+      setPdfPageInfo("Parsing questions from text locally using regex...");
+
+      const extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", f.questions);
 
       if (extractedQuestions.length === 0) {
         throw new Error("NO_QUESTIONS_FOUND: Could not extract any questions using regex. Make sure the PDF contains standard numbered questions (e.g. '1. Question...') and options (e.g. 'A. Option...').");
