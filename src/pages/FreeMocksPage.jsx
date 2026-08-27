@@ -7,6 +7,7 @@ import { useApp } from "../store.jsx";
 import MockTestRunner from "../components/MockTestRunner.jsx";
 import { CATEGORIES } from "../data.js";
 import { useAuth } from "../auth.jsx";
+import { fsAddAdmission } from "../backend.js";
 
 // Map groups to a nice label and filter condition
 const FREE_CATEGORIES = [
@@ -73,6 +74,17 @@ export default function FreeMocksPage() {
     setLeadLoading(true);
     try {
       await updateUserPhone(leadPhone, leadName);
+      
+      // Save lead into Admission Leads database
+      await fsAddAdmission({
+        fullName: leadName || user?.name || "Free Mock Student",
+        mobileNumber: leadPhone,
+        emailId: user?.email || "",
+        modeOfLearning: "Free Mock Test Student",
+        targetExam: showLeadGen?.category || activeTab || "Banking",
+        source: "Free Mock Test Lead Prompt"
+      }).catch(err => console.warn("Failed to add admission lead", err));
+
       incrementMocksTaken();
       setActiveTest(showLeadGen);
       setShowLeadGen(null);

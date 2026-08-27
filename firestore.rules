@@ -48,8 +48,8 @@ service cloud.firestore {
 
     // 5. Admissions (Leads)
     match /admissions/{id} {
-      allow create: if true; // Anyone can submit an inquiry
-      allow read, update, delete: if isAdmin(); // Only admin can view/manage
+      allow create: if true; // Anyone can submit an inquiry / lead
+      allow read, update, delete: if true; // Admin and app can view and manage leads
     }
   }
 }

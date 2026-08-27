@@ -1657,38 +1657,46 @@ export function AdmissionsPage() {
                 <th className="py-3 px-4 font-medium">Date</th>
                 <th className="py-3 px-4 font-medium">Name</th>
                 <th className="py-3 px-4 font-medium">Mobile Number</th>
-                <th className="py-3 px-4 font-medium">Email</th>
+                <th className="py-3 px-4 font-medium">Email ID</th>
+                <th className="py-3 px-4 font-medium">Target Exam</th>
                 <th className="py-3 px-4 font-medium">Mode of Learning</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
               {admissions.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="py-8 text-center text-ink-muted">
-                    No admission inquiries yet.
+                  <td colSpan="6" className="py-8 text-center text-ink-muted">
+                    No admission inquiries yet. Leads submitted from website popups & free mocks will appear here live!
                   </td>
                 </tr>
               ) : (
                 admissions.map((lead) => (
                   <tr key={lead.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-3 px-4 text-ink-muted">
+                    <td className="py-3 px-4 text-ink-muted text-xs font-semibold">
                       {new Date(lead.createdAt?.toMillis ? lead.createdAt.toMillis() : Date.now()).toLocaleDateString("en-IN", {
                         day: "numeric", month: "short", year: "numeric"
                       })}
                     </td>
-                    <td className="py-3 px-4 font-medium text-ink">{lead.fullName}</td>
-                    <td className="py-3 px-4 font-medium text-brand-600">
-                      <a href={`tel:${lead.mobileNumber}`}>{lead.mobileNumber}</a>
+                    <td className="py-3 px-4 font-bold text-ink">{lead.fullName || lead.name || "Student"}</td>
+                    <td className="py-3 px-4 font-bold text-brand-600">
+                      <a href={`tel:${lead.mobileNumber}`} className="hover:underline flex items-center gap-1">
+                        📞 {lead.mobileNumber}
+                      </a>
                     </td>
-                    <td className="py-3 px-4 text-ink-muted">
+                    <td className="py-3 px-4 text-ink-muted text-xs">
                       {lead.emailId ? (
-                        <a href={`mailto:${lead.emailId}`}>{lead.emailId}</a>
+                        <a href={`mailto:${lead.emailId}`} className="hover:underline">{lead.emailId}</a>
                       ) : (
                         "-"
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      <Badge>{lead.modeOfLearning}</Badge>
+                      <span className="bg-amber-100 text-amber-900 font-bold px-2.5 py-1 rounded-lg text-xs">
+                        {lead.targetExam || "General"}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <Badge>{lead.modeOfLearning || "Online"}</Badge>
                     </td>
                   </tr>
                 ))
