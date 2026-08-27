@@ -209,6 +209,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           if (approvalStatus.passage !== undefined) {
             finalQuestions[idx].passage = approvalStatus.passage;
           }
+          if (approvalStatus.section !== undefined) {
+            finalQuestions[idx].section = approvalStatus.section;
+          }
           if (approvalStatus.questionText !== undefined) {
             finalQuestions[idx].question = approvalStatus.questionText;
           }
@@ -582,6 +585,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       [idx]: {
         ...prev[idx],
         passage: passageText
+      }
+    }));
+  };
+
+  const editQuestionSection = (idx, sectionName) => {
+    setApprovedQuestions(prev => ({
+      ...prev,
+      [idx]: {
+        ...prev[idx],
+        section: sectionName
       }
     }));
   };
@@ -1056,7 +1069,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             <Eye size={18} className="text-brand-600" /> {mode === "manual" ? "Manual Test Preview" : mode === "pdf" ? "📄 Extracted Questions Preview" : "AI Question Bank Preview"}
           </h3>
 
-          {(mode === "pdf" && generatedTest) ? (
+          {((mode === "pdf" || mode === "multipdf") && generatedTest) ? (
             <div className="space-y-3">
               <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
                 <p className="font-bold text-emerald-900 text-sm">{generatedTest.title}</p>
@@ -1087,7 +1100,18 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       <div className="flex items-start justify-between gap-4 mb-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="px-1.5 py-0.5 rounded bg-black/10 text-ink-soft text-[10px] font-bold">Q{idx + 1}</span>
-                          <span className="px-1.5 py-0.5 rounded bg-brand-100 text-brand-800 text-[10px] font-bold">{q.subject} / {q.topic}</span>
+                          
+                          <select
+                            className="input text-[10px] py-0.5 px-1.5 font-bold border-brand-200 bg-brand-50 text-brand-900 rounded"
+                            value={approvedQuestions[idx]?.section || q.section || "General"}
+                            onChange={(e) => editQuestionSection(idx, e.target.value)}
+                          >
+                            <option value="Quantitative Aptitude">Quantitative Aptitude</option>
+                            <option value="Reasoning Ability">Reasoning Ability</option>
+                            <option value="English Language">English Language</option>
+                            <option value="General Awareness">General Awareness</option>
+                            <option value="General">General</option>
+                          </select>
                           
                           {q.answer_status === "VERIFIED" && <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px] font-bold">VERIFIED</span>}
                           {q.answer_status === "MISMATCH" && <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] font-bold">MISMATCH</span>}
@@ -1122,10 +1146,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       </div>
 
                       <div className="mb-3">
+                        <label className="text-[10px] font-bold text-ink-muted mb-1 block">Paragraph / Passage Directions Context (Optional):</label>
                         <textarea
                           className="input text-xs min-h-[60px] bg-white border border-black/10"
                           placeholder="Paragraph Context (Optional) - e.g. Read the following passage..."
-                          value={approvedQuestions[idx]?.passage || ""}
+                          value={approvedQuestions[idx]?.passage ?? (q.passage || "")}
                           onChange={(e) => editPassage(idx, e.target.value)}
                         />
                       </div>
