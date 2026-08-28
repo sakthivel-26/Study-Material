@@ -1322,25 +1322,23 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           return (
                             <div
                               key={key}
-                              className={`flex items-center gap-2 p-2 rounded-xl border transition-all ${
+                              onClick={() => {
+                                editAnswer(idx, key);
+                                toggleApproveQuestion(idx, true);
+                              }}
+                              className={`flex items-center gap-2 p-2 rounded-xl border transition-all cursor-pointer ${
                                 isRight 
                                   ? "bg-emerald-100/90 border-emerald-400 text-emerald-950 font-bold shadow-sm ring-2 ring-emerald-500/30" 
-                                  : "bg-black/[0.03] hover:bg-black/[0.06] border-black/10 text-ink"
+                                  : "bg-black/[0.03] hover:bg-black/[0.06] border-black/10 text-ink hover:border-emerald-300"
                               }`}
                             >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  editAnswer(idx, key);
-                                  toggleApproveQuestion(idx, true);
-                                }}
-                                className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 cursor-pointer ${
-                                  isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-black/10 text-ink hover:bg-emerald-600 hover:text-white'
+                              <span
+                                className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 ${
+                                  isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-black/10 text-ink'
                                 }`}
-                                title="Click to set as Correct Answer"
                               >
                                 {key}
-                              </button>
+                              </span>
 
                               <input
                                 type="radio"
@@ -1354,26 +1352,25 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                               />
 
                               <input 
-                                className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium"
+                                className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
                                 value={approvedQuestions[idx]?.options?.[key] ?? opt}
-                                onChange={(e) => editOptionText(idx, key, e.target.value)}
-                                placeholder={`Option ${key}`}
-                              />
-
-                              <button
-                                type="button"
                                 onClick={() => {
                                   editAnswer(idx, key);
                                   toggleApproveQuestion(idx, true);
                                 }}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer ${
+                                onChange={(e) => editOptionText(idx, key, e.target.value)}
+                                placeholder={`Option ${key}`}
+                              />
+
+                              <span
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all ${
                                   isRight 
                                     ? "bg-emerald-600 text-white shadow-sm" 
-                                    : "bg-black/5 text-ink-soft hover:bg-emerald-100 hover:text-emerald-800"
+                                    : "bg-black/5 text-ink-soft"
                                 }`}
                               >
-                                {isRight ? "✓ Correct" : "Mark Correct"}
-                              </button>
+                                {isRight ? "✓ Correct" : "Select"}
+                              </span>
                             </div>
                           );
                         })}
@@ -1799,17 +1796,20 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             const isCorrect = (q.correctAnswerIndex ?? 0) === optIdx;
                             const letter = String.fromCharCode(65 + optIdx);
                             return (
-                              <div key={optIdx} className={`flex items-center gap-2 p-2 rounded-xl border transition-all ${isCorrect ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/20' : 'bg-white border-black/10'}`}>
-                                <button
-                                  type="button"
-                                  onClick={() => updateEditingQuestion(qIdx, "correctAnswerIndex", optIdx)}
-                                  className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 cursor-pointer ${
-                                    isCorrect ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-emerald-600 hover:text-white'
+                              <div
+                                key={optIdx}
+                                onClick={() => updateEditingQuestion(qIdx, "correctAnswerIndex", optIdx)}
+                                className={`flex items-center gap-2 p-2 rounded-xl border transition-all cursor-pointer ${
+                                  isCorrect ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/20 font-bold' : 'bg-white border-black/10 hover:border-emerald-300'
+                                }`}
+                              >
+                                <span
+                                  className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 ${
+                                    isCorrect ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700'
                                   }`}
-                                  title="Click to set as Correct Answer"
                                 >
                                   {letter}
-                                </button>
+                                </span>
                                 <input
                                   type="radio"
                                   name={`correct_ans_${editingTest.id}_${qIdx}`}
@@ -1818,20 +1818,19 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                   className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
                                 />
                                 <input
-                                  className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium"
+                                  className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
                                   value={opt}
+                                  onClick={() => updateEditingQuestion(qIdx, "correctAnswerIndex", optIdx)}
                                   onChange={(e) => updateEditingOption(qIdx, optIdx, e.target.value)}
                                   placeholder={`Option ${letter}`}
                                 />
-                                <button
-                                  type="button"
-                                  onClick={() => updateEditingQuestion(qIdx, "correctAnswerIndex", optIdx)}
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer ${
-                                    isCorrect ? "bg-emerald-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-800"
+                                <span
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all ${
+                                    isCorrect ? "bg-emerald-600 text-white shadow-sm" : "bg-slate-100 text-slate-600"
                                   }`}
                                 >
-                                  {isCorrect ? "✓ Correct" : "Mark Correct"}
-                                </button>
+                                  {isCorrect ? "✓ Correct" : "Select"}
+                                </span>
                               </div>
                             );
                           })}
