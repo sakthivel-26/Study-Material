@@ -1323,17 +1323,17 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             <div
                               key={key}
                               onClick={() => {
-                                editAnswer(idx, key);
+                                editCorrectAnswer(idx, key);
                                 toggleApproveQuestion(idx, true);
                               }}
-                              className={`flex items-center gap-2 p-2 rounded-xl border transition-all cursor-pointer ${
+                              className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all cursor-pointer select-none ${
                                 isRight 
                                   ? "bg-emerald-100/90 border-emerald-400 text-emerald-950 font-bold shadow-sm ring-2 ring-emerald-500/30" 
                                   : "bg-black/[0.03] hover:bg-black/[0.06] border-black/10 text-ink hover:border-emerald-300"
                               }`}
                             >
                               <span
-                                className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 ${
+                                className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-all ${
                                   isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-black/10 text-ink'
                                 }`}
                               >
@@ -1345,7 +1345,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                 name={`teacher_review_ans_${idx}`}
                                 checked={isRight}
                                 onChange={() => {
-                                  editAnswer(idx, key);
+                                  editCorrectAnswer(idx, key);
                                   toggleApproveQuestion(idx, true);
                                 }}
                                 className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
@@ -1354,23 +1354,28 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                               <input 
                                 className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
                                 value={approvedQuestions[idx]?.options?.[key] ?? opt}
-                                onClick={() => {
-                                  editAnswer(idx, key);
-                                  toggleApproveQuestion(idx, true);
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                 }}
                                 onChange={(e) => editOptionText(idx, key, e.target.value)}
                                 placeholder={`Option ${key}`}
                               />
 
-                              <span
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all ${
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  editCorrectAnswer(idx, key);
+                                  toggleApproveQuestion(idx, true);
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer ${
                                   isRight 
                                     ? "bg-emerald-600 text-white shadow-sm" 
-                                    : "bg-black/5 text-ink-soft"
+                                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
                                 }`}
                               >
-                                {isRight ? "✓ Correct" : "Select"}
-                              </span>
+                                {isRight ? "✓ Correct" : "Mark Correct"}
+                              </button>
                             </div>
                           );
                         })}
@@ -1413,17 +1418,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             <p><strong>AI Calc:</strong> <span className="text-emerald-600">{q.ai_verified_answer}</span></p>
                           </div>
                           <p className="text-[11px] text-ink-soft bg-black/5 p-2 rounded italic">" {q.verification_explanation} "</p>
-                          
-                          <div className="pt-2 flex items-center gap-2">
-                            <label className="text-[10px] font-bold text-ink-muted">Set Final Answer:</label>
-                            <select 
-                              className="input text-xs py-1 px-2 h-auto"
-                              value={finalAnswer}
-                              onChange={(e) => editCorrectAnswer(idx, e.target.value)}
-                            >
-                              {Object.keys(q.options || {}).map(k => <option key={k} value={k}>{k}</option>)}
-                            </select>
-                          </div>
                         </div>
                       )}
                     </div>
