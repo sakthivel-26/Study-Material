@@ -100,18 +100,15 @@ export default function MockTestRunner({ test, onClose }) {
   // Countdown Timer
   useEffect(() => {
     if (submitted) return;
+    if (timeLeft <= 0) {
+      handleSubmitTest();
+      return;
+    }
     const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          handleSubmitTest();
-          return 0;
-        }
-        return prev - 1;
-      });
+      setTimeLeft((prev) => Math.max(0, prev - 1));
     }, 1000);
     return () => clearInterval(timer);
-  }, [submitted]);
+  }, [timeLeft, submitted]);
 
   // Mark visited
   useEffect(() => {
@@ -174,9 +171,10 @@ export default function MockTestRunner({ test, onClose }) {
 
     questions.forEach((q) => {
       const studentAns = answers[q.id];
+      const correctIdx = typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0;
       if (studentAns === undefined) {
         unattemptedCount++;
-      } else if (studentAns === q.correctAnswerIndex) {
+      } else if (studentAns === correctIdx) {
         correctCount++;
       } else {
         incorrectCount++;
@@ -508,18 +506,21 @@ export default function MockTestRunner({ test, onClose }) {
               {questions
                 .filter((q) => {
                   const studentAns = answers[q.id];
-                  if (solutionFilter === "correct") return studentAns === q.correctAnswerIndex;
-                  if (solutionFilter === "incorrect") return studentAns !== undefined && studentAns !== q.correctAnswerIndex;
+                  const correctIdx = typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0;
+                  if (solutionFilter === "correct") return studentAns === correctIdx;
+                  if (solutionFilter === "incorrect") return studentAns !== undefined && studentAns !== correctIdx;
                   if (solutionFilter === "unattempted") return studentAns === undefined;
                   return true;
                 })
                 .map((q, idx) => {
                   const studentAns = answers[q.id];
-                  const isCorrect = studentAns === q.correctAnswerIndex;
+                  const correctIdx = typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0;
+                  const isCorrect = studentAns === correctIdx;
                   const isUnattempted = studentAns === undefined;
+                  const qImg = q.imageUrl || q.image || q.chartUrl || q.img;
 
                   return (
-                    <div key={q.id} className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
+                    <div key={q.id || idx} className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-bold text-brand-400">Question {idx + 1} ({q.section || "General"})</span>
                         <span className={`px-2.5 py-1 rounded-md font-semibold ${isCorrect ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : isUnattempted ? "bg-slate-900 text-slate-400" : "bg-rose-950 text-rose-400 border border-rose-800"}`}>
@@ -530,40 +531,50 @@ export default function MockTestRunner({ test, onClose }) {
                       {q.passage && (
                         <div className="p-4 rounded-xl bg-slate-900 border border-slate-800/80 mb-3">
                           <p className="text-[10px] font-bold text-brand-400 uppercase tracking-wider mb-1">Directions / Data</p>
-                          <p className="text-xs text-slate-400 whitespace-pre-line leading-relaxed">{q.passage}</p>
+                          <p className="text-xs text-slate-300 whitespace-pre-line leading-relaxed">{formatMathText(q.passage)}</p>
                         </div>
                       )}
-                      {q.imageUrl && (
-                        <div className="rounded-xl overflow-hidden border border-slate-800 mb-3 max-w-sm bg-white/5 p-1">
-                          <img src={q.imageUrl} alt="Question Chart" className="w-full h-auto object-contain rounded-lg mix-blend-screen" />
+
+                      {qImg && (
+                        <div className="my-3 rounded-xl border border-slate-700/80 max-w-xl bg-white p-2.5 shadow-lg overflow-hidden">
+                          <img src={qImg} alt="Question Chart" className="w-full max-h-[300px] object-contain rounded-lg block" />
                         </div>
                       )}
-                      <p className="font-semibold text-slate-200 text-sm whitespace-pre-line">{q.question}</p>
+
+                      <p className="font-semibold text-slate-100 text-sm whitespace-pre-line leading-relaxed">
+                        {formatMathText(q.question)}
+                      </p>
 
                       <div className="grid sm:grid-cols-2 gap-2 text-xs">
                         {q.options?.map((opt, oIdx) => {
-                          const isRightChoice = oIdx === q.correctAnswerIndex;
+                          const isRightChoice = oIdx === correctIdx;
                           const isStudentChoice = oIdx === studentAns;
 
                           let bgClass = "bg-slate-900 border-slate-800 text-slate-400";
-                          if (isRightChoice) bgClass = "bg-emerald-950/80 border-emerald-600 text-emerald-200 font-bold";
-                          else if (isStudentChoice && !isRightChoice) bgClass = "bg-rose-950/80 border-rose-600 text-rose-200";
+                          if (isRightChoice) bgClass = "bg-emerald-950/80 border-emerald-600 text-emerald-200 font-bold shadow-sm ring-1 ring-emerald-500/50";
+                          else if (isStudentChoice && !isRightChoice) bgClass = "bg-rose-950/80 border-rose-600 text-rose-200 font-semibold";
 
                           return (
-                            <div key={oIdx} className={`p-3 rounded-xl border flex items-center gap-3 ${bgClass}`}>
-                              <span className="w-5 h-5 rounded bg-black/30 flex items-center justify-center text-[10px] font-bold">
-                                {String.fromCharCode(65 + oIdx)}
-                              </span>
-                              <span>{opt}</span>
+                            <div key={oIdx} className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${bgClass}`}>
+                              <div className="flex items-center gap-3">
+                                <span className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold ${isRightChoice ? 'bg-emerald-600 text-white' : isStudentChoice ? 'bg-rose-600 text-white' : 'bg-black/30 text-slate-400'}`}>
+                                  {String.fromCharCode(65 + oIdx)}
+                                </span>
+                                <span>{formatMathText(opt)}</span>
+                              </div>
+                              {isRightChoice && <span className="text-emerald-400 font-extrabold text-[11px] shrink-0">✓ Correct Answer</span>}
+                              {isStudentChoice && !isRightChoice && <span className="text-rose-400 font-bold text-[11px] shrink-0">Your Choice ✗</span>}
                             </div>
                           );
                         })}
                       </div>
 
                       {/* Solution Explanation */}
-                      <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 space-y-1">
-                        <p className="font-bold text-amber-400 flex items-center gap-1">💡 Solution Explanation:</p>
-                        <p className="leading-relaxed text-slate-300">{q.explanation}</p>
+                      <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 space-y-1.5">
+                        <p className="font-bold text-amber-400 flex items-center gap-1">💡 Solution &amp; Explanation:</p>
+                        <p className="leading-relaxed text-slate-200 whitespace-pre-line">
+                          {formatMathText(q.explanation) || `Correct Option is (${String.fromCharCode(65 + correctIdx)}): ${formatMathText(q.options?.[correctIdx] || "")}`}
+                        </p>
                       </div>
                     </div>
                   );
