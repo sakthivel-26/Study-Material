@@ -32,7 +32,7 @@ export default function MockTestRunner({ test, onClose }) {
           explanation: q.verification_explanation || "Verified answer.",
           section: q.section || "General",
           passage: q.passage || "",
-          imageUrl: q.imageUrl || ""
+          imageUrl: q.imageUrl || q.image || q.chartUrl || q.img || ""
         };
       })
     : [];
@@ -328,12 +328,6 @@ export default function MockTestRunner({ test, onClose }) {
                 </div>
               )}
 
-              {currentQ.imageUrl && (
-                <div className="rounded-xl overflow-hidden border border-slate-700 max-w-lg bg-white/5 p-2">
-                  <img src={currentQ.imageUrl} alt="Question Chart" className="w-full h-auto object-contain rounded-lg mix-blend-screen" />
-                </div>
-              )}
-
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between mb-2">
                   {currentQ.passage ? (
@@ -357,6 +351,17 @@ export default function MockTestRunner({ test, onClose }) {
                   {formatMathText(currentQ.question)}
                 </p>
               </div>
+
+              {/* Question Image / Chart Attachment - Right Above Options */}
+              {(currentQ.imageUrl || currentQ.image || currentQ.chartUrl || currentQ.img) && (
+                <div className="my-4 rounded-xl border border-slate-700/80 max-w-xl bg-white p-2.5 shadow-xl overflow-hidden">
+                  <img
+                    src={currentQ.imageUrl || currentQ.image || currentQ.chartUrl || currentQ.img}
+                    alt="Question Chart / Image"
+                    className="w-full max-h-[350px] object-contain rounded-lg block"
+                  />
+                </div>
+              )}
 
               {/* Options List */}
               <div className="space-y-3 pt-4">
