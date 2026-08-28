@@ -1322,16 +1322,26 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           return (
                             <div
                               key={key}
-                              onClick={() => {
-                                editAnswer(idx, key);
-                                toggleApproveQuestion(idx, true);
-                              }}
-                              className={`flex items-center gap-2 p-2 rounded-xl border transition-all cursor-pointer ${
+                              className={`flex items-center gap-2 p-2 rounded-xl border transition-all ${
                                 isRight 
                                   ? "bg-emerald-100/90 border-emerald-400 text-emerald-950 font-bold shadow-sm ring-2 ring-emerald-500/30" 
                                   : "bg-black/[0.03] hover:bg-black/[0.06] border-black/10 text-ink"
                               }`}
                             >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  editAnswer(idx, key);
+                                  toggleApproveQuestion(idx, true);
+                                }}
+                                className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 cursor-pointer ${
+                                  isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-black/10 text-ink hover:bg-emerald-600 hover:text-white'
+                                }`}
+                                title="Click to set as Correct Answer"
+                              >
+                                {key}
+                              </button>
+
                               <input
                                 type="radio"
                                 name={`teacher_review_ans_${idx}`}
@@ -1342,16 +1352,28 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                 }}
                                 className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
                               />
-                              <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-extrabold shrink-0 ${isRight ? 'bg-emerald-600 text-white' : 'bg-black/10 text-ink-muted'}`}>
-                                {key}
-                              </span>
+
                               <input 
                                 className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium"
                                 value={approvedQuestions[idx]?.options?.[key] ?? opt}
-                                onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => editOptionText(idx, key, e.target.value)}
+                                placeholder={`Option ${key}`}
                               />
-                              {isRight && <span className="text-emerald-700 font-extrabold text-[11px] shrink-0 pr-1">✓ Right Answer</span>}
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  editAnswer(idx, key);
+                                  toggleApproveQuestion(idx, true);
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer ${
+                                  isRight 
+                                    ? "bg-emerald-600 text-white shadow-sm" 
+                                    : "bg-black/5 text-ink-soft hover:bg-emerald-100 hover:text-emerald-800"
+                                }`}
+                              >
+                                {isRight ? "✓ Correct" : "Mark Correct"}
+                              </button>
                             </div>
                           );
                         })}
@@ -1775,25 +1797,41 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         <div className="grid sm:grid-cols-2 gap-2">
                           {q.options?.map((opt, optIdx) => {
                             const isCorrect = (q.correctAnswerIndex ?? 0) === optIdx;
+                            const letter = String.fromCharCode(65 + optIdx);
                             return (
-                              <div key={optIdx} className={`flex items-center gap-2 p-1.5 rounded-lg border ${isCorrect ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-black/10'}`}>
+                              <div key={optIdx} className={`flex items-center gap-2 p-2 rounded-xl border transition-all ${isCorrect ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/20' : 'bg-white border-black/10'}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => updateEditingQuestion(qIdx, "correctAnswerIndex", optIdx)}
+                                  className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 cursor-pointer ${
+                                    isCorrect ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-emerald-600 hover:text-white'
+                                  }`}
+                                  title="Click to set as Correct Answer"
+                                >
+                                  {letter}
+                                </button>
                                 <input
                                   type="radio"
                                   name={`correct_ans_${editingTest.id}_${qIdx}`}
                                   checked={isCorrect}
                                   onChange={() => updateEditingQuestion(qIdx, "correctAnswerIndex", optIdx)}
-                                  className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                  className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
                                 />
-                                <span className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${isCorrect ? 'bg-emerald-600 text-white' : 'bg-black/5 text-ink-soft'}`}>
-                                  {String.fromCharCode(65 + optIdx)}
-                                </span>
                                 <input
-                                  className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1"
+                                  className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium"
                                   value={opt}
                                   onChange={(e) => updateEditingOption(qIdx, optIdx, e.target.value)}
-                                  placeholder={`Option ${String.fromCharCode(65 + optIdx)}`}
+                                  placeholder={`Option ${letter}`}
                                 />
-                                {isCorrect && <span className="text-emerald-600 font-bold text-xs mr-1">✓ Correct</span>}
+                                <button
+                                  type="button"
+                                  onClick={() => updateEditingQuestion(qIdx, "correctAnswerIndex", optIdx)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer ${
+                                    isCorrect ? "bg-emerald-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-800"
+                                  }`}
+                                >
+                                  {isCorrect ? "✓ Correct" : "Mark Correct"}
+                                </button>
                               </div>
                             );
                           })}
