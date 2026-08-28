@@ -2,8 +2,10 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Loader2, CheckCircle } from "lucide-react";
 import { fsAddAdmission } from "../backend.js";
+import { useAuth } from "../auth.jsx";
 
 export function AdmissionModal() {
+  const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -16,17 +18,18 @@ export function AdmissionModal() {
   });
 
   useEffect(() => {
-    // Check if user has already interacted with the modal
+    // Check if user has already interacted with the modal or submitted details
     const hasClosed = localStorage.getItem("ken_ias_admission_closed");
     const hasSubmitted = localStorage.getItem("ken_ias_admission_submitted");
+    const hasPhone = localStorage.getItem("user_phone_submitted") || user?.phone;
     
-    if (!hasClosed && !hasSubmitted) {
+    if (!hasClosed && !hasSubmitted && !hasPhone) {
       const timer = setTimeout(() => {
         setIsOpen(true);
       }, 20000); // 20 seconds
       return () => clearTimeout(timer);
     }
-  }, []);
+  }, [user]);
 
   const handleClose = () => {
     setIsOpen(false);
@@ -42,6 +45,8 @@ export function AdmissionModal() {
       await fsAddAdmission(formData);
       setIsSubmitted(true);
       localStorage.setItem("ken_ias_admission_submitted", "true");
+      localStorage.setItem("ken_ias_admission_closed", "true");
+      localStorage.setItem("user_phone_submitted", formData.mobileNumber);
       
       // Auto close after 3 seconds
       setTimeout(() => {

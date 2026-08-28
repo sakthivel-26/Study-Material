@@ -57,8 +57,10 @@ export default function FreeMocksPage() {
       return;
     }
     
+    const hasSubmittedLead = localStorage.getItem("ken_ias_admission_submitted") === "true" || !!localStorage.getItem("user_phone_submitted") || !!user?.phone;
+
     // Check if they need to provide mobile number
-    if (!user?.phone && getMocksTaken() >= 1) {
+    if (!hasSubmittedLead && getMocksTaken() >= 1) {
       setLeadName(user?.name || "");
       setShowLeadGen(test);
       return;
@@ -73,7 +75,17 @@ export default function FreeMocksPage() {
     setLeadError("");
     setLeadLoading(true);
     try {
-      await updateUserPhone(leadPhone, leadName);
+      if (leadPhone) {
+        localStorage.setItem("user_phone_submitted", leadPhone);
+        localStorage.setItem("ken_ias_admission_submitted", "true");
+        localStorage.setItem("ken_ias_admission_closed", "true");
+      }
+
+      try {
+        await updateUserPhone(leadPhone, leadName);
+      } catch (err) {
+        console.warn("updateUserPhone silent warning", err);
+      }
       
       // Save lead into Admission Leads database
       await fsAddAdmission({
