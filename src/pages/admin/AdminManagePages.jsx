@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import {
   ClipboardPlus, Users, Megaphone, TrendingUp, BookOpen, Plus, Search,
   Trash2, Send, Bell, Sparkles, Loader2, CheckCircle2, Eye, HelpCircle, X,
-  FileUp, FileText, Upload, Download, ShieldCheck, Image as ImageIcon
+  FileUp, FileText, Upload, Download, ShieldCheck, Image as ImageIcon, Edit3
 } from "lucide-react";
 import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
@@ -28,6 +28,124 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [extractionProgress, setExtractionProgress] = useState(null);
   const [verificationProgress, setVerificationProgress] = useState(null);
   const [extractionStartTime, setExtractionStartTime] = useState(null);
+
+  // Edit Existing Test Modal State
+  const [editingTest, setEditingTest] = useState(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const handleStartEditTest = (test) => {
+    let qList = [];
+    if (Array.isArray(test.questionsList) && test.questionsList.length > 0) {
+      qList = test.questionsList;
+    } else if (Array.isArray(test.questions)) {
+      qList = test.questions;
+    } else if (Array.isArray(test.rawExtractedQuestions)) {
+      qList = test.rawExtractedQuestions;
+    }
+
+    const normalizedQs = qList.map((q, idx) => {
+      let opts = q.options;
+      if (opts && typeof opts === "object" && !Array.isArray(opts)) {
+        const keys = Object.keys(opts).sort();
+        opts = keys.map(k => opts[k]);
+      }
+      if (!Array.isArray(opts) || opts.length === 0) {
+        opts = ["Option A", "Option B", "Option C", "Option D"];
+      }
+
+      return {
+        id: q.id || `q_${Date.now()}_${idx}`,
+        question: q.question || q.question_text || "",
+        options: opts,
+        correctAnswerIndex: typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0,
+        explanation: q.explanation || "",
+        section: q.section || "General",
+        passage: q.passage || "",
+        imageUrl: q.imageUrl || ""
+      };
+    });
+
+    setEditingTest({
+      ...test,
+      title: test.title || "Mock Test",
+      category: test.category || CATEGORIES[0].name,
+      time: test.time || "30 min",
+      isSectionalTimed: !!test.isSectionalTimed,
+      questionsList: JSON.parse(JSON.stringify(normalizedQs))
+    });
+  };
+
+  const updateEditingField = (field, value) => {
+    setEditingTest(prev => prev ? ({ ...prev, [field]: value }) : null);
+  };
+
+  const updateEditingQuestion = (qIdx, field, value) => {
+    setEditingTest(prev => {
+      if (!prev) return null;
+      const updatedList = [...prev.questionsList];
+      updatedList[qIdx] = { ...updatedList[qIdx], [field]: value };
+      return { ...prev, questionsList: updatedList };
+    });
+  };
+
+  const updateEditingOption = (qIdx, optIdx, text) => {
+    setEditingTest(prev => {
+      if (!prev) return null;
+      const updatedList = [...prev.questionsList];
+      const updatedOpts = [...updatedList[qIdx].options];
+      updatedOpts[optIdx] = text;
+      updatedList[qIdx] = { ...updatedList[qIdx], options: updatedOpts };
+      return { ...prev, questionsList: updatedList };
+    });
+  };
+
+  const addEditingQuestion = () => {
+    setEditingTest(prev => {
+      if (!prev) return null;
+      const newQ = {
+        id: `q_new_${Date.now()}`,
+        question: "",
+        options: ["", "", "", ""],
+        correctAnswerIndex: 0,
+        explanation: "",
+        section: "General",
+        passage: "",
+        imageUrl: ""
+      };
+      return { ...prev, questionsList: [...prev.questionsList, newQ] };
+    });
+  };
+
+  const removeEditingQuestion = (qIdx) => {
+    setEditingTest(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        questionsList: prev.questionsList.filter((_, idx) => idx !== qIdx)
+      };
+    });
+  };
+
+  const saveEditingTest = async () => {
+    if (!editingTest) return;
+    setIsSavingEdit(true);
+    try {
+      const finalObject = {
+        ...editingTest,
+        title: editingTest.title.trim() || "Untitled Mock Test",
+        questionsList: editingTest.questionsList,
+        questions: editingTest.questionsList.length
+      };
+      await updateMockTest(editingTest.id, finalObject);
+      setEditingTest(null);
+      pushToast("✅ Mock test updated & saved to Cloud!");
+    } catch (err) {
+      console.error(err);
+      pushToast("Failed to save mock test edits.");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
   const [extractionElapsed, setExtractionElapsed] = useState(0);
 
   // 3-Section Full Mock State
@@ -1428,21 +1546,322 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                     <h4 className="font-bold text-sm text-ink">{test.title}</h4>
                     <p className="text-xs text-ink-muted mt-1">{test.category} · {test.questions} Qs · {test.time}</p>
                   </div>
-                  <button
-                    onClick={() => {
-                      if (window.confirm("Are you sure you want to delete this mock test? This action cannot be undone.")) {
-                        deleteMockTest(test.id);
-                      }
-                    }}
-                    className="btn-soft px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-bold"
-                  >
-                    Delete Test
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleStartEditTest(test)}
+                      className="btn-soft px-3 py-1.5 bg-brand-50 hover:bg-brand-100 text-brand-700 rounded-lg text-xs font-bold flex items-center gap-1 border border-brand-200"
+                    >
+                      <Edit3 size={14} /> Edit / Modify Test
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Are you sure you want to delete this mock test? This action cannot be undone.")) {
+                          deleteMockTest(test.id);
+                        }
+                      }}
+                      className="btn-soft px-3 py-1.5 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-bold"
+                    >
+                      Delete Test
+                    </button>
+                  </div>
                 </div>
               ))
           )}
         </div>
       </div>
+
+      {/* Edit Test Modal */}
+      {editingTest && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-4xl max-h-[92vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-black/10">
+            
+            {/* Modal Header */}
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <Edit3 size={20} className="text-amber-400" />
+                <h3 className="font-bold text-base">Edit &amp; Modify Mock Test</h3>
+              </div>
+              <button onClick={() => setEditingTest(null)} className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+              
+              {/* Test Basic Controls */}
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-4">
+                <h4 className="font-bold text-xs text-ink uppercase tracking-wider">Test Settings</h4>
+                <div className="grid sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] font-bold text-ink-muted mb-1 block">Test Title</label>
+                    <input
+                      className="input text-xs font-bold"
+                      value={editingTest.title}
+                      onChange={(e) => updateEditingField("title", e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-ink-muted mb-1 block">Time Limit</label>
+                    <input
+                      className="input text-xs"
+                      value={editingTest.time}
+                      onChange={(e) => updateEditingField("time", e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="text-[11px] font-bold text-ink-muted mb-1 block">Category</label>
+                    <select
+                      className="input text-xs font-semibold bg-white"
+                      value={editingTest.category}
+                      onChange={(e) => updateEditingField("category", e.target.value)}
+                    >
+                      {CATEGORIES.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-center pt-5">
+                    <label className="flex items-center gap-2 text-xs font-bold text-ink cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500"
+                        checked={!!editingTest.isSectionalTimed}
+                        onChange={(e) => updateEditingField("isSectionalTimed", e.target.checked)}
+                      />
+                      Banking Sectional Timer Enabled (20 min/Section)
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Questions Manager */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-extrabold text-sm text-ink flex items-center gap-2">
+                    <BookOpen size={16} className="text-brand-600" /> Test Questions ({editingTest.questionsList.length})
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={addEditingQuestion}
+                    className="btn-soft text-xs px-3 py-1.5 text-brand-700 bg-brand-50 hover:bg-brand-100 flex items-center gap-1 border border-brand-200 font-bold"
+                  >
+                    <Plus size={14} /> Add New Question
+                  </button>
+                </div>
+
+                {editingTest.questionsList.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                    <p className="text-xs text-ink-muted">No questions in this test yet. Click "+ Add New Question" to add one.</p>
+                  </div>
+                ) : (
+                  editingTest.questionsList.map((q, qIdx) => (
+                    <div key={q.id || qIdx} className="p-4 rounded-xl border-2 border-black/10 bg-slate-50/50 space-y-3 relative">
+                      
+                      {/* Question Header */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded bg-brand-600 text-white flex items-center justify-center text-xs font-bold">
+                            {qIdx + 1}
+                          </span>
+                          <select
+                            className="input text-[11px] py-0.5 px-2 font-bold bg-white border-black/10 rounded"
+                            value={q.section || "General"}
+                            onChange={(e) => updateEditingQuestion(qIdx, "section", e.target.value)}
+                          >
+                            <option value="Quantitative Aptitude">Quantitative Aptitude</option>
+                            <option value="Reasoning Ability">Reasoning Ability</option>
+                            <option value="English Language">English Language</option>
+                            <option value="General Awareness">General Awareness</option>
+                            <option value="General">General</option>
+                          </select>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => removeEditingQuestion(qIdx)}
+                          className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-100"
+                        >
+                          <Trash2 size={13} /> Remove Q{qIdx + 1}
+                        </button>
+                      </div>
+
+                      {/* Question Statement */}
+                      <div>
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">Question Statement</label>
+
+                        <div className="flex flex-wrap items-center gap-1 mb-1.5 bg-white p-1.5 rounded-lg border border-black/10">
+                          <span className="text-[10px] font-bold text-ink-muted mr-1">Math Insert:</span>
+                          {[
+                            { label: "⅓", insert: " ⅓ " },
+                            { label: "¼", insert: " ¼ " },
+                            { label: "½", insert: " ½ " },
+                            { label: "¾", insert: " ¾ " },
+                            { label: "⅔", insert: " ⅔ " },
+                            { label: "²", insert: "²" },
+                            { label: "³", insert: "³" },
+                            { label: "×", insert: " × " },
+                            { label: "÷", insert: " ÷ " },
+                            { label: "√", insert: " √" },
+                          ].map((sym, sIdx) => (
+                            <button
+                              key={sIdx}
+                              type="button"
+                              className="px-1.5 py-0.5 text-[11px] font-bold bg-slate-100 hover:bg-brand-50 hover:text-brand-700 border border-slate-200 rounded transition-colors"
+                              onClick={() => {
+                                updateEditingQuestion(qIdx, "question", (q.question || "") + sym.insert);
+                              }}
+                            >
+                              {sym.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <textarea
+                          className="input text-xs font-semibold bg-white min-h-[60px]"
+                          placeholder="Enter question text..."
+                          value={q.question || ""}
+                          onChange={(e) => updateEditingQuestion(qIdx, "question", e.target.value)}
+                        />
+                      </div>
+
+                      {/* Options List & Answer Key Selector */}
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">
+                          Options &amp; Correct Answer Key (Select radio button for correct option):
+                        </label>
+                        <div className="grid sm:grid-cols-2 gap-2">
+                          {q.options?.map((opt, optIdx) => {
+                            const isCorrect = (q.correctAnswerIndex ?? 0) === optIdx;
+                            return (
+                              <div key={optIdx} className={`flex items-center gap-2 p-1.5 rounded-lg border ${isCorrect ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-black/10'}`}>
+                                <input
+                                  type="radio"
+                                  name={`correct_ans_${editingTest.id}_${qIdx}`}
+                                  checked={isCorrect}
+                                  onChange={() => updateEditingQuestion(qIdx, "correctAnswerIndex", optIdx)}
+                                  className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                />
+                                <span className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${isCorrect ? 'bg-emerald-600 text-white' : 'bg-black/5 text-ink-soft'}`}>
+                                  {String.fromCharCode(65 + optIdx)}
+                                </span>
+                                <input
+                                  className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1"
+                                  value={opt}
+                                  onChange={(e) => updateEditingOption(qIdx, optIdx, e.target.value)}
+                                  placeholder={`Option ${String.fromCharCode(65 + optIdx)}`}
+                                />
+                                {isCorrect && <span className="text-emerald-600 font-bold text-xs mr-1">✓ Correct</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Paragraph Context (Optional) */}
+                      <div>
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">Paragraph / Passage Directions Context (Optional):</label>
+                        <textarea
+                          className="input text-xs bg-white min-h-[50px]"
+                          placeholder="Read the following passage and answer the questions..."
+                          value={q.passage || ""}
+                          onChange={(e) => updateEditingQuestion(qIdx, "passage", e.target.value)}
+                        />
+                      </div>
+
+                      {/* Image / Chart Attachment */}
+                      <div>
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">Chart / Image Attachment (Optional):</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            id={`edit-img-upload-${qIdx}`}
+                            onChange={(e) => {
+                              const file = e.target.files[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  updateEditingQuestion(qIdx, "imageUrl", reader.result);
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`edit-img-upload-${qIdx}`}
+                            className="btn-soft text-xs px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 cursor-pointer flex items-center gap-1.5 flex-1 justify-center whitespace-nowrap rounded-lg text-ink-soft font-semibold"
+                          >
+                            <ImageIcon size={14} /> {q.imageUrl ? "Change Image/Chart" : "Attach Chart/Image"}
+                          </label>
+                          {q.imageUrl && (
+                            <button
+                              type="button"
+                              onClick={() => updateEditingQuestion(qIdx, "imageUrl", "")}
+                              className="btn-ghost text-rose-500 hover:bg-rose-50 p-1.5 rounded-lg border border-rose-100"
+                              title="Remove Image"
+                            >
+                              <X size={14} />
+                            </button>
+                          )}
+                        </div>
+                        {q.imageUrl && (
+                          <div className="mt-2 h-28 w-full max-w-sm rounded-xl border border-black/10 overflow-hidden relative group bg-black/5 p-1">
+                             <img src={q.imageUrl} className="w-full h-full object-contain" alt="Attached preview" />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Explanation */}
+                      <div>
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">Step-by-Step Explanation / Solution:</label>
+                        <textarea
+                          className="input text-xs bg-white min-h-[50px]"
+                          placeholder="Provide step-by-step solution..."
+                          value={q.explanation || ""}
+                          onChange={(e) => updateEditingQuestion(qIdx, "explanation", e.target.value)}
+                        />
+                      </div>
+
+                    </div>
+                  ))
+                )}
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+              <button
+                type="button"
+                onClick={() => setEditingTest(null)}
+                className="btn-soft px-4 py-2 text-xs font-bold text-ink-soft bg-white border border-slate-200 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEditingTest}
+                disabled={isSavingEdit}
+                className="btn-primary px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-2"
+              >
+                {isSavingEdit ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" /> Saving Changes...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={16} /> Save &amp; Update Test in Cloud
+                  </>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
     </>
   );
 }

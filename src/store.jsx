@@ -9,6 +9,7 @@ import {
   fsNotify,
   fsMarkAllRead,
   fsDeleteMockTest,
+  fsUpdateMockTest,
   fsDeleteUpload,
   useRealtimeBackend,
 } from "./backend.js";
@@ -236,6 +237,13 @@ export function AppProvider({ children }) {
   };
 
   const updateMockTest = async (id, updatedTest) => {
+    if (isFirebaseConfigured) {
+      try {
+        await fsUpdateMockTest(id, updatedTest);
+      } catch (err) {
+        console.warn("Firestore update failed", err);
+      }
+    }
     setMockTests((prev) => prev.map(t => t.id === id ? { ...t, ...updatedTest } : t));
     pushToast("Mock test updated successfully ✅");
     return updatedTest;

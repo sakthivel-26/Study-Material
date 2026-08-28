@@ -115,6 +115,12 @@ export async function fsDeleteMockTest(id) {
   await deleteDoc(doc(db, COLLECTIONS.mockTests, id));
 }
 
+export async function fsUpdateMockTest(id, data) {
+  const { doc, updateDoc } = await import("firebase/firestore");
+  const db = await getFirebaseDb();
+  await updateDoc(doc(db, COLLECTIONS.mockTests, id), data);
+}
+
 export async function fsDeleteUpload(id) {
   const { doc, deleteDoc } = await import("firebase/firestore");
   const db = await getFirebaseDb();
