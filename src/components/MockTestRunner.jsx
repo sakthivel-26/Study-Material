@@ -8,7 +8,34 @@ export default function MockTestRunner({ test, onClose }) {
 
   // Test state
   // Preserve every option supplied by the PDF: some competitive exams use 4, 5, or 6 choices.
-  const questions = test?.questionsList || [];
+  const questions = (Array.isArray(test?.questionsList) && test.questionsList.length > 0)
+    ? test.questionsList
+    : (Array.isArray(test?.questions) && test.questions.length > 0)
+    ? test.questions
+    : (Array.isArray(test?.rawExtractedQuestions) && test.rawExtractedQuestions.length > 0)
+    ? test.rawExtractedQuestions.map((q, idx) => {
+        let opts = q.options;
+        if (opts && typeof opts === "object" && !Array.isArray(opts)) {
+          const keys = Object.keys(opts).sort();
+          opts = keys.map(k => opts[k]);
+        }
+        if (!Array.isArray(opts) || opts.length === 0) {
+          opts = ["Option A", "Option B", "Option C", "Option D"];
+        }
+        const finalLetter = q.ai_verified_answer || q.source_answer || "A";
+        const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
+        return {
+          id: q.id || `q_${idx}`,
+          question: q.question_text || q.question || `Question ${idx + 1}`,
+          options: opts,
+          correctAnswerIndex: ansIndex < opts.length ? ansIndex : 0,
+          explanation: q.verification_explanation || "Verified answer.",
+          section: q.section || "General",
+          passage: q.passage || "",
+          imageUrl: q.imageUrl || ""
+        };
+      })
+    : [];
   const totalDurationSeconds = (test?.durationMinutes || parseInt(test?.time) || 30) * 60;
   const [timeLeft, setTimeLeft] = useState(totalDurationSeconds);
   const [currentIndex, setCurrentIndex] = useState(0);

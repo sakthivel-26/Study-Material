@@ -302,48 +302,53 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const applyPDFUpdates = async () => {
     if (!generatedTest) return;
 
-    // Apply approved fixes to the already created test
-    let finalQuestions = generatedTest.questionsList ? [...generatedTest.questionsList] : [];
-    
-    // We only keep questions that the teacher has explicitly approved
-    const approvedIndices = [];
+    let finalQuestions = [];
 
-    generatedTest.rawExtractedQuestions.forEach((q, idx) => {
+    // Process all rawExtractedQuestions (include all by default unless explicitly unapproved with isApproved === false)
+    (generatedTest.rawExtractedQuestions || []).forEach((q, idx) => {
       const approvalStatus = approvedQuestions[idx];
-      // Only process if it is approved
-      if (approvalStatus && approvalStatus.isApproved) {
-        approvedIndices.push(idx);
 
-        const finalLetter = approvalStatus.editedAnswer || q.ai_verified_answer || q.source_answer || "A";
-        const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
-        
-        if (finalQuestions[idx]) {
-          finalQuestions[idx].correctAnswerIndex = ansIndex;
-          finalQuestions[idx].explanation = q.verification_explanation || "Verified by teacher.";
-
-          if (approvalStatus.imageUrl !== undefined) {
-            finalQuestions[idx].imageUrl = approvalStatus.imageUrl;
-          }
-          if (approvalStatus.passage !== undefined) {
-            finalQuestions[idx].passage = approvalStatus.passage;
-          }
-          if (approvalStatus.section !== undefined) {
-            finalQuestions[idx].section = approvalStatus.section;
-          }
-          if (approvalStatus.questionText !== undefined) {
-            finalQuestions[idx].question = approvalStatus.questionText;
-          }
-          if (approvalStatus.options !== undefined) {
-            const mergedOptions = { ...q.options, ...approvalStatus.options };
-            const optKeys = Object.keys(mergedOptions).sort();
-            finalQuestions[idx].options = optKeys.length > 0 ? optKeys.map(k => mergedOptions[k]) : finalQuestions[idx].options;
-          }
-        }
+      // Skip ONLY if explicitly unchecked / unapproved
+      if (approvalStatus && approvalStatus.isApproved === false) {
+        return;
       }
+
+      const finalLetter = approvalStatus?.editedAnswer || q.ai_verified_answer || q.source_answer || "A";
+      const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
+
+      // Merge options (whether array or object)
+      let optsArray = [];
+      if (approvalStatus?.options) {
+        const mergedOptions = { ...q.options, ...approvalStatus.options };
+        const optKeys = Object.keys(mergedOptions).sort();
+        optsArray = optKeys.map(k => mergedOptions[k]);
+      } else if (Array.isArray(q.options)) {
+        optsArray = q.options;
+      } else if (q.options && typeof q.options === "object") {
+        const optKeys = Object.keys(q.options).sort();
+        optsArray = optKeys.map(k => q.options[k]);
+      }
+
+      if (optsArray.length === 0) {
+        optsArray = ["Option A", "Option B", "Option C", "Option D"];
+      }
+
+      finalQuestions.push({
+        id: `pdf_q_${Date.now()}_${idx}`,
+        section: approvalStatus?.section || q.section || "General",
+        passage: approvalStatus?.passage ?? (q.passage || ""),
+        imageUrl: approvalStatus?.imageUrl ?? (q.imageUrl || ""),
+        question: approvalStatus?.questionText ?? (q.question_text || q.question || `Question ${idx + 1}`),
+        options: optsArray,
+        correctAnswerIndex: ansIndex < optsArray.length ? ansIndex : 0,
+        explanation: q.verification_explanation || "Verified by teacher."
+      });
     });
 
-    // Filter out any unapproved questions
-    finalQuestions = finalQuestions.filter((_, idx) => approvedIndices.includes(idx));
+    if (finalQuestions.length === 0) {
+      pushToast("Cannot publish test with 0 questions. Please approve at least 1 question.");
+      return;
+    }
 
     // Update the test metadata from the latest form state (f)
     const testToPublish = { 
@@ -356,28 +361,37 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
        durationMinutes: Math.max(1, parseInt(f.time) || 30),
        isSectionalTimed: !!f.isSectionalTimed,
        questionsList: finalQuestions, 
-       questions: finalQuestions.length 
+       questions: finalQuestions.length
     };
-
-    if (testToPublish.id && testToPublish.id.startsWith("draft_")) {
+    
+    setIsPublishing(true);
+    try {
+      if (testToPublish.id && testToPublish.id.startsWith("draft_")) {
         delete testToPublish.id;
         await addMockTest(testToPublish);
-    } else {
+      } else {
         await updateMockTest(generatedTest.id, { 
-            questionsList: finalQuestions, 
-            questions: finalQuestions.length,
-            title: testToPublish.title,
-            category: testToPublish.category,
-            subject: testToPublish.subject,
-            topic: testToPublish.topic,
-            time: testToPublish.time,
-            durationMinutes: testToPublish.durationMinutes
+          questionsList: finalQuestions, 
+          questions: finalQuestions.length,
+          title: testToPublish.title,
+          category: testToPublish.category,
+          subject: testToPublish.subject,
+          topic: testToPublish.topic,
+          time: testToPublish.time,
+          durationMinutes: testToPublish.durationMinutes
         });
+      }
+      setGeneratedTest(null);
+      setPdfFile(null);
+      setApprovedQuestions({});
+      setF({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault, isSectionalTimed: false });
+      pushToast(`🎉 Test published successfully with ${finalQuestions.length} questions!`);
+    } catch (err) {
+      console.error("Publishing error:", err);
+      pushToast("Error publishing test. Please try again.");
+    } finally {
+      setIsPublishing(false);
     }
-    
-    setGeneratedTest(null);
-    setPdfStatus("");
-    setApprovedQuestions({});
   };
 
   const publish = async () => {
