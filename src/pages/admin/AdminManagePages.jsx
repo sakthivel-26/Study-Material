@@ -472,39 +472,104 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   };
 
   const parseQuestionsFromPDFText = (fullText, sectionName = "General", targetCount = 35) => {
-    const questions = [];
-    const normalized = " " + fullText.replace(/\n+/g, ' ').replace(/\s+/g, ' ');
-    const parts = normalized.split(/\s(?:Q-?)?\d+[\.\)]\s/i);
-    
-    for (let i = 1; i < parts.length; i++) {
-        let block = parts[i].trim();
-        if (!block) continue;
-        
-        const optRegex = /(?:\b|\s|\()([A-E])[\.\)]\s+(.*?)(?=(?:\s*(?:\b|\s|\()[A-E][\.\)]\s+)|$)/gi;
-        let options = {};
-        let questionText = block;
-        
-        let firstOptIndex = -1;
-        let optMatch;
-        while ((optMatch = optRegex.exec(block)) !== null) {
-           if (firstOptIndex === -1) firstOptIndex = optMatch.index;
-           options[optMatch[1].toUpperCase()] = formatMathText(optMatch[2].trim());
+    if (!fullText || !fullText.trim()) return [];
+
+    let questions = [];
+    const cleanText = fullText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    // Strategy 1: Flexible Regex Splitter (matches 1., Q1., Q.1, Question 1:, 1), (1), Q1 -, 1 -)
+    const qSplitRegex = /(?:^|\n|\s)(?:Q(?:uestion)?[\s\.-]*\d+|\d+[\)\.\:\-]|(?:\(\d+\)))\s+/gi;
+    const rawBlocks = cleanText.split(qSplitRegex).map(b => b.trim()).filter(Boolean);
+
+    const parseOptionsFromBlock = (block) => {
+      // Matches A. / A) / (A) / (a) / a) / a. / 1) / (1) / 1.
+      const optRegex = /(?:^|\n|\s|\()([A-Ea-e1-5])[\)\.\:\-]\s+([^\n]+)/gi;
+      let options = {};
+      let questionText = block;
+      let firstOptIndex = -1;
+      let match;
+
+      while ((match = optRegex.exec(block)) !== null) {
+        if (firstOptIndex === -1) firstOptIndex = match.index;
+        let key = match[1].toUpperCase();
+        // Convert numeric 1,2,3,4,5 to A,B,C,D,E
+        if (/^[1-5]$/.test(key)) {
+          key = String.fromCharCode(64 + parseInt(key));
         }
-        
-        if (firstOptIndex !== -1) {
-            questionText = block.substring(0, firstOptIndex).trim();
+        if (!options[key]) {
+          options[key] = formatMathText(match[2].trim());
         }
-        
-        if (questionText && Object.keys(options).length >= 2) {
-            questions.push({
-                section: sectionName,
-                question_text: formatMathText(questionText),
-                options: options,
-                source_answer: "A",
-                explanation: "Answer not detected. Verification needed."
-            });
+      }
+
+      if (firstOptIndex !== -1) {
+        questionText = block.substring(0, firstOptIndex).trim();
+      }
+
+      return { questionText: formatMathText(questionText), options };
+    };
+
+    for (let block of rawBlocks) {
+      if (block.length < 5) continue;
+      let { questionText, options } = parseOptionsFromBlock(block);
+
+      let finalOptions = { ...options };
+      if (Object.keys(finalOptions).length < 2) {
+        const inlineOptRegex = /(?:\b|\s|\()([A-Ea-e])[\)\.\:\-]\s*(.*?)(?=(?:\s*(?:\b|\s|\()[A-Ea-e][\)\.\:\-])|$)/gi;
+        let inlineOpts = {};
+        let m;
+        let inlineFirstIndex = -1;
+        while ((m = inlineOptRegex.exec(block)) !== null) {
+          if (inlineFirstIndex === -1) inlineFirstIndex = m.index;
+          inlineOpts[m[1].toUpperCase()] = formatMathText(m[2].trim());
         }
+        if (Object.keys(inlineOpts).length >= 2) {
+          finalOptions = inlineOpts;
+          if (inlineFirstIndex > 0) {
+            questionText = formatMathText(block.substring(0, inlineFirstIndex).trim());
+          }
+        }
+      }
+
+      if (questionText) {
+        const keys = ["A", "B", "C", "D"];
+        keys.forEach(k => {
+          if (!finalOptions[k]) finalOptions[k] = `Option ${k}`;
+        });
+
+        questions.push({
+          section: sectionName,
+          question_text: questionText,
+          options: finalOptions,
+          source_answer: "A",
+          explanation: "Extracted from PDF. Click option to select correct answer."
+        });
+      }
     }
+
+    // Strategy 2: Fallback paragraph chunker if Strategy 1 yields 0 questions
+    if (questions.length === 0) {
+      const lineParagraphs = cleanText
+        .split(/\n\s*\n/)
+        .map(p => p.trim())
+        .filter(p => p.length > 15);
+
+      lineParagraphs.forEach((para, idx) => {
+        const { questionText, options } = parseOptionsFromBlock(para);
+        const finalOptions = { ...options };
+        ["A", "B", "C", "D"].forEach(k => {
+          if (!finalOptions[k]) finalOptions[k] = `Option ${k}`;
+        });
+
+        questions.push({
+          section: sectionName,
+          question_text: formatMathText(questionText || para),
+          options: finalOptions,
+          source_answer: "A",
+          explanation: "Extracted from PDF paragraph block. Review and edit options as needed."
+        });
+      });
+    }
+
     return questions.slice(0, Math.max(1, Math.min(200, Number(targetCount) || 35)));
   };
 
