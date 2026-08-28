@@ -22,6 +22,28 @@ export default function MockTestRunner({ test, onClose }) {
   const [results, setResults] = useState(null);
   const [solutionFilter, setSolutionFilter] = useState("all");
 
+  const formatMathText = (str) => {
+    if (!str || typeof str !== "string") return str;
+
+    let res = str;
+
+    res = res
+      .replace(/\^2/g, "²")
+      .replace(/\^3/g, "³")
+      .replace(/\^4/g, "⁴")
+      .replace(/\^5/g, "⁵");
+
+    res = res.replace(/(\b\d+|\))\s+([23])(?=\s*(?:[\+\-\*\/\=\,\)\?]|$))/g, (match, base, exp) => {
+      if (/[²³⁴⁵]$/.test(base)) return match;
+      const superscripts = { "2": "²", "3": "³" };
+      return `${base}${superscripts[exp] || exp}`;
+    });
+
+    res = res.replace(/([²³⁴⁵])\1+/g, "$1");
+
+    return res;
+  };
+
   const [touchStart, setTouchStart] = useState(null);
   const [touchEnd, setTouchEnd] = useState(null);
   const minSwipeDistance = 50;
@@ -263,7 +285,7 @@ export default function MockTestRunner({ test, onClose }) {
                   {/* Passage Text */}
                   <div className="relative">
                     <p className={`text-slate-200 text-sm leading-relaxed whitespace-pre-line ${!expandedPassage ? "line-clamp-4" : ""}`}>
-                      {currentQ.passage}
+                      {formatMathText(currentQ.passage)}
                     </p>
                     {!expandedPassage && currentQ.passage.length > 200 && (
                       <button onClick={() => setExpandedPassage(true)} className="text-blue-400 font-bold text-xs mt-1 hover:underline">
@@ -305,7 +327,7 @@ export default function MockTestRunner({ test, onClose }) {
                 </div>
                 
                 <p className="text-slate-100 font-medium text-[15px] leading-relaxed whitespace-pre-line">
-                  {currentQ.question}
+                  {formatMathText(currentQ.question)}
                 </p>
               </div>
 
@@ -322,7 +344,7 @@ export default function MockTestRunner({ test, onClose }) {
                       <span className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center font-bold text-[10px] sm:text-[11px] shrink-0 ${isSelected ? "bg-slate-600 text-white" : "bg-slate-700/60 text-slate-400"}`}>
                         {String.fromCharCode(65 + optIdx)}
                       </span>
-                      <span className="text-xs sm:text-[14px] leading-relaxed">{opt}</span>
+                      <span className="text-xs sm:text-[14px] leading-relaxed">{formatMathText(opt)}</span>
                     </div>
                   );
                 })}

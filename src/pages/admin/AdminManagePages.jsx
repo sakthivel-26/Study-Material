@@ -314,6 +314,31 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     }
   };
 
+  const formatMathText = (str) => {
+    if (!str || typeof str !== "string") return str;
+
+    let res = str;
+
+    // 1. Convert caret notation: e.g. 15^2 -> 15², x^3 -> x³
+    res = res
+      .replace(/\^2/g, "²")
+      .replace(/\^3/g, "³")
+      .replace(/\^4/g, "⁴")
+      .replace(/\^5/g, "⁵");
+
+    // 2. Convert space-separated powers like "15 2" or "12 2" or "(15) 2" -> "15²", "12²"
+    res = res.replace(/(\b\d+|\))\s+([23])(?=\s*(?:[\+\-\*\/\=\,\)\?]|$))/g, (match, base, exp) => {
+      if (/[²³⁴⁵]$/.test(base)) return match;
+      const superscripts = { "2": "²", "3": "³" };
+      return `${base}${superscripts[exp] || exp}`;
+    });
+
+    // 3. Clean up any duplicate consecutive superscripts (e.g. ²² -> ²) to prevent double superscript bugs
+    res = res.replace(/([²³⁴⁵])\1+/g, "$1");
+
+    return res;
+  };
+
   const parseQuestionsFromPDFText = (fullText, sectionName = "General", targetCount = 35) => {
     const questions = [];
     const normalized = " " + fullText.replace(/\n+/g, ' ').replace(/\s+/g, ' ');
@@ -331,7 +356,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         let optMatch;
         while ((optMatch = optRegex.exec(block)) !== null) {
            if (firstOptIndex === -1) firstOptIndex = optMatch.index;
-           options[optMatch[1].toUpperCase()] = optMatch[2].trim();
+           options[optMatch[1].toUpperCase()] = formatMathText(optMatch[2].trim());
         }
         
         if (firstOptIndex !== -1) {
@@ -341,7 +366,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         if (questionText && Object.keys(options).length >= 2) {
             questions.push({
                 section: sectionName,
-                question_text: questionText,
+                question_text: formatMathText(questionText),
                 options: options,
                 source_answer: "A",
                 explanation: "Answer not detected. Verification needed."
@@ -1123,6 +1148,34 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           <input type="checkbox" checked={!!isAppr} onChange={(e) => toggleApproveQuestion(idx, e.target.checked)} className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-black/20" />
                           <span className={`text-[11px] font-bold ${isAppr ? 'text-emerald-600' : 'text-ink-muted'}`}>Approve</span>
                         </label>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1 mb-1.5 bg-black/5 p-1.5 rounded-lg border border-black/5">
+                        <span className="text-[10px] font-bold text-ink-muted mr-1">Math Insert:</span>
+                        {[
+                          { label: "⅓", insert: "⅓" },
+                          { label: "¼", insert: "¼" },
+                          { label: "½", insert: "½" },
+                          { label: "¾", insert: "¾" },
+                          { label: "⅔", insert: "⅔" },
+                          { label: "²", insert: "²" },
+                          { label: "³", insert: "³" },
+                          { label: "×", insert: " × " },
+                          { label: "÷", insert: " ÷ " },
+                          { label: "√", insert: " √" },
+                        ].map((sym, sIdx) => (
+                          <button
+                            key={sIdx}
+                            type="button"
+                            className="px-1.5 py-0.5 text-[11px] font-bold bg-white hover:bg-brand-50 hover:text-brand-700 border border-black/10 rounded transition-colors"
+                            onClick={() => {
+                              const curText = approvedQuestions[idx]?.questionText ?? q.question_text;
+                              editQuestionText(idx, formatMathText(curText + sym.insert));
+                            }}
+                          >
+                            {sym.label}
+                          </button>
+                        ))}
                       </div>
 
                       <textarea
