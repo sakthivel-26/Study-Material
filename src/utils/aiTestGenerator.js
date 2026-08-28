@@ -459,11 +459,158 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
     // Proceeding to fallback generator automatically...
   }
 
+function genSpeedMathSimplification(idx) {
+  const type = idx % 5;
+  let qText = "", ansVal = 0, explanationText = "";
+
+  if (type === 0) {
+    const pct = pickRandom([15, 20, 25, 30, 40, 50, 60, 75]);
+    const base = pickRandom([200, 300, 400, 500, 600, 800, 1200]);
+    const add = pickRandom([25, 45, 50, 75, 100, 150]);
+    ansVal = (pct / 100) * base + add;
+    qText = `${pct}% of ${base} + ${add} = ?`;
+    explanationText = `${pct}% of ${base} = ${(pct / 100) * base}. Adding ${add}: ${(pct / 100) * base} + ${add} = ${ansVal}.`;
+  } else if (type === 1) {
+    const a = randInt(12, 25);
+    const b = randInt(5, 11);
+    const c = randInt(10, 50);
+    ansVal = (a * a) - (b * b) + c;
+    qText = `${a}² - ${b}² + ${c} = ?`;
+    explanationText = `${a}² = ${a*a}, ${b}² = ${b*b}. So ${a*a} - ${b*b} + ${c} = ${ansVal}.`;
+  } else if (type === 2) {
+    const a = randInt(12, 25);
+    const b = randInt(4, 15);
+    const d = pickRandom([4, 5, 8, 10]);
+    const multD = randInt(4, 20);
+    const c = d * multD;
+    ansVal = (a * b) + (c / d);
+    qText = `${a} × ${b} + ${c} ÷ ${d} = ?`;
+    explanationText = `${a} × ${b} = ${a*b}. ${c} ÷ ${d} = ${c/d}. Total = ${a*b} + ${c/d} = ${ansVal}.`;
+  } else if (type === 3) {
+    const roots = [
+      { sq: 400, r: 20 }, { sq: 576, r: 24 }, { sq: 625, r: 25 }, 
+      { sq: 784, r: 28 }, { sq: 900, r: 30 }, { sq: 1024, r: 32 }, 
+      { sq: 1296, r: 36 }, { sq: 1600, r: 40 }, { sq: 2025, r: 45 }
+    ];
+    const r1 = pickRandom(roots);
+    const r2 = pickRandom(roots);
+    const r3 = pickRandom([{ sq: 144, r: 12 }, { sq: 196, r: 14 }, { sq: 256, r: 16 }, { sq: 324, r: 18 }]);
+    ansVal = r1.r + r2.r - r3.r;
+    qText = `√${r1.sq} + √${r2.sq} - √${r3.sq} = ?`;
+    explanationText = `√${r1.sq} = ${r1.r}, √${r2.sq} = ${r2.r}, √${r3.sq} = ${r3.r}. ${r1.r} + ${r2.r} - ${r3.r} = ${ansVal}.`;
+  } else {
+    const b = pickRandom([3, 4, 5, 8]);
+    const multB = randInt(4, 15);
+    const a = b * multB;
+    const c = randInt(5, 12);
+    const d = randInt(15, 60);
+    ansVal = (a / b) * c + d;
+    qText = `(${a} ÷ ${b}) × ${c} + ${d} = ?`;
+    explanationText = `${a} ÷ ${b} = ${a/b}. ${(a/b)} × ${c} = ${(a/b)*c}. Adding ${d}: ${ansVal}.`;
+  }
+
+  const distractors = new Set([ansVal]);
+  while (distractors.size < 4) {
+    const offset = pickRandom([-20, -10, -5, -2, 2, 5, 10, 20, 15, 25]);
+    const fake = ansVal + offset;
+    if (fake > 0) distractors.add(fake);
+  }
+
+  const optionsArr = shuffle(Array.from(distractors)).map(String);
+  const correctIdx = optionsArr.indexOf(String(ansVal));
+
+  return {
+    id: `simp_${idx}_${Date.now()}`,
+    section: "Simplification",
+    question: qText,
+    options: optionsArr,
+    correctAnswerIndex: correctIdx >= 0 ? correctIdx : 0,
+    explanation: explanationText
+  };
+}
+
+function genSpeedMathApproximation(idx) {
+  const type = idx % 4;
+  let qText = "", ansVal = 0, explanationText = "";
+
+  if (type === 0) {
+    const a = randInt(14, 40) + 0.98;
+    const b = randInt(20, 50) + 0.02;
+    const c = randInt(5, 15) + 0.99;
+    const approxA = Math.round(a);
+    const approxB = Math.round(b);
+    const approxC = Math.round(c);
+    ansVal = approxA + approxB - approxC;
+    qText = `${a.toFixed(2)} + ${b.toFixed(2)} - ${c.toFixed(2)} ≈ ?`;
+    explanationText = `Approximating terms to integers: ${approxA} + ${approxB} - ${approxC} = ${ansVal}.`;
+  } else if (type === 1) {
+    const pctApprox = pickRandom([15, 20, 25, 30, 40, 50]);
+    const pct = pctApprox - 0.02;
+    const baseApprox = pickRandom([200, 300, 400, 500, 600, 800]);
+    const base = baseApprox - 0.02;
+    const addApprox = pickRandom([10, 15, 20, 30]);
+    const add = addApprox + 0.01;
+    
+    ansVal = (pctApprox / 100) * baseApprox + addApprox;
+    qText = `${pct.toFixed(2)}% of ${base.toFixed(2)} + ${add.toFixed(2)} ≈ ?`;
+    explanationText = `Approximating: ${pctApprox}% of ${baseApprox} + ${addApprox} = ${(pctApprox/100)*baseApprox} + ${addApprox} = ${ansVal}.`;
+  } else if (type === 2) {
+    const aApprox = randInt(12, 20);
+    const bApprox = randInt(4, 9);
+    const a = aApprox + 0.01;
+    const b = bApprox - 0.01;
+    ansVal = (aApprox * aApprox) - (bApprox * bApprox);
+    qText = `(${a.toFixed(2)})² - (${b.toFixed(2)})² ≈ ?`;
+    explanationText = `Approximating: ${aApprox}² - ${bApprox}² = ${aApprox*aApprox} - ${bApprox*bApprox} = ${ansVal}.`;
+  } else {
+    const roots = [
+      { sq: 399.98, approxSq: 400, r: 20 },
+      { sq: 575.95, approxSq: 576, r: 24 },
+      { sq: 624.99, approxSq: 625, r: 25 },
+      { sq: 783.97, approxSq: 784, r: 28 },
+      { sq: 899.96, approxSq: 900, r: 30 },
+      { sq: 1023.98, approxSq: 1024, r: 32 }
+    ];
+    const r1 = pickRandom(roots);
+    const r2 = pickRandom(roots);
+    ansVal = r1.r + r2.r;
+    qText = `√${r1.sq} + √${r2.sq} ≈ ?`;
+    explanationText = `Approximating: √${r1.approxSq} + √${r2.approxSq} = ${r1.r} + ${r2.r} = ${ansVal}.`;
+  }
+
+  const distractors = new Set([ansVal]);
+  while (distractors.size < 4) {
+    const offset = pickRandom([-10, -5, -2, -1, 1, 2, 5, 10]);
+    const fake = ansVal + offset;
+    if (fake > 0) distractors.add(fake);
+  }
+
+  const optionsArr = shuffle(Array.from(distractors)).map(String);
+  const correctIdx = optionsArr.indexOf(String(ansVal));
+
+  return {
+    id: `approx_${idx}_${Date.now()}`,
+    section: "Approximation",
+    question: qText,
+    options: optionsArr,
+    correctAnswerIndex: correctIdx >= 0 ? correctIdx : 0,
+    explanation: explanationText
+  };
+}
+
   // 5. Fallback Category Generator
   if (!questions || questions.length === 0) {
     const catLower = (category || "").toLowerCase();
 
-    if (catLower.includes("bank") || catLower.includes("sbi") || catLower.includes("ibps")) {
+    if (catLower.includes("simplification") || (catLower.includes("speed math") && !catLower.includes("approximation"))) {
+      for (let i = 0; i < questionsCount; i++) {
+        questions.push(genSpeedMathSimplification(i + 1));
+      }
+    } else if (catLower.includes("approximation")) {
+      for (let i = 0; i < questionsCount; i++) {
+        questions.push(genSpeedMathApproximation(i + 1));
+      }
+    } else if (catLower.includes("bank") || catLower.includes("sbi") || catLower.includes("ibps")) {
       let stIdx = 0;
       for (let i = 0; i < questionsCount; i++) {
         if (i % 2 === 0) questions.push(genBankingQuant(i + 1));

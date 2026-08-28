@@ -1316,18 +1316,45 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         onChange={(e) => editQuestionText(idx, e.target.value)}
                       />
                       
-                      <div className="grid sm:grid-cols-2 gap-1.5 text-[11px] text-ink-muted mb-3">
-                        {Object.entries(q.options || {}).map(([key, opt]) => (
-                          <div key={key} className={`flex items-center gap-1.5 px-2 py-1 rounded ${key === finalAnswer ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-black/5"}`}>
-                            <span>{key}:</span>
-                            <input 
-                              className="input text-[11px] py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 w-full"
-                              value={approvedQuestions[idx]?.options?.[key] ?? opt}
-                              onChange={(e) => editOptionText(idx, key, e.target.value)}
-                            />
-                            {key === finalAnswer && <span>✓</span>}
-                          </div>
-                        ))}
+                      <div className="grid sm:grid-cols-2 gap-2 text-[11px] text-ink-muted mb-3">
+                        {Object.entries(q.options || {}).map(([key, opt]) => {
+                          const isRight = key === finalAnswer;
+                          return (
+                            <div
+                              key={key}
+                              onClick={() => {
+                                editAnswer(idx, key);
+                                toggleApproveQuestion(idx, true);
+                              }}
+                              className={`flex items-center gap-2 p-2 rounded-xl border transition-all cursor-pointer ${
+                                isRight 
+                                  ? "bg-emerald-100/90 border-emerald-400 text-emerald-950 font-bold shadow-sm ring-2 ring-emerald-500/30" 
+                                  : "bg-black/[0.03] hover:bg-black/[0.06] border-black/10 text-ink"
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`teacher_review_ans_${idx}`}
+                                checked={isRight}
+                                onChange={() => {
+                                  editAnswer(idx, key);
+                                  toggleApproveQuestion(idx, true);
+                                }}
+                                className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
+                              />
+                              <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-extrabold shrink-0 ${isRight ? 'bg-emerald-600 text-white' : 'bg-black/10 text-ink-muted'}`}>
+                                {key}
+                              </span>
+                              <input 
+                                className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium"
+                                value={approvedQuestions[idx]?.options?.[key] ?? opt}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => editOptionText(idx, key, e.target.value)}
+                              />
+                              {isRight && <span className="text-emerald-700 font-extrabold text-[11px] shrink-0 pr-1">✓ Right Answer</span>}
+                            </div>
+                          );
+                        })}
                       </div>
 
                       <div className="mb-3">
