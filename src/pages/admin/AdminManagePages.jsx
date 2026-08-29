@@ -573,7 +573,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       });
     }
 
-    return questions.slice(0, Math.max(1, Math.min(200, Number(targetCount) || 35)));
+    return questions.slice(0, 200);
   };
 
   const handleMultiPDFUpload = async () => {
@@ -706,9 +706,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         fullText += textContent.items.map(item => item.str).join(" ") + "\n";
       }
 
-      setPdfPageInfo("Parsing questions from text locally using regex...");
-
-      const extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", f.questions);
+      const extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 200);
+      setF(prev => ({ ...prev, questions: extractedQuestions.length }));
 
       if (extractedQuestions.length === 0) {
         throw new Error("NO_QUESTIONS_FOUND: Could not extract any questions using regex. Make sure the PDF contains standard numbered questions (e.g. '1. Question...') and options (e.g. 'A. Option...').");
