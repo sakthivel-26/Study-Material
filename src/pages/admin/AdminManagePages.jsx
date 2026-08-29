@@ -9,7 +9,7 @@ import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
 import { CATEGORIES, COURSE_PROGRESS } from "../../data.js";
 import { Badge, ProgressBar } from "../../components/ui.jsx";
-import { verifyQuestionsBackground } from "../../utils/aiTestGenerator.js";
+import { verifyQuestionsBackground, generateMockTestFromPDF } from "../../utils/aiTestGenerator.js";
 import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
 
@@ -779,14 +779,39 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         fullText += textContent.items.map(item => item.str).join(" ") + "\n";
       }
 
-      const extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 200);
+      setPdfPageInfo("Extracting questions using High-Accuracy AI LLM Model...");
+
+      let extractedQuestions = [];
+      let llmSuccess = false;
+
+      try {
+        const aiResult = await generateMockTestFromPDF({
+          pdfText: fullText,
+          category: f.category,
+          timeLimit: f.time,
+          title: f.title,
+          onProgress: (done, total) => setPdfPageInfo(`AI LLM extracting questions (Chunk ${done}/${total})...`)
+        });
+        if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
+          extractedQuestions = aiResult.rawExtractedQuestions;
+          llmSuccess = true;
+        }
+      } catch (aiErr) {
+        console.warn("AI LLM Extraction warning, using local regex parser fallback...", aiErr);
+      }
+
+      if (!llmSuccess || extractedQuestions.length === 0) {
+        setPdfPageInfo("Parsing questions locally using fallback engine...");
+        extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 200);
+      }
+
       setF(prev => ({ ...prev, questions: extractedQuestions.length }));
 
       if (extractedQuestions.length === 0) {
-        throw new Error("NO_QUESTIONS_FOUND: Could not extract any questions using regex. Make sure the PDF contains standard numbered questions (e.g. '1. Question...') and options (e.g. 'A. Option...').");
+        throw new Error("NO_QUESTIONS_FOUND: Could not extract any questions from the uploaded PDF.");
       }
 
-      setPdfPageInfo(`Successfully extracted ${extractedQuestions.length} questions`);
+      setPdfPageInfo(`Successfully extracted ${extractedQuestions.length} questions (${llmSuccess ? "AI LLM Engine" : "Offline Parser"})`);
 
       const result = {
         title: f.title.trim() || `${f.category} PYQ - ${file.name.replace(".pdf", "")}`,

@@ -653,29 +653,32 @@ function genSpeedMathApproximation(idx) {
 // Upload a PYQ paper PDF → AI extracts exact questions → Mock Test
 // ------------------------------------------------------------------
 
-const buildExtractionPrompt = (pdfChunk, category) => `Extract the questions exactly from the supplied text. Return only valid JSON.
+const buildExtractionPrompt = (pdfChunk, category) => `You are a high-accuracy Indian Competitive Exam Question Extractor.
+Extract ALL questions from the supplied PDF text with 100% precision.
 
-## INSTRUCTIONS FOR ANSWERS
-1. If the PDF provides an answer key, use it for "source_answer".
-2. If there is NO answer key in the PDF, you MUST solve the question yourself to determine the correct option (A, B, C, or D) and put it in "source_answer".
-3. Provide a brief step-by-step solution in the "explanation" field.
+INSTRUCTIONS:
+1. "section": Subject section e.g. "Quantitative Aptitude", "Reasoning Ability", "English Language", "General Awareness", or "General".
+2. "passage": If there is a Reading Comprehension passage, Data Interpretation (DI) table context, or Directions (e.g. "Directions (Q. 1-5)..."), put it in the "passage" field.
+3. "question_text": The clean question statement.
+4. "options": Key-value object for options A, B, C, D, E, F, G (e.g. {"A": "10", "B": "20", "C": "30", "D": "40"}).
+5. "source_answer": Correct option letter e.g. "A", "B", "C", "D", "E", "F", or "G". Solve the question if no answer key is present.
+6. "explanation": Brief step-by-step math solution or reasoning logic.
 
-## JSON FORMAT
-Every question MUST be a JSON object in this exact format. Do NOT add markdown fences around the JSON array, just output raw JSON:
+Return ONLY a raw valid JSON object (no markdown fences):
 {
   "questions": [
     {
-      "question_number": 1,
-      "question_text": "What is 25% of 240?",
+      "section": "Quantitative Aptitude",
+      "passage": "Directions (Q. 1-5): Read the following table...",
+      "question_text": "What is the total number of items sold?",
       "options": {
-        "A": "40",
-        "B": "50",
-        "C": "60",
-        "D": "80"
+        "A": "150",
+        "B": "200",
+        "C": "250",
+        "D": "300"
       },
       "source_answer": "C",
-      "explanation": "25% of 240 is (25/100) * 240 = 60.",
-      "page_number": 2
+      "explanation": "Sum = 100 + 150 = 250."
     }
   ]
 }
@@ -693,9 +696,6 @@ Your job is to independently verify this extracted question and compare your ans
 ## BACKGROUND VERIFICATION
 1. Read the source answer from the provided JSON.
 2. Independently solve the question.
-3. Determine the AI answer.
-4. Compare source answer and AI answer.
-5. Detect mismatches.
 
 ## NEVER TRUST THE PDF ANSWER KEY
 If source_answer = B and AI independently calculates ai_verified_answer = C, DO NOT automatically replace B with C. Keep both values.
@@ -718,6 +718,48 @@ ${JSON.stringify(questionJson, null, 2)}
 """`;
 
 async function callLLMChain(prompt) {
+  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
+  const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY") || getEnvKey("VITE_GEMMA_API_KEY");
+  const openAIKey = getEnvKey("VITE_OPENAI_API_KEY") || getEnvKey("OPENAI_API_KEY");
+  const deepSeekKey = getEnvKey("VITE_DEEPSEEK_API_KEY") || getEnvKey("DEEPSEEK_API_KEY");
+
+  // 1. Try Gemini API if key exists
+  if (geminiKey) {
+    try {
+      return await callGemini(geminiKey, prompt);
+    } catch (e) {
+      console.warn("Gemini API call failed, falling back...", e);
+    }
+  }
+
+  // 2. Try Groq / Gemma API if key exists
+  if (groqKey) {
+    try {
+      return await callNvidia(groqKey, prompt, "llama-3.3-70b-versatile");
+    } catch (e) {
+      console.warn("Groq API call failed, falling back...", e);
+    }
+  }
+
+  // 3. Try OpenAI if key exists
+  if (openAIKey) {
+    try {
+      return await callOpenAI(openAIKey, prompt);
+    } catch (e) {
+      console.warn("OpenAI API call failed, falling back...", e);
+    }
+  }
+
+  // 4. Try DeepSeek if key exists
+  if (deepSeekKey) {
+    try {
+      return await callDeepSeek(deepSeekKey, prompt);
+    } catch (e) {
+      console.warn("DeepSeek API call failed, falling back...", e);
+    }
+  }
+
+  // 5. Try backend /api/chat
   try {
     const response = await fetch(`/api/chat`, {
       method: "POST",
@@ -725,35 +767,33 @@ async function callLLMChain(prompt) {
       body: JSON.stringify({ prompt }),
     });
 
-    if (!response.ok) {
-      throw new Error(`Backend AI Error: ${response.statusText}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.text) {
+        const text = data.text;
+        const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        const jsonStart = cleaned.indexOf("[");
+        const jsonEnd = cleaned.lastIndexOf("]");
+        if (jsonStart !== -1 && jsonEnd !== -1) {
+          return JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+        }
+        const parsed = JSON.parse(cleaned);
+        return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed;
+      }
     }
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.detail || "Unknown error");
-    }
-
-    const text = data.text;
-    
-    // Attempt to extract JSON from text
-    const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    const jsonStart = cleaned.indexOf("[");
-    const jsonEnd = cleaned.lastIndexOf("]");
-    
-    if (jsonStart !== -1 && jsonEnd !== -1) {
-      return JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
-    }
-    
-    const parsed = JSON.parse(cleaned);
-    // Extraction returns { questions: [...] }, while the background verifier
-    // returns one verification object. Keep that object instead of converting
-    // it to an empty array (which caused "failed to return structured JSON").
-    return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed;
   } catch (err) {
     console.error("Backend LLMChain error:", err);
-    return [];
   }
+
+  // 6. Try OpenRouter free tier fallback
+  try {
+    const openRouterKey = getEnvKey("VITE_OPENROUTER_API_KEY") || "sk-or-v1-free";
+    return await callOpenRouter(openRouterKey, prompt, "google/gemma-2-9b-it:free");
+  } catch (e) {
+    console.warn("OpenRouter API call failed...", e);
+  }
+
+  return [];
 }
 
 /**
