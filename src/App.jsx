@@ -17,6 +17,12 @@ import { CreateMockTestPage, ManageStudentsPage, AnnouncementsPage, ManageCourse
 import AdminAccountPage from "./pages/admin/AdminAccountPage.jsx";
 import { AdmissionModal } from "./components/AdmissionModal.jsx";
 
+import { NotFoundPage } from "./pages/ErrorPages.jsx";
+
+import { PrivacyPolicyPage, TermsOfServicePage, CookiePolicyPage, RefundPolicyPage, ContactSupportPage } from "./pages/LegalPages.jsx";
+
+import { PricingPage, PaymentSuccessPage, PaymentFailedPage } from "./pages/BillingPages.jsx";
+
 export default function App() {
   return (
     <>
@@ -37,6 +43,19 @@ export default function App() {
         <Route path="/mock-tests" element={<MockTestsPage />} />
         <Route path="/free-mocks" element={<FreeMocksPage />} />
         <Route path="/daily-practice" element={<DailyPracticePage />} />
+        
+        {/* Billing & Payment Lifecycle */}
+        <Route path="/pricing" element={<PricingPage />} />
+        <Route path="/payment-success" element={<RequireAuth><PaymentSuccessPage /></RequireAuth>} />
+        <Route path="/payment-failed" element={<RequireAuth><PaymentFailedPage /></RequireAuth>} />
+
+        {/* Legal & Trust Pages */}
+        <Route path="/privacy" element={<PrivacyPolicyPage />} />
+        <Route path="/terms" element={<TermsOfServicePage />} />
+        <Route path="/cookies" element={<CookiePolicyPage />} />
+        <Route path="/refund" element={<RefundPolicyPage />} />
+        <Route path="/contact" element={<ContactSupportPage />} />
+
         {/* Protected specific routes */}
         <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
         <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
@@ -57,7 +76,8 @@ export default function App() {
         <Route path="/admin/account" element={<AdminAccountPage />} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      {/* UX Error States */}
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
     </>
   );
