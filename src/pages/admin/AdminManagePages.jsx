@@ -875,6 +875,17 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     pushToast("✅ All verified questions approved!");
   };
 
+  const removeExtractedQuestion = (idx) => {
+    if (!generatedTest || !generatedTest.rawExtractedQuestions) return;
+    const updatedRaw = generatedTest.rawExtractedQuestions.filter((_, i) => i !== idx);
+    setGeneratedTest(prev => ({
+      ...prev,
+      questions: updatedRaw.length,
+      rawExtractedQuestions: updatedRaw
+    }));
+    pushToast(`Removed Question ${idx + 1}`);
+  };
+
   return (
     <>
       <PageHeader icon={<ClipboardPlus size={22} />} title={isFreeByDefault ? "Create Free Mock Test" : "Create Mock Test"} subtitle="Design a test manually or generate automatically using AI (Past 5-Yr PYQs)" />
@@ -1295,39 +1306,30 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           </h3>
 
           {((mode === "pdf" || mode === "multipdf") && generatedTest) ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
                 <p className="font-bold text-emerald-900 text-sm">{generatedTest.title}</p>
                 <p className="text-xs text-emerald-700 mt-1">
-                  {generatedTest.questions} Questions extracted from PDF · {generatedTest.time} · {generatedTest.category}
+                  {generatedTest.rawExtractedQuestions?.length || generatedTest.questions} Questions extracted from PDF · {generatedTest.time} · {generatedTest.category}
                 </p>
                 {pdfFile && <p className="text-[11px] text-emerald-600 mt-1 font-medium">📎 Source: {pdfFile.name}</p>}
               </div>
 
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-ink">Teacher Review Required</p>
-                <div className="flex items-center gap-2">
-                  {verificationProgress && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-md border border-amber-200">Verifying: {verificationProgress}</span>}
-                  <button type="button" onClick={approveAllVerified} className="btn-soft px-3 py-1.5 text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100">
-                    <CheckCircle2 size={14} /> Approve All VERIFIED
-                  </button>
-                </div>
-              </div>
-
-              <div className="max-h-[500px] overflow-y-auto space-y-4 pr-1">
+              <div className="max-h-[550px] overflow-y-auto space-y-4 pr-1">
                 {generatedTest.rawExtractedQuestions?.map((q, idx) => {
-                  const isAppr = approvedQuestions[idx]?.isApproved;
                   const finalAnswer = approvedQuestions[idx]?.editedAnswer || q.ai_verified_answer || q.source_answer || "A";
 
                   return (
-                    <div key={idx} className={`p-4 rounded-xl border-2 transition-colors ${isAppr ? 'border-emerald-400 bg-emerald-50/30' : q.answer_status === 'VERIFIED' ? 'border-black/5 bg-black/[0.02]' : q.answer_status === 'MISMATCH' ? 'border-rose-300 bg-rose-50/50' : 'border-amber-300 bg-amber-50/50'}`}>
+                    <div key={idx} className="p-4 rounded-xl border-2 border-black/10 bg-slate-50/50 space-y-3 relative">
                       
-                      <div className="flex items-start justify-between gap-4 mb-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-1.5 py-0.5 rounded bg-black/10 text-ink-soft text-[10px] font-bold">Q{idx + 1}</span>
-                          
+                      {/* Question Header */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded bg-brand-600 text-white flex items-center justify-center text-xs font-bold">
+                            {idx + 1}
+                          </span>
                           <select
-                            className="input text-[10px] py-0.5 px-1.5 font-bold border-brand-200 bg-brand-50 text-brand-900 rounded"
+                            className="input text-[11px] py-0.5 px-2 font-bold bg-white border-black/10 rounded"
                             value={approvedQuestions[idx]?.section || q.section || "General"}
                             onChange={(e) => editQuestionSection(idx, e.target.value)}
                           >
@@ -1337,120 +1339,124 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             <option value="General Awareness">General Awareness</option>
                             <option value="General">General</option>
                           </select>
-                          
-                          {q.answer_status === "VERIFIED" && <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px] font-bold">VERIFIED</span>}
-                          {q.answer_status === "MISMATCH" && <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] font-bold">MISMATCH</span>}
-                          {q.answer_status === "NEEDS_REVIEW" && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold">NEEDS REVIEW</span>}
-                          {q.answer_status === "NO_SOURCE_ANSWER" && <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-bold">NO ANSWER KEY</span>}
                         </div>
 
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                          <input type="checkbox" checked={!!isAppr} onChange={(e) => toggleApproveQuestion(idx, e.target.checked)} className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-black/20" />
-                          <span className={`text-[11px] font-bold ${isAppr ? 'text-emerald-600' : 'text-ink-muted'}`}>Approve</span>
-                        </label>
+                        <button
+                          type="button"
+                          onClick={() => removeExtractedQuestion(idx)}
+                          className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-100"
+                        >
+                          <Trash2 size={13} /> Remove Q{idx + 1}
+                        </button>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-1 mb-1.5 bg-black/5 p-1.5 rounded-lg border border-black/5">
-                        <span className="text-[10px] font-bold text-ink-muted mr-1">Math Insert:</span>
-                        {[
-                          { label: "⅓", insert: "⅓" },
-                          { label: "¼", insert: "¼" },
-                          { label: "½", insert: "½" },
-                          { label: "¾", insert: "¾" },
-                          { label: "⅔", insert: "⅔" },
-                          { label: "²", insert: "²" },
-                          { label: "³", insert: "³" },
-                          { label: "×", insert: " × " },
-                          { label: "÷", insert: " ÷ " },
-                          { label: "√", insert: " √" },
-                        ].map((sym, sIdx) => (
-                          <button
-                            key={sIdx}
-                            type="button"
-                            className="px-1.5 py-0.5 text-[11px] font-bold bg-white hover:bg-brand-50 hover:text-brand-700 border border-black/10 rounded transition-colors"
-                            onClick={() => {
-                              const curText = approvedQuestions[idx]?.questionText ?? q.question_text;
-                              editQuestionText(idx, formatMathText(curText + sym.insert));
-                            }}
-                          >
-                            {sym.label}
-                          </button>
-                        ))}
-                      </div>
+                      {/* Question Statement */}
+                      <div>
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">Question Statement</label>
 
-                      <textarea
-                        className="input font-semibold text-ink text-xs mb-2 min-h-[60px]"
-                        value={approvedQuestions[idx]?.questionText ?? q.question_text}
-                        onChange={(e) => editQuestionText(idx, e.target.value)}
-                      />
-                      
-                      <div className="grid sm:grid-cols-2 gap-2 text-[11px] text-ink-muted mb-3">
-                        {Object.entries(q.options || {}).map(([key, opt]) => {
-                          const isRight = key === finalAnswer;
-                          return (
-                            <div
-                              key={key}
+                        <div className="flex flex-wrap items-center gap-1 mb-1.5 bg-white p-1.5 rounded-lg border border-black/10">
+                          <span className="text-[10px] font-bold text-ink-muted mr-1">Math Insert:</span>
+                          {[
+                            { label: "⅓", insert: " ⅓ " },
+                            { label: "¼", insert: " ¼ " },
+                            { label: "½", insert: " ½ " },
+                            { label: "¾", insert: " ¾ " },
+                            { label: "⅔", insert: " ⅔ " },
+                            { label: "²", insert: "²" },
+                            { label: "³", insert: "³" },
+                            { label: "×", insert: " × " },
+                            { label: "÷", insert: " ÷ " },
+                            { label: "√", insert: " √" },
+                          ].map((sym, sIdx) => (
+                            <button
+                              key={sIdx}
+                              type="button"
+                              className="px-1.5 py-0.5 text-[11px] font-bold bg-slate-100 hover:bg-brand-50 hover:text-brand-700 border border-slate-200 rounded transition-colors"
                               onClick={() => {
-                                editCorrectAnswer(idx, key);
-                                toggleApproveQuestion(idx, true);
+                                const curText = approvedQuestions[idx]?.questionText ?? q.question_text;
+                                editQuestionText(idx, formatMathText(curText + sym.insert));
                               }}
-                              className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all cursor-pointer select-none ${
-                                isRight 
-                                  ? "bg-emerald-100/90 border-emerald-400 text-emerald-950 font-bold shadow-sm ring-2 ring-emerald-500/30" 
-                                  : "bg-black/[0.03] hover:bg-black/[0.06] border-black/10 text-ink hover:border-emerald-300"
-                              }`}
                             >
-                              <span
-                                className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-all ${
-                                  isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-black/10 text-ink'
-                                }`}
-                              >
-                                {key}
-                              </span>
+                              {sym.label}
+                            </button>
+                          ))}
+                        </div>
 
-                              <input
-                                type="radio"
-                                name={`teacher_review_ans_${idx}`}
-                                checked={isRight}
-                                onChange={() => {
-                                  editCorrectAnswer(idx, key);
-                                  toggleApproveQuestion(idx, true);
-                                }}
-                                className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
-                              />
-
-                              <input 
-                                className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
-                                value={approvedQuestions[idx]?.options?.[key] ?? (opt || `Option ${key}`)}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                }}
-                                onChange={(e) => editOptionText(idx, key, e.target.value)}
-                                placeholder={`Option ${key}`}
-                              />
-
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  editCorrectAnswer(idx, key);
-                                  toggleApproveQuestion(idx, true);
-                                }}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer ${
-                                  isRight 
-                                    ? "bg-emerald-600 text-white shadow-sm" 
-                                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
-                                }`}
-                              >
-                                {isRight ? "✓ Correct" : "Mark Correct"}
-                              </button>
-                            </div>
-                          );
-                        })}
+                        <textarea
+                          className="input text-xs font-semibold bg-white min-h-[60px]"
+                          placeholder="Enter question statement..."
+                          value={approvedQuestions[idx]?.questionText ?? q.question_text}
+                          onChange={(e) => editQuestionText(idx, e.target.value)}
+                        />
                       </div>
 
-                      <div className="mb-3">
-                        <label className="text-[10px] font-bold text-ink-muted mb-1 block">Paragraph / Passage Directions Context (Optional):</label>
+                      {/* Options List & Answer Key Selector */}
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">
+                          Options &amp; Correct Answer Key (Select radio button for correct option):
+                        </label>
+
+                        <div className="grid sm:grid-cols-2 gap-2">
+                          {Object.entries(q.options || {}).map(([key, opt]) => {
+                            const isRight = key === finalAnswer;
+                            return (
+                              <div
+                                key={key}
+                                onClick={() => {
+                                  editCorrectAnswer(idx, key);
+                                  toggleApproveQuestion(idx, true);
+                                }}
+                                className={`flex items-center gap-2 p-2 rounded-xl border transition-all cursor-pointer ${
+                                  isRight 
+                                    ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/20 font-bold' 
+                                    : 'bg-white border-black/10 hover:border-emerald-300'
+                                }`}
+                              >
+                                <span
+                                  className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 ${
+                                    isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700'
+                                  }`}
+                                >
+                                  {key}
+                                </span>
+
+                                <input
+                                  type="radio"
+                                  name={`teacher_review_ans_${idx}`}
+                                  checked={isRight}
+                                  onChange={() => {
+                                    editCorrectAnswer(idx, key);
+                                    toggleApproveQuestion(idx, true);
+                                  }}
+                                  className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
+                                />
+
+                                <input 
+                                  className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
+                                  value={approvedQuestions[idx]?.options?.[key] ?? (opt || `Option ${key}`)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => editOptionText(idx, key, e.target.value)}
+                                  placeholder={`Option ${key}`}
+                                />
+
+                                <span
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all ${
+                                    isRight ? "bg-emerald-600 text-white shadow-sm" : "bg-slate-100 text-slate-600"
+                                  }`}
+                                >
+                                  {isRight ? "✓ Correct" : "Select"}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Paragraph Context (Optional) */}
+                      <div>
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">
+                          Paragraph / Passage Directions Context (Optional):
+                        </label>
                         <textarea
                           className="input text-xs min-h-[60px] bg-white border border-black/10"
                           placeholder="Paragraph Context (Optional) - e.g. Read the following passage..."
@@ -1459,10 +1465,12 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         />
                       </div>
 
+                      {/* Image Preview & Attachment */}
                       {approvedQuestions[idx]?.imageUrl && (
-                        <div className="mt-2 mb-3 relative max-w-sm rounded-lg overflow-hidden border border-black/10">
+                        <div className="mt-2 relative max-w-sm rounded-lg overflow-hidden border border-black/10 bg-white">
                           <img src={approvedQuestions[idx].imageUrl} alt="Chart/Data" className="w-full h-auto object-contain" />
                           <button 
+                            type="button"
                             className="absolute top-1 right-1 bg-rose-600 text-white rounded p-1 shadow-sm"
                             onClick={() => attachImageToQuestion(idx, null)}
                           >
@@ -1471,32 +1479,20 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         </div>
                       )}
 
-                      <div className="flex items-center gap-2 mb-3">
-                         <label className="btn-soft px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 cursor-pointer flex items-center gap-1 font-semibold rounded-lg border border-slate-200">
-                           <Upload size={13} /> Attach Chart/Image
-                           <input type="file" accept="image/*" className="hidden" onChange={(e) => attachImageToQuestion(idx, e.target.files[0])} />
-                         </label>
+                      <div className="flex items-center gap-2 pt-1">
+                        <label className="btn-soft px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 cursor-pointer flex items-center gap-1 font-semibold rounded-lg border border-slate-200">
+                          <Upload size={13} /> {approvedQuestions[idx]?.imageUrl ? "Change Chart/Image" : "Attach Chart/Image"}
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => attachImageToQuestion(idx, e.target.files[0])} />
+                        </label>
                       </div>
 
-                      {true && (
-                        <div className="mt-3 p-3 rounded-lg bg-white border border-rose-100 shadow-sm space-y-2">
-                          <p className="text-[10px] font-bold text-rose-600 uppercase tracking-wider">{q.review_reason}</p>
-                          <div className="flex gap-4 text-[11px]">
-                            <p><strong>PDF Key:</strong> <span className="text-rose-600">{q.source_answer || "None"}</span></p>
-                            <p><strong>AI Calc:</strong> <span className="text-emerald-600">{q.ai_verified_answer}</span></p>
-                          </div>
-                          <p className="text-[11px] text-ink-soft bg-black/5 p-2 rounded italic">" {q.verification_explanation} "</p>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
               </div>
-              <div className="pt-2">
-                 <button onClick={applyPDFUpdates} className="btn-primary w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-emerald-500/20">
-                   <CheckCircle2 size={18} /> Apply Fixes & Publish Mock Test
-                 </button>
-              </div>
+              <button onClick={applyPDFUpdates} className="btn-primary w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-emerald-500/20">
+                <CheckCircle2 size={18} /> Apply Fixes & Publish Mock Test
+              </button>
             </div>
           ) : mode === "pdf" && pdfStatus === "error" ? (
             <div className="flex flex-col items-center justify-center py-20 text-center space-y-4 text-red-500">
