@@ -508,9 +508,48 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       return { questionText: formatMathText(questionText), options };
     };
 
-    for (let block of rawBlocks) {
+    let currentPassage = "";
+    let passageEndQNum = -1;
+
+    for (let i = 0; i < rawBlocks.length; i++) {
+      let block = rawBlocks[i];
       if (block.length < 5) continue;
       let { questionText, options } = parseOptionsFromBlock(block);
+
+      let extractedPassageForThisQ = "";
+
+      // Check if block contains Directions / Passage / DI context header
+      const dirRegex = /(?:Directions?\s*(?:\([^\)]+\))?[\:\s]*|Read the following[^\:\n]*[\:\.\n]|Study the following[^\:\n]*[\:\.\n]|Passage\s*[\:\-]|Paragraph\s*[\:\-])/i;
+      
+      if (dirRegex.test(questionText)) {
+        const dirMatch = questionText.match(/(?:Directions?\s*\([^\)]+\)|Directions?|Read the following[^\:\n]*|Study the following[^\:\n]*|Passage|Paragraph)[\s\S]*?(?=\n\s*(?:What|Find|Calculate|If|Which|How|In|Select|Choose|Who|Where|When|The|A|An|\d+[\.\)])|$)/i);
+
+        if (dirMatch && dirMatch[0]) {
+          extractedPassageForThisQ = dirMatch[0].trim();
+          let cleanedQText = questionText.substring(dirMatch[0].length).trim();
+          if (cleanedQText.length > 5) {
+            questionText = cleanedQText;
+          }
+        } else {
+          extractedPassageForThisQ = questionText.trim();
+        }
+
+        const rangeMatch = extractedPassageForThisQ.match(/(?:Q(?:uestion)?s?[\:\s\.]*)?(\d+)\s*(?:-|to|–|—)\s*(\d+)/i);
+        if (rangeMatch) {
+          const startQ = parseInt(rangeMatch[1]);
+          const endQ = parseInt(rangeMatch[2]);
+          passageEndQNum = endQ;
+          currentPassage = extractedPassageForThisQ;
+        } else {
+          currentPassage = extractedPassageForThisQ;
+          passageEndQNum = questions.length + 5;
+        }
+      }
+
+      let finalPassage = extractedPassageForThisQ;
+      if (!finalPassage && currentPassage && (questions.length + 1 <= passageEndQNum)) {
+        finalPassage = currentPassage;
+      }
 
       let finalOptions = { ...options };
       if (Object.keys(finalOptions).length < 2) {
@@ -540,6 +579,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
         questions.push({
           section: sectionName,
+          passage: finalPassage,
           question_text: questionText,
           options: finalOptions,
           source_answer: "A",
