@@ -865,7 +865,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       // PHASE 3: Background Verification. The offline parser has already
       // produced a usable test; do not make dozens of failing AI calls and
       // destabilise the preview when the optional AI service is offline.
-      if (responseData.warning) {
+      if (!llmSuccess) {
         const reviewable = result.rawExtractedQuestions.map((q) => ({
           ...q,
           answer_status: q.source_answer ? "NEEDS_REVIEW" : "NO_SOURCE_ANSWER",

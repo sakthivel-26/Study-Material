@@ -116,25 +116,35 @@ async function callGemma7B(apiKey, prompt, customEndpoint) {
 
 // 2. Google Gemini API Provider
 async function callGemini(apiKey, prompt) {
-  const models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
+  if (!apiKey || typeof apiKey !== "string") {
+    throw new Error("Invalid API key provided for Google Gemini.");
+  }
+
+  const cleanKey = apiKey.trim();
+
+  const candidateEndpoints = [
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${cleanKey}`,
+  ];
+
   let lastErr = null;
 
-  for (const model of models) {
+  for (const url of candidateEndpoints) {
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
-          }),
-        }
-      );
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+        }),
+      });
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
-        throw new Error(`Gemini ${model} API error (${response.status}): ${errText || response.statusText}`);
+        throw new Error(`Gemini API error (${response.status}): ${errText || response.statusText}`);
       }
       const data = await response.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
@@ -147,11 +157,11 @@ async function callGemini(apiKey, prompt) {
       const parsed = JSON.parse(cleaned);
       return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
     } catch (err) {
-      console.warn(`Gemini model ${model} failed, trying next...`, err);
+      console.warn(`Gemini endpoint ${url} failed, trying next...`, err);
       lastErr = err;
     }
   }
-  throw lastErr || new Error("All Gemini models failed.");
+  throw lastErr || new Error("All Gemini model endpoints failed. Please check your Google Gemini API key at https://aistudio.google.com/app/apikey");
 }
 
 // 3. OpenAI API Provider
