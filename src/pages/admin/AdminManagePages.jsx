@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import {
   ClipboardPlus, Users, Megaphone, TrendingUp, BookOpen, Plus, Search,
   Trash2, Send, Bell, Sparkles, Loader2, CheckCircle2, Eye, HelpCircle, X,
-  FileUp, FileText, Upload, Download, ShieldCheck, Image as ImageIcon, Edit3
+  FileUp, FileText, Upload, Download, ShieldCheck, Image as ImageIcon, Edit3, Maximize2, Minimize2
 } from "lucide-react";
 import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
@@ -28,6 +28,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [extractionProgress, setExtractionProgress] = useState(null);
   const [verificationProgress, setVerificationProgress] = useState(null);
   const [extractionStartTime, setExtractionStartTime] = useState(null);
+  const [isFullPreview, setIsFullPreview] = useState(false);
 
   // Edit Existing Test Modal State
   const [editingTest, setEditingTest] = useState(null);
@@ -919,7 +920,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-[1.2fr_1fr] gap-6">
+      <div className={`grid gap-6 ${((mode === "pdf" || mode === "multipdf") && generatedTest) ? "grid-cols-1" : "lg:grid-cols-[1.2fr_1fr]"}`}>
         {/* Left Form */}
         <div className="card p-6 space-y-5">
           <div className="flex items-center justify-between">
@@ -1300,21 +1301,42 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
         {/* Right Preview Card */}
         <div className="card p-6 space-y-4">
-          <h3 className="font-bold text-ink flex items-center gap-2">
-            <Eye size={18} className="text-brand-600" /> {mode === "manual" ? "Manual Test Preview" : mode === "pdf" ? "📄 Extracted Questions Preview" : "AI Question Bank Preview"}
-          </h3>
+          <div className="flex items-center justify-between border-b border-black/5 pb-3">
+            <h3 className="font-bold text-ink flex items-center gap-2 text-base">
+              <Eye size={20} className="text-brand-600" /> {mode === "manual" ? "Manual Test Preview" : mode === "pdf" ? "📄 Extracted Questions Preview" : "AI Question Bank Preview"}
+            </h3>
+
+            {((mode === "pdf" || mode === "multipdf") && generatedTest) && (
+              <button
+                type="button"
+                onClick={() => setIsFullPreview(true)}
+                className="btn-soft px-3 py-1.5 text-xs bg-brand-50 text-brand-700 hover:bg-brand-100 flex items-center gap-1.5 font-bold rounded-xl border border-brand-200 shadow-sm transition-all active:scale-95"
+              >
+                <Maximize2 size={14} /> Fullscreen Maximize View
+              </button>
+            )}
+          </div>
 
           {((mode === "pdf" || mode === "multipdf") && generatedTest) ? (
             <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
-                <p className="font-bold text-emerald-900 text-sm">{generatedTest.title}</p>
-                <p className="text-xs text-emerald-700 mt-1">
-                  {generatedTest.rawExtractedQuestions?.length || generatedTest.questions} Questions extracted from PDF · {generatedTest.time} · {generatedTest.category}
-                </p>
-                {pdfFile && <p className="text-[11px] text-emerald-600 mt-1 font-medium">📎 Source: {pdfFile.name}</p>}
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <p className="font-bold text-emerald-900 text-sm">{generatedTest.title}</p>
+                  <p className="text-xs text-emerald-700 mt-1">
+                    {generatedTest.rawExtractedQuestions?.length || generatedTest.questions} Questions extracted from PDF · {generatedTest.time} · {generatedTest.category}
+                  </p>
+                  {pdfFile && <p className="text-[11px] text-emerald-600 mt-1 font-medium">📎 Source: {pdfFile.name}</p>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsFullPreview(true)}
+                  className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-emerald-700"
+                >
+                  <Maximize2 size={13} /> Expand 100%
+                </button>
               </div>
 
-              <div className="max-h-[550px] overflow-y-auto space-y-4 pr-1">
+              <div className="max-h-[75vh] md:max-h-[850px] overflow-y-auto space-y-4 pr-1">
                 {generatedTest.rawExtractedQuestions?.map((q, idx) => {
                   const finalAnswer = approvedQuestions[idx]?.editedAnswer || q.ai_verified_answer || q.source_answer || "A";
 
@@ -1561,6 +1583,246 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           )}
         </div>
       </div>
+
+      {/* FULLSCREEN MAXIMIZE PREVIEW OVERLAY */}
+      {isFullPreview && generatedTest && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md p-3 sm:p-6 flex flex-col items-center justify-center">
+          <div className="w-full max-w-6xl h-full bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-black/10">
+            {/* Top Modal Header */}
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-brand-600 flex items-center justify-center text-white">
+                  <Eye size={18} />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base leading-tight">📄 Extracted Questions Preview (Full Screen)</h3>
+                  <p className="text-xs text-slate-400">
+                    {generatedTest.title} · {generatedTest.rawExtractedQuestions?.length || generatedTest.questions} Questions extracted from PDF
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={applyPDFUpdates}
+                  className="btn-primary px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-600/30"
+                >
+                  <CheckCircle2 size={16} /> Save &amp; Publish Test
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsFullPreview(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+                  title="Close Fullscreen View"
+                >
+                  <Minimize2 size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable Questions Container */}
+            <div className="p-6 overflow-y-auto space-y-5 flex-1 bg-slate-50">
+              {generatedTest.rawExtractedQuestions?.map((q, idx) => {
+                const finalAnswer = approvedQuestions[idx]?.editedAnswer || q.ai_verified_answer || q.source_answer || "A";
+
+                return (
+                  <div key={idx} className="p-5 rounded-2xl border-2 border-black/10 bg-white space-y-4 shadow-sm relative hover:border-brand-200 transition-colors">
+                    
+                    {/* Header */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="w-8 h-8 rounded-xl bg-brand-600 text-white flex items-center justify-center text-sm font-extrabold shadow-sm">
+                          {idx + 1}
+                        </span>
+                        <select
+                          className="input text-xs py-1 px-3 font-bold bg-slate-50 border-black/10 rounded-xl"
+                          value={approvedQuestions[idx]?.section || q.section || "General"}
+                          onChange={(e) => editQuestionSection(idx, e.target.value)}
+                        >
+                          <option value="Quantitative Aptitude">Quantitative Aptitude</option>
+                          <option value="Reasoning Ability">Reasoning Ability</option>
+                          <option value="English Language">English Language</option>
+                          <option value="General Awareness">General Awareness</option>
+                          <option value="General">General</option>
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeExtractedQuestion(idx)}
+                        className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1.5 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-100 transition-colors"
+                      >
+                        <Trash2 size={14} /> Remove Q{idx + 1}
+                      </button>
+                    </div>
+
+                    {/* Question Statement */}
+                    <div>
+                      <label className="text-xs font-bold text-ink-muted mb-1 block">Question Statement</label>
+
+                      <div className="flex flex-wrap items-center gap-1.5 mb-2 bg-slate-50 p-2 rounded-xl border border-black/10">
+                        <span className="text-xs font-bold text-ink-muted mr-1">Math Insert:</span>
+                        {[
+                          { label: "⅓", insert: " ⅓ " },
+                          { label: "¼", insert: " ¼ " },
+                          { label: "½", insert: " ½ " },
+                          { label: "¾", insert: " ¾ " },
+                          { label: "⅔", insert: " ⅔ " },
+                          { label: "²", insert: "²" },
+                          { label: "³", insert: "³" },
+                          { label: "×", insert: " × " },
+                          { label: "÷", insert: " ÷ " },
+                          { label: "√", insert: " √" },
+                        ].map((sym, sIdx) => (
+                          <button
+                            key={sIdx}
+                            type="button"
+                            className="px-2 py-1 text-xs font-bold bg-white hover:bg-brand-50 hover:text-brand-700 border border-slate-200 rounded-lg transition-colors shadow-xs"
+                            onClick={() => {
+                              const curText = approvedQuestions[idx]?.questionText ?? q.question_text;
+                              editQuestionText(idx, formatMathText(curText + sym.insert));
+                            }}
+                          >
+                            {sym.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <textarea
+                        className="input text-sm font-semibold bg-white min-h-[90px] p-3 border-black/10 focus:border-brand-500"
+                        placeholder="Enter question statement..."
+                        value={approvedQuestions[idx]?.questionText ?? q.question_text}
+                        onChange={(e) => editQuestionText(idx, e.target.value)}
+                      />
+                    </div>
+
+                    {/* Options List */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-ink-muted mb-1 block">
+                        Options &amp; Correct Answer Key (Click radio button to mark correct option):
+                      </label>
+
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        {Object.entries(q.options || {}).map(([key, opt]) => {
+                          const isRight = key === finalAnswer;
+                          return (
+                            <div
+                              key={key}
+                              onClick={() => {
+                                editCorrectAnswer(idx, key);
+                                toggleApproveQuestion(idx, true);
+                              }}
+                              className={`flex items-center gap-2.5 p-3 rounded-2xl border-2 transition-all cursor-pointer ${
+                                isRight 
+                                  ? 'bg-emerald-50/80 border-emerald-400 ring-2 ring-emerald-500/20 font-bold shadow-sm' 
+                                  : 'bg-slate-50 border-black/10 hover:border-emerald-300 hover:bg-white'
+                              }`}
+                            >
+                              <span
+                                className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 ${
+                                  isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-700'
+                                }`}
+                              >
+                                {key}
+                              </span>
+
+                              <input
+                                type="radio"
+                                name={`teacher_review_ans_full_${idx}`}
+                                checked={isRight}
+                                onChange={() => {
+                                  editCorrectAnswer(idx, key);
+                                  toggleApproveQuestion(idx, true);
+                                }}
+                                className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
+                              />
+
+                              <input 
+                                className="input text-xs py-1.5 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-semibold cursor-text"
+                                value={approvedQuestions[idx]?.options?.[key] ?? (opt || `Option ${key}`)}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => editOptionText(idx, key, e.target.value)}
+                                placeholder={`Option ${key}`}
+                              />
+
+                              <span
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all ${
+                                  isRight ? "bg-emerald-600 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-600"
+                                }`}
+                              >
+                                {isRight ? "✓ Correct" : "Select"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Paragraph Context */}
+                    <div>
+                      <label className="text-xs font-bold text-ink-muted mb-1 block">
+                        Paragraph / Passage Directions Context (Optional):
+                      </label>
+                      <textarea
+                        className="input text-xs min-h-[70px] bg-white border border-black/10 p-2.5"
+                        placeholder="Paragraph Context (Optional) - e.g. Read the following passage..."
+                        value={approvedQuestions[idx]?.passage ?? (q.passage || "")}
+                        onChange={(e) => editPassage(idx, e.target.value)}
+                      />
+                    </div>
+
+                    {/* Image Preview & Attachment */}
+                    {approvedQuestions[idx]?.imageUrl && (
+                      <div className="mt-2 relative max-w-md rounded-xl overflow-hidden border border-black/10 bg-white">
+                        <img src={approvedQuestions[idx].imageUrl} alt="Chart/Data" className="w-full h-auto object-contain max-h-60" />
+                        <button 
+                          type="button"
+                          className="absolute top-2 right-2 bg-rose-600 text-white rounded-lg p-1.5 shadow-md"
+                          onClick={() => attachImageToQuestion(idx, null)}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <label className="btn-soft px-3.5 py-2 text-xs bg-slate-100 hover:bg-slate-200 cursor-pointer flex items-center gap-1.5 font-bold rounded-xl border border-slate-200">
+                        <Upload size={14} /> {approvedQuestions[idx]?.imageUrl ? "Change Chart/Image" : "Attach Chart/Image"}
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => attachImageToQuestion(idx, e.target.files[0])} />
+                      </label>
+                    </div>
+
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Bottom Modal Footer */}
+            <div className="p-4 bg-white border-t border-black/10 flex items-center justify-between shrink-0">
+              <span className="text-xs text-ink-muted font-medium">Reviewing {generatedTest.rawExtractedQuestions?.length || 0} extracted questions in full screen.</span>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsFullPreview(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl"
+                >
+                  Exit Fullscreen
+                </button>
+                <button
+                  type="button"
+                  onClick={applyPDFUpdates}
+                  className="btn-primary px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-600/20"
+                >
+                  <CheckCircle2 size={16} /> Save &amp; Publish Test
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* LLM Key Settings Modal */}
       {showKeyModal && (
