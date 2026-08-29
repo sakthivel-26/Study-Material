@@ -753,7 +753,19 @@ async function callLLMChain(prompt) {
   const openAIKey = getEnvKey("VITE_OPENAI_API_KEY") || getEnvKey("OPENAI_API_KEY");
   const deepSeekKey = getEnvKey("VITE_DEEPSEEK_API_KEY") || getEnvKey("DEEPSEEK_API_KEY");
 
-  // 1. Try Gemini API if key exists
+  const openRouterKey = getEnvKey("VITE_OPENROUTER_API_KEY") || getEnvKey("OPENROUTER_API_KEY");
+  const openRouterModel = getEnvKey("VITE_OPENROUTER_MODEL") || "nvidia/nemotron-4-340b-instruct:free";
+
+  // 1. Try OpenRouter if key exists
+  if (openRouterKey && openRouterKey !== "sk-or-v1-free") {
+    try {
+      return await callOpenRouter(openRouterKey, prompt, openRouterModel);
+    } catch (e) {
+      console.warn("OpenRouter API call failed, falling back...", e);
+    }
+  }
+
+  // 2. Try Gemini API if key exists
   if (geminiKey) {
     try {
       return await callGemini(geminiKey, prompt);
@@ -762,7 +774,7 @@ async function callLLMChain(prompt) {
     }
   }
 
-  // 2. Try Groq / Gemma API if key exists
+  // 3. Try Groq / Gemma API if key exists
   if (groqKey) {
     try {
       return await callNvidia(groqKey, prompt, "llama-3.3-70b-versatile");
@@ -771,7 +783,7 @@ async function callLLMChain(prompt) {
     }
   }
 
-  // 3. Try OpenAI if key exists
+  // 4. Try OpenAI if key exists
   if (openAIKey) {
     try {
       return await callOpenAI(openAIKey, prompt);
@@ -780,7 +792,7 @@ async function callLLMChain(prompt) {
     }
   }
 
-  // 4. Try DeepSeek if key exists
+  // 5. Try DeepSeek if key exists
   if (deepSeekKey) {
     try {
       return await callDeepSeek(deepSeekKey, prompt);

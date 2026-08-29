@@ -30,7 +30,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [extractionStartTime, setExtractionStartTime] = useState(null);
   const [isFullPreview, setIsFullPreview] = useState(false);
   const [showKeyModal, setShowKeyModal] = useState(false);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY") || "");
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENROUTER_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY") || "");
+  const [openRouterModel, setOpenRouterModel] = useState(() => localStorage.getItem("VITE_OPENROUTER_MODEL") || "nvidia/nemotron-4-340b-instruct:free");
   const [keyType, setKeyType] = useState(() => localStorage.getItem("LLM_PROVIDER_TYPE") || "gemini");
 
   const saveLLMKey = () => {
@@ -43,6 +44,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       localStorage.removeItem("OPENAI_API_KEY");
       localStorage.removeItem("VITE_DEEPSEEK_API_KEY");
       localStorage.removeItem("DEEPSEEK_API_KEY");
+      localStorage.removeItem("VITE_OPENROUTER_API_KEY");
+      localStorage.removeItem("OPENROUTER_API_KEY");
       setShowKeyModal(false);
       pushToast("LLM API Key cleared.");
       return;
@@ -60,6 +63,10 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     } else if (keyType === "deepseek") {
       localStorage.setItem("VITE_DEEPSEEK_API_KEY", apiKey.trim());
       localStorage.setItem("DEEPSEEK_API_KEY", apiKey.trim());
+    } else if (keyType === "openrouter") {
+      localStorage.setItem("VITE_OPENROUTER_API_KEY", apiKey.trim());
+      localStorage.setItem("OPENROUTER_API_KEY", apiKey.trim());
+      localStorage.setItem("VITE_OPENROUTER_MODEL", openRouterModel.trim());
     }
     localStorage.setItem("LLM_PROVIDER_TYPE", keyType);
     setShowKeyModal(false);
@@ -2073,6 +2080,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                   <option value="groq">Groq / Gemma-7B (Ultra-fast LLM Inference)</option>
                   <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
                   <option value="deepseek">DeepSeek API (DeepSeek-R1 / Chat)</option>
+                  <option value="openrouter">OpenRouter (Any Custom Model!)</option>
                 </select>
               </div>
 
@@ -2082,6 +2090,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                   {keyType === "groq" && "Groq / Gemma API Key (gsk_...)"}
                   {keyType === "openai" && "OpenAI API Key (sk-proj-...)"}
                   {keyType === "deepseek" && "DeepSeek API Key (sk-...)"}
+                  {keyType === "openrouter" && "OpenRouter API Key (sk-or-...)"}
                 </label>
                 <input
                   type="password"
@@ -2092,6 +2101,22 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                 />
                 <p className="text-[11px] text-ink-faint mt-1">Key is stored securely in your local browser storage for AI calls.</p>
               </div>
+
+              {keyType === "openrouter" && (
+                <div>
+                  <label className="text-xs font-bold text-ink-soft mb-1.5 block">
+                    OpenRouter Model ID
+                  </label>
+                  <input
+                    type="text"
+                    className="input font-mono text-xs bg-brand-50"
+                    placeholder="e.g. nvidia/nemotron-4-340b-instruct:free"
+                    value={openRouterModel}
+                    onChange={(e) => setOpenRouterModel(e.target.value)}
+                  />
+                  <p className="text-[10px] text-ink-muted mt-1.5">You can enter any OpenRouter Model ID here (e.g. <b>nvidia/nemotron-4-340b-instruct:free</b> or <b>nvidia/nemotron-3-ultra-550b-a55b:free</b>)</p>
+                </div>
+              )}
             </div>
 
             <div className="pt-3 border-t border-black/5 flex justify-end gap-2">
