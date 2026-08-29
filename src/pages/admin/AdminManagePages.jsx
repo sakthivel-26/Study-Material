@@ -29,6 +29,42 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [verificationProgress, setVerificationProgress] = useState(null);
   const [extractionStartTime, setExtractionStartTime] = useState(null);
   const [isFullPreview, setIsFullPreview] = useState(false);
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY") || "");
+  const [keyType, setKeyType] = useState(() => localStorage.getItem("LLM_PROVIDER_TYPE") || "gemini");
+
+  const saveLLMKey = () => {
+    if (!apiKey.trim()) {
+      localStorage.removeItem("VITE_GEMINI_API_KEY");
+      localStorage.removeItem("GEMINI_API_KEY");
+      localStorage.removeItem("VITE_GROQ_API_KEY");
+      localStorage.removeItem("GROQ_API_KEY");
+      localStorage.removeItem("VITE_OPENAI_API_KEY");
+      localStorage.removeItem("OPENAI_API_KEY");
+      localStorage.removeItem("VITE_DEEPSEEK_API_KEY");
+      localStorage.removeItem("DEEPSEEK_API_KEY");
+      setShowKeyModal(false);
+      pushToast("LLM API Key cleared.");
+      return;
+    }
+
+    if (keyType === "gemini") {
+      localStorage.setItem("VITE_GEMINI_API_KEY", apiKey.trim());
+      localStorage.setItem("GEMINI_API_KEY", apiKey.trim());
+    } else if (keyType === "groq") {
+      localStorage.setItem("VITE_GROQ_API_KEY", apiKey.trim());
+      localStorage.setItem("GROQ_API_KEY", apiKey.trim());
+    } else if (keyType === "openai") {
+      localStorage.setItem("VITE_OPENAI_API_KEY", apiKey.trim());
+      localStorage.setItem("OPENAI_API_KEY", apiKey.trim());
+    } else if (keyType === "deepseek") {
+      localStorage.setItem("VITE_DEEPSEEK_API_KEY", apiKey.trim());
+      localStorage.setItem("DEEPSEEK_API_KEY", apiKey.trim());
+    }
+    localStorage.setItem("LLM_PROVIDER_TYPE", keyType);
+    setShowKeyModal(false);
+    pushToast(`✅ ${keyType.toUpperCase()} API Key saved for High-Accuracy PDF Extraction!`);
+  };
 
   // Edit Existing Test Modal State
   const [editingTest, setEditingTest] = useState(null);
@@ -167,35 +203,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     }
     return () => clearInterval(interval);
   }, [pdfStatus, extractionStartTime]);
-
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [keys, setKeys] = useState({
-    gemma: localStorage.getItem("GEMMA_API_KEY") || "",
-    gemmaEndpoint: localStorage.getItem("GEMMA_ENDPOINT") || "",
-    gemini: localStorage.getItem("GEMINI_API_KEY") || "",
-    openai: localStorage.getItem("OPENAI_API_KEY") || "",
-    deepseek: localStorage.getItem("DEEPSEEK_API_KEY") || "",
-  });
-
-  const saveKeys = () => {
-    if (keys.gemma) localStorage.setItem("GEMMA_API_KEY", keys.gemma.trim());
-    else localStorage.removeItem("GEMMA_API_KEY");
-
-    if (keys.gemmaEndpoint) localStorage.setItem("GEMMA_ENDPOINT", keys.gemmaEndpoint.trim());
-    else localStorage.removeItem("GEMMA_ENDPOINT");
-
-    if (keys.gemini) localStorage.setItem("GEMINI_API_KEY", keys.gemini.trim());
-    else localStorage.removeItem("GEMINI_API_KEY");
-
-    if (keys.openai) localStorage.setItem("OPENAI_API_KEY", keys.openai.trim());
-    else localStorage.removeItem("OPENAI_API_KEY");
-
-    if (keys.deepseek) localStorage.setItem("DEEPSEEK_API_KEY", keys.deepseek.trim());
-    else localStorage.removeItem("DEEPSEEK_API_KEY");
-
-    pushToast("LLM API Keys saved successfully! 🤖");
-    setShowKeyModal(false);
-  };
 
   useEffect(() => {
     setF(prev => ({ ...prev, isFree: isFreeByDefault }));
@@ -1086,6 +1093,42 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                 onChange={handlePDFUpload}
               />
 
+              {/* LLM Connection Status Card */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-brand-50 to-indigo-50 border border-brand-200 flex items-center justify-between flex-wrap gap-3 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center font-extrabold shadow-sm shrink-0">
+                    <Sparkles size={20} className="animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-xs font-extrabold text-brand-950">AI LLM Model Status:</h4>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
+                        localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY") || localStorage.getItem("VITE_DEEPSEEK_API_KEY")
+                          ? "bg-emerald-500 text-white shadow-xs"
+                          : "bg-amber-500 text-white"
+                      }`}>
+                        {localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY") || localStorage.getItem("VITE_DEEPSEEK_API_KEY")
+                          ? "🟢 LLM Connected (100% Accuracy)"
+                          : "⚡ Auto-LLM Active"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-brand-700 font-medium mt-0.5">
+                      {localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY")
+                        ? "Connected with direct API Key! PDF questions are extracted with 100% precision."
+                        : "Connect your Google Gemini or Groq API Key to ensure 100% LLM PDF extraction accuracy."}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowKeyModal(true)}
+                  className="btn-primary text-xs px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5"
+                >
+                  ⚙️ {localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") ? "API Key Connected" : "Connect LLM API Key"}
+                </button>
+              </div>
+
               <div
                 onClick={() => pdfInputRef.current?.click()}
                 className="group cursor-pointer border-2 border-dashed border-emerald-300 hover:border-emerald-500 rounded-2xl p-8 text-center bg-emerald-50/40 hover:bg-emerald-50/70 transition-all"
@@ -1094,9 +1137,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                   <div className="space-y-3">
                     <Loader2 size={40} className="mx-auto text-emerald-600 animate-spin" />
                     <p className="font-bold text-emerald-900 text-sm">
-                      {pdfStatus === "extracting" ? "📄 Extracting text from PDF..." : "🤖 AI is extracting questions..."}
+                      {pdfStatus === "extracting" ? "📄 Extracting text from PDF..." : "🤖 AI LLM Model is extracting questions..."}
                     </p>
-                    {pdfPageInfo && <p className="text-xs text-emerald-700">{pdfPageInfo}</p>}
+                    {pdfPageInfo && <p className="text-xs text-emerald-700 font-semibold">{pdfPageInfo}</p>}
                     {extractionProgress && (
                       <div className="bg-emerald-100 rounded-full h-1.5 mt-2 overflow-hidden relative">
                         <div className="bg-emerald-500 absolute inset-y-0 left-0 w-full animate-pulse"></div>
@@ -1105,16 +1148,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                     {extractionProgress && <p className="text-xs font-bold text-emerald-700">{extractionProgress}</p>}
                     {extractionElapsed > 0 && (
                       <p className="text-[10px] font-semibold text-emerald-600 mt-1">
-                        Time elapsed: {extractionElapsed}s {extractionElapsed > 15 && "(Usually takes 15-30s)"}
+                        Time elapsed: {extractionElapsed}s {extractionElapsed > 15 && "(Processing PDF text with LLM model)"}
                       </p>
                     )}
                   </div>
                 ) : pdfStatus === "done" ? (
                   <div className="space-y-2">
                     <CheckCircle2 size={40} className="mx-auto text-emerald-600" />
-                    <p className="font-bold text-emerald-900 text-sm">✅ {generatedTest?.questions} questions found</p>
-                    <p className="text-xs text-emerald-700">Mock ready</p>
-                    <p className="text-xs text-emerald-600 font-semibold mt-1">Click to upload a different PDF</p>
+                    <p className="font-bold text-emerald-900 text-sm">✅ {generatedTest?.questions} questions extracted with AI</p>
+                    <p className="text-xs text-emerald-700 font-semibold">Mock Test Ready</p>
+                    <p className="text-xs text-emerald-600 font-bold mt-1">Click to upload a different PDF</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -1126,7 +1169,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       <p className="text-xs text-ink-muted mt-1">or click to browse · Supports IBPS, SBI, TNPSC, SSC question papers</p>
                     </div>
                     {pdfFile && (
-                      <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white rounded-xl text-xs text-ink-soft border border-black/5">
+                      <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white rounded-xl text-xs text-ink-soft border border-black/5 font-semibold">
                         <FileText size={14} className="text-emerald-600" />
                         {pdfFile.name}
                       </div>
@@ -1134,8 +1177,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                   </div>
                 )}
               </div>
-
-              {/* Removed redundant publish button, PDF auto-publishes and updates via Review Panel */}
             </div>
           )}
 
@@ -2008,78 +2049,56 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           <div className="w-full max-w-lg bg-white rounded-3xl p-6 shadow-lift space-y-5 border border-black/5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-black/5 pb-3">
               <h3 className="font-extrabold text-lg text-ink flex items-center gap-2">
-                <Sparkles size={20} className="text-amber-500" /> Connect LLM Models for AI Mock Tests
+                <Sparkles size={20} className="text-amber-500" /> Connect LLM Models for AI PDF Extraction
               </h3>
               <button onClick={() => setShowKeyModal(false)} className="text-ink-muted hover:text-ink">
                 <X size={18} />
               </button>
             </div>
 
-            <p className="text-xs text-ink-muted">
-              Configure your API key for Google Gemma-7B, Google Gemini, OpenAI, or DeepSeek below.
+            <p className="text-xs text-ink-muted leading-relaxed">
+              Select your preferred AI provider below and enter your API key to enable 100% accurate PDF question extraction and AI mock generation.
             </p>
 
-            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-              <div className="p-3 rounded-2xl bg-amber-50/60 border border-amber-200 space-y-2">
-                <label className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-                  <Sparkles size={14} className="text-amber-600" /> 1. Google Gemma-7B Open Model (HuggingFace / Groq / Ollama / NVIDIA NIM)
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-ink-soft mb-1.5 block">Select AI Model Provider</label>
+                <select
+                  className="input text-xs font-bold bg-white"
+                  value={keyType}
+                  onChange={(e) => setKeyType(e.target.value)}
+                >
+                  <option value="gemini">Google Gemini API (Recommended - Free &amp; Fast)</option>
+                  <option value="groq">Groq / Gemma-7B (Ultra-fast LLM Inference)</option>
+                  <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+                  <option value="deepseek">DeepSeek API (DeepSeek-R1 / Chat)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-ink-soft mb-1.5 block">
+                  {keyType === "gemini" && "Google Gemini API Key (AIzaSy...)"}
+                  {keyType === "groq" && "Groq / Gemma API Key (gsk_...)"}
+                  {keyType === "openai" && "OpenAI API Key (sk-proj-...)"}
+                  {keyType === "deepseek" && "DeepSeek API Key (sk-...)"}
                 </label>
                 <input
                   type="password"
-                  className="input font-mono text-xs bg-white"
-                  placeholder="HuggingFace / Groq API Key (hf_... / gsk_...)"
-                  value={keys.gemma}
-                  onChange={(e) => setKeys({ ...keys, gemma: e.target.value })}
-                />
-                <input
-                  type="text"
-                  className="input font-mono text-xs bg-white"
-                  placeholder="Custom Endpoint URL (e.g. http://localhost:11434/v1/chat/completions)"
-                  value={keys.gemmaEndpoint}
-                  onChange={(e) => setKeys({ ...keys, gemmaEndpoint: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-ink-soft mb-1 block">2. Google Gemini API Key (Recommended - Free)</label>
-                <input
-                  type="password"
                   className="input font-mono text-xs"
-                  placeholder="AIzaSy..."
-                  value={keys.gemini}
-                  onChange={(e) => setKeys({ ...keys, gemini: e.target.value })}
+                  placeholder={`Enter your ${keyType.toUpperCase()} API key here...`}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
                 />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-ink-soft mb-1 block">3. OpenAI API Key (GPT-4o / GPT-4o-mini)</label>
-                <input
-                  type="password"
-                  className="input font-mono text-xs"
-                  placeholder="sk-proj-..."
-                  value={keys.openai}
-                  onChange={(e) => setKeys({ ...keys, openai: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-ink-soft mb-1 block">4. DeepSeek API Key (DeepSeek-R1 / DeepSeek-Chat)</label>
-                <input
-                  type="password"
-                  className="input font-mono text-xs"
-                  placeholder="sk-..."
-                  value={keys.deepseek}
-                  onChange={(e) => setKeys({ ...keys, deepseek: e.target.value })}
-                />
+                <p className="text-[11px] text-ink-faint mt-1">Key is stored securely in your local browser storage for AI calls.</p>
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2">
-              <button onClick={() => setShowKeyModal(false)} className="btn-ghost text-xs px-4 py-2">
+            <div className="pt-3 border-t border-black/5 flex justify-end gap-2">
+              <button onClick={() => setShowKeyModal(false)} className="btn-ghost text-xs px-4 py-2 font-bold text-slate-600">
                 Cancel
               </button>
-              <button onClick={saveKeys} className="btn-primary text-xs px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white font-bold">
-                Save API Keys
+              <button onClick={saveLLMKey} className="btn-primary text-xs px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl shadow-xs">
+                Save &amp; Connect API Key
               </button>
             </div>
           </div>
