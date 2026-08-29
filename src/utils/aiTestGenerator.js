@@ -116,22 +116,42 @@ async function callGemma7B(apiKey, prompt, customEndpoint) {
 
 // 2. Google Gemini API Provider
 async function callGemini(apiKey, prompt) {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.3 },
-      }),
+  const models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
+  let lastErr = null;
+
+  for (const model of models) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+          }),
+        }
+      );
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        throw new Error(`Gemini ${model} API error (${response.status}): ${errText || response.statusText}`);
+      }
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+      const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+      const jsonStart = cleaned.indexOf("[");
+      const jsonEnd = cleaned.lastIndexOf("]");
+      if (jsonStart !== -1 && jsonEnd !== -1) {
+        return JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+      }
+      const parsed = JSON.parse(cleaned);
+      return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
+    } catch (err) {
+      console.warn(`Gemini model ${model} failed, trying next...`, err);
+      lastErr = err;
     }
-  );
-  if (!response.ok) throw new Error("Gemini API error: " + response.statusText);
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
-  const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-  return JSON.parse(cleaned);
+  }
+  throw lastErr || new Error("All Gemini models failed.");
 }
 
 // 3. OpenAI API Provider
@@ -879,14 +899,49 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     throw new Error("Failed to extract any valid questions from the PDF.");
   }
 
-  // Deduplicate by question text
+  // Normalize and deduplicate questions
   const uniqueQuestions = [];
   const seen = new Set();
   for (const q of allQuestions) {
-    const cleanText = (q.question_text || "").trim().toLowerCase();
+    const qText = q.question || q.question_text || "";
+    const cleanText = qText.trim().toLowerCase();
     if (cleanText && !seen.has(cleanText)) {
       seen.add(cleanText);
-      uniqueQuestions.push(q);
+
+      // Normalize options array
+      let opts = [];
+      if (Array.isArray(q.options)) {
+        opts = q.options;
+      } else if (q.options && typeof q.options === "object") {
+        opts = Object.keys(q.options).sort().map(k => q.options[k]);
+      }
+      if (!opts || opts.length === 0) {
+        opts = ["Option A", "Option B", "Option C", "Option D"];
+      }
+
+      // Calculate correct answer index
+      let correctIndex = 0;
+      if (typeof q.correctAnswerIndex === "number") {
+        correctIndex = q.correctAnswerIndex;
+      } else if (q.source_answer && typeof q.source_answer === "string") {
+        const code = q.source_answer.trim().toUpperCase().charCodeAt(0);
+        if (code >= 65 && code <= 71) {
+          correctIndex = code - 65;
+        }
+      }
+
+      uniqueQuestions.push({
+        id: q.id || `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
+        question: qText,
+        question_text: qText,
+        options: opts,
+        correctAnswerIndex: correctIndex,
+        source_answer: q.source_answer || String.fromCharCode(65 + correctIndex),
+        passage: q.passage || "",
+        section: q.section || category || "General",
+        explanation: q.explanation || "",
+        imageUrl: q.imageUrl || ""
+      });
     }
   }
 

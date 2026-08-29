@@ -805,6 +805,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         }
       } catch (aiErr) {
         console.warn("AI LLM Extraction warning, using local regex parser fallback...", aiErr);
+        pushToast(`⚠️ AI LLM Notice: ${aiErr.message || "Model response fallback"}`);
       }
 
       if (!llmSuccess || extractedQuestions.length === 0) {
