@@ -36,7 +36,9 @@ export default function MockTestRunner({ test, onClose }) {
         };
       })
     : [];
-  const totalDurationSeconds = (test?.durationMinutes || parseInt(test?.time) || 30) * 60;
+  const minutesFromTime = parseInt(String(test?.time || "").replace(/\D+/g, ""));
+  const minutes = minutesFromTime || Number(test?.durationMinutes) || 30;
+  const totalDurationSeconds = Math.max(1, minutes) * 60;
   const [timeLeft, setTimeLeft] = useState(totalDurationSeconds);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState({}); // { [qId]: optionIndex }

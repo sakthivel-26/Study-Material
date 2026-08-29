@@ -250,6 +250,38 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     );
   };
 
+  const addOptionToManual = (qIdx) => {
+    setManualQuestions(prev => prev.map((q, i) => {
+      if (i !== qIdx) return q;
+      if (q.options.length >= 7) {
+        pushToast("Maximum 7 options (A to G) reached.");
+        return q;
+      }
+      const nextLetter = String.fromCharCode(65 + q.options.length);
+      return {
+        ...q,
+        options: [...q.options, `Option ${nextLetter}`]
+      };
+    }));
+  };
+
+  const removeOptionFromManual = (qIdx) => {
+    setManualQuestions(prev => prev.map((q, i) => {
+      if (i !== qIdx) return q;
+      if (q.options.length <= 2) {
+        pushToast("A question must have at least 2 options.");
+        return q;
+      }
+      const newOpts = q.options.slice(0, -1);
+      const newAnsIdx = q.correctAnswerIndex >= newOpts.length ? newOpts.length - 1 : q.correctAnswerIndex;
+      return {
+        ...q,
+        options: newOpts,
+        correctAnswerIndex: newAnsIdx
+      };
+    }));
+  };
+
   const attachImageToManual = (idx, file) => {
     if (!file) {
       updateManualQuestion(idx, "imageUrl", "");
@@ -1177,145 +1209,226 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
           {mode === "manual" && (
             <div className="pt-4 border-t border-black/5 space-y-6">
-              <div className="flex items-center justify-between">
-                <h4 className="font-extrabold text-sm text-ink flex items-center gap-2">
-                  <BookOpen size={16} className="text-brand-600" /> Manual Questions ({manualQuestions.length})
-                </h4>
-                <button type="button" onClick={addManualQuestion} className="btn-soft text-xs px-3 py-1.5 text-brand-700 bg-brand-50 hover:bg-brand-100 flex items-center gap-1">
-                  <Plus size={14} /> Add Question
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h4 className="font-extrabold text-base text-ink flex items-center gap-2">
+                    <BookOpen size={18} className="text-brand-600" /> Manual Questions Builder ({manualQuestions.length})
+                  </h4>
+                  <p className="text-xs text-ink-muted mt-0.5">Build questions manually with custom statements, passage context, images, and options up to G.</p>
+                </div>
+                <button type="button" onClick={addManualQuestion} className="btn-primary text-xs px-4 py-2 text-white bg-brand-600 hover:bg-brand-500 flex items-center gap-1.5 font-bold shadow-sm rounded-xl">
+                  <Plus size={16} /> Add New Question
                 </button>
               </div>
 
-              <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
+              <div className="space-y-6 max-h-[75vh] md:max-h-[850px] overflow-y-auto pr-1">
                 {manualQuestions.map((q, qIdx) => (
-                  <div key={qIdx} className="p-4 rounded-2xl bg-black/[0.02] border border-black/5 space-y-3 relative">
+                  <div key={qIdx} className="p-5 rounded-2xl border-2 border-black/10 bg-slate-50/50 space-y-4 relative shadow-xs">
+                    
+                    {/* Header */}
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-brand-700">Question {qIdx + 1}</span>
-                      <button type="button" onClick={() => removeManualQuestion(qIdx)} className="text-xs text-rose-600 hover:text-rose-700 flex items-center gap-1 font-semibold">
-                        <Trash2 size={13} /> Remove
+                      <div className="flex items-center gap-3">
+                        <span className="w-7 h-7 rounded-xl bg-brand-600 text-white flex items-center justify-center text-xs font-extrabold shadow-sm">
+                          {qIdx + 1}
+                        </span>
+                        <select
+                          className="input text-xs py-1 px-3 font-bold bg-white border-black/10 rounded-xl"
+                          value={q.section || "Quantitative Aptitude"}
+                          onChange={(e) => updateManualQuestion(qIdx, "section", e.target.value)}
+                        >
+                          <option value="Quantitative Aptitude">Quantitative Aptitude</option>
+                          <option value="Reasoning Ability">Reasoning Ability</option>
+                          <option value="English Language">English Language</option>
+                          <option value="General Awareness">General Awareness</option>
+                          <option value="General">General</option>
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeManualQuestion(qIdx)}
+                        className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-100 transition-colors"
+                      >
+                        <Trash2 size={13} /> Remove Q{qIdx + 1}
                       </button>
                     </div>
 
-                    <div className="grid sm:grid-cols-2 gap-3 mb-3">
+                    {/* Question Statement */}
+                    <div>
+                      <label className="text-xs font-bold text-ink-muted mb-1 block">Question Statement</label>
+
+                      <div className="flex flex-wrap items-center gap-1.5 mb-2 bg-white p-2 rounded-xl border border-black/10">
+                        <span className="text-xs font-bold text-ink-muted mr-1">Math Insert:</span>
+                        {[
+                          { label: "⅓", insert: " ⅓ " },
+                          { label: "¼", insert: " ¼ " },
+                          { label: "½", insert: " ½ " },
+                          { label: "¾", insert: " ¾ " },
+                          { label: "⅔", insert: " ⅔ " },
+                          { label: "²", insert: "²" },
+                          { label: "³", insert: "³" },
+                          { label: "×", insert: " × " },
+                          { label: "÷", insert: " ÷ " },
+                          { label: "√", insert: " √" },
+                        ].map((sym, sIdx) => (
+                          <button
+                            key={sIdx}
+                            type="button"
+                            className="px-2 py-1 text-xs font-bold bg-slate-100 hover:bg-brand-50 hover:text-brand-700 border border-slate-200 rounded-lg transition-colors"
+                            onClick={() => {
+                              updateManualQuestion(qIdx, "question", formatMathText((q.question || "") + sym.insert));
+                            }}
+                          >
+                            {sym.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <textarea
+                        className="input text-sm font-semibold bg-white min-h-[85px] p-3 border-black/10 focus:border-brand-500"
+                        placeholder="Enter question statement..."
+                        value={q.question}
+                        onChange={(e) => updateManualQuestion(qIdx, "question", e.target.value)}
+                      />
+                    </div>
+
+                    {/* Options Grid (Up to Option G) */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-ink-muted block">
+                          Options ({q.options.length}) &amp; Correct Answer Key (Click radio button to mark correct option):
+                        </label>
+                        <div className="flex items-center gap-2">
+                          {q.options.length < 7 && (
+                            <button
+                              type="button"
+                              onClick={() => addOptionToManual(qIdx)}
+                              className="text-[11px] font-bold text-brand-700 hover:text-brand-800 bg-brand-50 px-2.5 py-1 rounded-lg border border-brand-200 flex items-center gap-1"
+                            >
+                              <Plus size={12} /> Add Option ({String.fromCharCode(65 + q.options.length)})
+                            </button>
+                          )}
+                          {q.options.length > 2 && (
+                            <button
+                              type="button"
+                              onClick={() => removeOptionFromManual(qIdx)}
+                              className="text-[11px] font-bold text-rose-600 hover:text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-100"
+                            >
+                              - Remove Option
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        {q.options.map((opt, optIdx) => {
+                          const letter = String.fromCharCode(65 + optIdx);
+                          const isRight = +q.correctAnswerIndex === optIdx;
+                          return (
+                            <div
+                              key={optIdx}
+                              onClick={() => updateManualQuestion(qIdx, "correctAnswerIndex", optIdx)}
+                              className={`flex items-center gap-2.5 p-2.5 rounded-xl border-2 transition-all cursor-pointer ${
+                                isRight 
+                                  ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-500/20 font-bold shadow-sm' 
+                                  : 'bg-white border-black/10 hover:border-emerald-300'
+                              }`}
+                            >
+                              <span
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 ${
+                                  isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
+                                {letter}
+                              </span>
+
+                              <input
+                                type="radio"
+                                name={`manual_ans_${qIdx}`}
+                                checked={isRight}
+                                onChange={() => updateManualQuestion(qIdx, "correctAnswerIndex", optIdx)}
+                                className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
+                              />
+
+                              <input 
+                                className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
+                                value={opt}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateManualOption(qIdx, optIdx, e.target.value)}
+                                placeholder={`Option ${letter}`}
+                              />
+
+                              <span
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all ${
+                                  isRight ? "bg-emerald-600 text-white shadow-sm" : "bg-slate-100 text-slate-600"
+                                }`}
+                              >
+                                {isRight ? "✓ Correct" : "Select"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Passage Context & Explanation */}
+                    <div className="grid sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="text-[11px] font-semibold text-ink-muted mb-1 block">Paragraph Context (Optional)</label>
+                        <label className="text-xs font-bold text-ink-muted mb-1 block">Paragraph / Passage Context (Optional)</label>
                         <textarea
-                          className="input text-xs min-h-[60px]"
+                          className="input text-xs min-h-[60px] bg-white border-black/10"
                           placeholder="e.g. Read the following passage and answer the questions..."
-                          value={q.passage}
+                          value={q.passage || ""}
                           onChange={(e) => updateManualQuestion(qIdx, "passage", e.target.value)}
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] font-semibold text-ink-muted mb-1 block">Image (Optional)</label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            id={`img-upload-${qIdx}`}
-                            onChange={(e) => {
-                              const file = e.target.files[0];
-                              if (file) {
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                  updateManualQuestion(qIdx, "imageUrl", reader.result);
-                                };
-                                reader.readAsDataURL(file);
-                              }
-                            }}
-                          />
-                          <label htmlFor={`img-upload-${qIdx}`} className="btn-soft text-xs px-3 py-1.5 bg-black/[0.03] hover:bg-black/[0.06] border border-black/10 cursor-pointer flex items-center gap-1.5 flex-1 justify-center whitespace-nowrap rounded-lg text-ink-soft font-semibold">
-                            <ImageIcon size={14} /> {q.imageUrl ? "Change Image" : "Upload Image"}
-                          </label>
-                          {q.imageUrl && (
-                            <button type="button" onClick={() => updateManualQuestion(qIdx, "imageUrl", "")} className="btn-ghost text-rose-500 hover:bg-rose-50 p-1.5 rounded-lg border border-rose-100" title="Remove Image">
-                              <X size={14} />
-                            </button>
-                          )}
-                        </div>
-                        {q.imageUrl && (
-                          <div className="mt-2 h-20 w-full rounded-xl border border-black/10 overflow-hidden relative group bg-black/5">
-                             <img src={q.imageUrl} className="w-full h-full object-contain opacity-80 group-hover:opacity-100 transition-opacity" alt="Preview" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="grid sm:grid-cols-3 gap-3">
-                      <div className="sm:col-span-2">
-                        <label className="text-[11px] font-semibold text-ink-muted mb-1 block">Question Statement</label>
-                        <input
-                          className="input text-xs"
-                          placeholder="e.g. A train running at 72 km/h crosses a platform..."
-                          value={q.question}
-                          onChange={(e) => updateManualQuestion(qIdx, "question", e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-semibold text-ink-muted mb-1 block">Section Tag</label>
-                        <input
-                          className="input text-xs"
-                          placeholder="Quant / Reasoning / GA"
-                          value={q.section}
-                          onChange={(e) => updateManualQuestion(qIdx, "section", e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                      {q.options.map((opt, optIdx) => (
-                        <div key={optIdx} className="flex items-center gap-1.5">
-                          <span className="w-5 h-5 rounded bg-black/5 flex items-center justify-center text-[10px] font-bold text-ink-soft shrink-0">
-                            {String.fromCharCode(65 + optIdx)}
-                          </span>
-                          <input
-                            className="input text-xs py-1.5"
-                            placeholder={`Option ${String.fromCharCode(65 + optIdx)}`}
-                            value={opt}
-                            onChange={(e) => updateManualOption(qIdx, optIdx, e.target.value)}
-                          />
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="grid sm:grid-cols-2 gap-3 pt-1">
-                      <div>
-                        <label className="text-[11px] font-semibold text-ink-muted mb-1 block">Correct Answer Option</label>
-                        <select
-                          className="input text-xs"
-                          value={q.correctAnswerIndex}
-                          onChange={(e) => updateManualQuestion(qIdx, "correctAnswerIndex", e.target.value)}
-                        >
-                          {q.options.map((o, oi) => (
-                            <option key={oi} value={oi}>
-                              Option {String.fromCharCode(65 + oi)}: {o || `Option ${String.fromCharCode(65 + oi)}`}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-semibold text-ink-muted mb-1 block">Solution Explanation</label>
-                        <input
-                          className="input text-xs"
+                        <label className="text-xs font-bold text-ink-muted mb-1 block">Solution Explanation (Optional)</label>
+                        <textarea
+                          className="input text-xs min-h-[60px] bg-white border-black/10"
                           placeholder="Step-by-step math shortcut or reason..."
-                          value={q.explanation}
+                          value={q.explanation || ""}
                           onChange={(e) => updateManualQuestion(qIdx, "explanation", e.target.value)}
                         />
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-black/5 flex items-center gap-4">
+                    {/* Image Attachment */}
+                    <div>
+                      <label className="text-xs font-bold text-ink-muted mb-1 block">Attach Chart / Image (Optional)</label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          id={`img-upload-${qIdx}`}
+                          onChange={(e) => {
+                            const file = e.target.files[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                updateManualQuestion(qIdx, "imageUrl", reader.result);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                        <label htmlFor={`img-upload-${qIdx}`} className="btn-soft text-xs px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-200 cursor-pointer flex items-center gap-1.5 rounded-xl text-ink-soft font-bold shadow-xs">
+                          <ImageIcon size={14} /> {q.imageUrl ? "Change Chart/Image" : "Attach Chart/Image"}
+                        </label>
+                        {q.imageUrl && (
+                          <button type="button" onClick={() => updateManualQuestion(qIdx, "imageUrl", "")} className="text-rose-500 hover:bg-rose-50 p-1.5 rounded-xl border border-rose-100 text-xs font-bold flex items-center gap-1">
+                            <X size={14} /> Remove Image
+                          </button>
+                        )}
+                      </div>
                       {q.imageUrl && (
-                        <div className="relative h-12 w-20 rounded overflow-hidden border border-black/10">
-                          <img src={q.imageUrl} alt="preview" className="w-full h-full object-cover" />
-                          <button onClick={() => attachImageToManual(qIdx, null)} className="absolute top-0 right-0 bg-rose-600 text-white rounded p-0.5"><X size={10}/></button>
+                        <div className="mt-2 max-w-sm rounded-xl border border-black/10 overflow-hidden relative bg-white p-2">
+                           <img src={q.imageUrl} className="w-full h-auto object-contain max-h-48" alt="Preview" />
                         </div>
                       )}
-                      <label className="btn-soft px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 cursor-pointer flex items-center gap-1 font-semibold rounded-lg border border-slate-200">
-                        <Upload size={13} /> {q.imageUrl ? "Change Chart/Image" : "Attach Chart/Image"}
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => attachImageToManual(qIdx, e.target.files[0])} />
-                      </label>
                     </div>
+
                   </div>
                 ))}
               </div>
