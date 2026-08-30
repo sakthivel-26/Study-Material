@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#1B4F72" />
+    
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="Ken IAS Academy is India's most loved exam-prep academy for TNPSC, Banking, SSC & Railway exams. Access premium mock tests, daily practice, and video lectures." />
+    <link rel="canonical" href="https://kenias-academy.vercel.app/" />
+    
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -16,8 +21,23 @@
       rel="stylesheet"
     />
     <title>KEN IAS Academy</title>
+
+    <!-- JSON-LD Schema Markup -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "EducationalOrganization",
+      "name": "Ken IAS Academy",
+      "url": "https://kenias-academy.vercel.app/",
+      "logo": "https://kenias-academy.vercel.app/icon-192.png",
+      "description": "India's most loved exam-prep academy for TNPSC, Banking, SSC & Railway exams.",
+      "sameAs": []
+    }
+    </script>
   </head>
   <body>
+    <!-- Fallback H1 for SEO Crawlers -->
+    <h1 style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0;">Ken IAS Academy - Competitive Exam Preparation</h1>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
