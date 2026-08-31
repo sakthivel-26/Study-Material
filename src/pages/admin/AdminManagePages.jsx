@@ -2716,7 +2716,11 @@ export function PlansPage() {
           <p className="text-sm text-ink-muted mt-1">Configure the announcement banner displayed at the top of the student dashboard.</p>
         </div>
         <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" className="sr-only peer" checked={banner.enabled} onChange={e => setBanner({...banner, enabled: e.target.checked})} />
+          <input type="checkbox" className="sr-only peer" checked={banner.enabled} onChange={e => {
+            const next = {...banner, enabled: e.target.checked};
+            setBanner(next);
+            updatePromoBanner(next);
+          }} />
           <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-600 relative"></div>
         </label>
       </div>

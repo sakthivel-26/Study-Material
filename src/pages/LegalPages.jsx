@@ -61,7 +61,7 @@ export function PrivacyPolicyPage() {
 
       <h2>5. Contact Us</h2>
       <p>
-        If you have any questions about this privacy policy or our privacy practices, please contact us at support@kenias.academy.
+        If you have any questions about this privacy policy or our privacy practices, please contact us at kenacademy7@gmail.com.
       </p>
     </LegalLayout>
   );
@@ -172,7 +172,7 @@ export function RefundPolicyPage() {
 
       <h2>4. How to Request a Refund</h2>
       <p>
-        To request a refund under the exceptional circumstances listed above, please contact our support team at support@kenias.academy with your transaction details within 7 days of purchase.
+        To request a refund under the exceptional circumstances listed above, please contact our support team at kenacademy7@gmail.com with your transaction details within 7 days of purchase.
       </p>
     </LegalLayout>
   );
@@ -226,8 +226,8 @@ export function ContactSupportPage() {
         <div className="mt-8 pt-6 border-t border-black/5">
           <h3 className="font-bold text-ink mb-2">Direct Contact</h3>
           <p className="text-sm text-ink-soft">
-            Email: <a href="mailto:support@kenias.academy" className="text-brand-600 hover:underline">support@kenias.academy</a><br/>
-            Phone: +91 98765 43210 (Mon-Fri, 9am - 6pm IST)
+            Email: <a href="mailto:kenacademy7@gmail.com" className="text-brand-600 hover:underline">kenacademy7@gmail.com</a><br/>
+            Phone: +91 7530015494 (Mon-Fri, 9am - 6pm IST)
           </p>
         </div>
       </div>

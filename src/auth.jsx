@@ -456,46 +456,19 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const signInWithGoogle = async (account) => {
+  const signInWithGoogle = async () => {
     setLoading(true);
     setError(null);
     try {
-      if (isFirebaseConfigured) {
-        try {
-          return await fbGoogle();
-        } catch (err) {
-          if (isFirebaseConfigError(err) || err.code === "auth/popup-closed-by-user") {
-            console.warn("Firebase Google Auth error; falling back to Demo Mode:", err);
-          } else {
-            throw err;
-          }
-        }
+      if (!isFirebaseConfigured) {
+        throw new Error("Firebase is not configured for Google Sign-In. Please set up Firebase environment variables.");
       }
-      // Demo mode: accept the picked mock account.
-      const { name, email, photo } = account || {
-        name: "Google Student",
-        email: "student@gmail.com",
-      };
-      const list = loadUsers();
-      let nu = list.find((u) => u.email.toLowerCase() === email.toLowerCase());
-      if (!nu) {
-        nu = {
-          id: "u_" + Date.now(),
-          name,
-          email: email.toLowerCase(),
-          password: "",
-          role: "student",
-          initials: initialsOf(name),
-          photo: photo || null,
-          createdAt: new Date().toISOString(),
-        };
-        persistUsers([...list, nu]);
-      } else {
-        nu = { ...nu, photo: photo || nu.photo };
+      return await fbGoogle();
+    } catch (err) {
+      if (err.code !== "auth/popup-closed-by-user") {
+        setError(err.message || "Could not sign in with Google.");
       }
-      setSession({ ...nu, provider: "google", emailVerified: true });
-      notify(`Signed in with Google as ${name.split(" ")[0]}! 🎉`);
-      return { ...nu, provider: "google", emailVerified: true };
+      throw err;
     } finally {
       setLoading(false);
     }
