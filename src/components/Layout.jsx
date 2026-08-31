@@ -35,15 +35,19 @@ export default function Layout() {
       <div className="flex-1 flex flex-col min-w-0 bg-appbg">
         <Header onMenu={() => setMenu(true)} unread={unread} />
         {promoBanner?.enabled && (
-          <div className={`${promoBanner.color || "bg-brand-600"} text-white px-4 py-2.5 flex items-center justify-between text-sm shadow-sm z-10 relative`}>
-            <div className="flex-1 flex items-center gap-3 min-w-0">
-              {promoBanner.image && <img src={promoBanner.image} alt="Offer" className="h-6 w-auto object-contain rounded-md bg-white/10" />}
+          <div className={`${promoBanner.color || "bg-brand-600"} text-white px-4 py-2 flex items-center justify-between text-sm shadow-sm z-10 relative overflow-hidden gap-3`}>
+            <div className="flex items-center shrink-0 z-20">
+              {promoBanner.image && <img src={promoBanner.image} alt="Offer" className="h-7 w-auto object-contain rounded bg-white/10" />}
               {!promoBanner.image && <span className="bg-white/20 px-2 py-0.5 rounded-md font-bold text-[10px] uppercase tracking-wider shrink-0">Offer</span>}
-              <p className="font-medium truncate text-xs sm:text-sm">
+            </div>
+            
+            <div className="flex-1 overflow-hidden h-full flex items-center mask-image-edges">
+              <p className="font-medium text-[13px] sm:text-sm animate-marquee whitespace-nowrap">
                 {promoBanner.text} {promoBanner.code && <b>{promoBanner.code}</b>}
               </p>
             </div>
-            <button onClick={() => updatePromoBanner({ ...promoBanner, enabled: false })} className="ml-4 shrink-0 text-white/80 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors">
+
+            <button onClick={() => updatePromoBanner({ ...promoBanner, enabled: false })} className="shrink-0 text-white/80 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors z-20">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
           </div>

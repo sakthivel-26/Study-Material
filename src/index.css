@@ -94,3 +94,18 @@ body {
     radial-gradient(900px 500px at -10% 120%, rgba(192, 57, 43, 0.25), transparent 55%),
     linear-gradient(135deg, #1B4F72 0%, #2077A4 45%, #639FBF 100%);
 }
+
+/* Marquee Animation */
+@keyframes marquee {
+  0% { transform: translateX(100vw); }
+  100% { transform: translateX(-100%); }
+}
+.animate-marquee {
+  display: inline-block;
+  white-space: nowrap;
+  animation: marquee 25s linear infinite;
+  will-change: transform;
+}
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
