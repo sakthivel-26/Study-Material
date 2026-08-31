@@ -300,8 +300,8 @@ export default function MockTestRunner({ test, onClose }) {
                   {/* Instructions Header */}
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <span className="w-6 h-6 flex items-center justify-center bg-black/5 dark:bg-slate-800 text-white font-bold rounded text-xs">{currentIndex + 1}</span>
-                      <span className="font-bold text-white text-[15px]">Instructions</span>
+                      <span className="w-6 h-6 flex items-center justify-center bg-black/5 dark:bg-slate-800 text-ink dark:text-white font-bold rounded text-xs">{currentIndex + 1}</span>
+                      <span className="font-bold text-ink dark:text-white text-[15px]">Instructions</span>
                     </div>
                     <div className="flex items-center gap-2 text-[10px] font-bold">
                       <span className="bg-emerald-950/50 text-emerald-400 px-2 py-0.5 rounded">+1.0</span>
@@ -311,7 +311,7 @@ export default function MockTestRunner({ test, onClose }) {
                   
                   {/* Passage Text */}
                   <div className="relative">
-                    <p className={`text-slate-200 text-sm leading-relaxed whitespace-pre-line ${!expandedPassage ? "line-clamp-4" : ""}`}>
+                    <p className={`text-ink-soft dark:text-slate-200 text-sm leading-relaxed whitespace-pre-line ${!expandedPassage ? "line-clamp-4" : ""}`}>
                       {formatMathText(currentQ.passage)}
                     </p>
                     {!expandedPassage && currentQ.passage.length > 200 && (
@@ -331,11 +331,11 @@ export default function MockTestRunner({ test, onClose }) {
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between mb-2">
                   {currentQ.passage ? (
-                     <span className="font-bold text-white text-[15px]">Question</span>
+                     <span className="font-bold text-ink dark:text-white text-[15px]">Question</span>
                   ) : (
                      <div className="flex items-center gap-3">
-                       <span className="w-6 h-6 flex items-center justify-center bg-black/5 dark:bg-slate-800 text-white font-bold rounded text-xs">{currentIndex + 1}</span>
-                       <span className="font-bold text-white text-[15px]">Question</span>
+                       <span className="w-6 h-6 flex items-center justify-center bg-black/5 dark:bg-slate-800 text-ink dark:text-white font-bold rounded text-xs">{currentIndex + 1}</span>
+                       <span className="font-bold text-ink dark:text-white text-[15px]">Question</span>
                      </div>
                   )}
                   
@@ -371,9 +371,9 @@ export default function MockTestRunner({ test, onClose }) {
                     <div
                       key={optIdx}
                       onClick={() => selectOption(optIdx)}
-                      className={`p-2 sm:p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 sm:gap-4 ${isSelected ? "bg-black/5 dark:bg-slate-800/80 border-slate-500 text-white shadow-sm" : "bg-black/5 dark:bg-slate-800/30 border-black/10 dark:border-slate-800/80 text-ink-soft dark:text-slate-300 hover:bg-black/5 dark:bg-slate-800/60 hover:border-black/20 dark:border-slate-700"}`}
+                      className={`p-2 sm:p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 sm:gap-4 ${isSelected ? "bg-black/10 dark:bg-slate-800/80 border-slate-500 text-ink dark:text-white shadow-sm" : "bg-black/5 dark:bg-slate-800/30 border-black/10 dark:border-slate-800/80 text-ink-soft dark:text-slate-300 hover:bg-black/10 dark:bg-slate-800/60 hover:border-black/20 dark:border-slate-700"}`}
                     >
-                      <span className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center font-bold text-[10px] sm:text-[11px] shrink-0 ${isSelected ? "bg-slate-600 text-white" : "bg-slate-700/60 text-ink-muted dark:text-slate-400"}`}>
+                      <span className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center font-bold text-[10px] sm:text-[11px] shrink-0 ${isSelected ? "bg-slate-600 text-white" : "bg-slate-300 dark:bg-slate-700/60 text-ink-muted dark:text-slate-400"}`}>
                         {String.fromCharCode(65 + optIdx)}
                       </span>
                       <span className="text-xs sm:text-[14px] leading-relaxed">{formatMathText(opt)}</span>
