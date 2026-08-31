@@ -35,7 +35,19 @@ export function GoogleButton({ label = "Continue with Google", variant = "soft",
     }
   };
 
-      </AnimatePresence>
-    </>
+  return (
+    <button
+      type="button"
+      onClick={handleAuth}
+      disabled={pending}
+      className={`${variant === "soft" ? "btn-soft" : "btn border border-black/10 bg-white text-ink hover:bg-black/[0.03]"} w-full py-2.5 text-sm ${className}`}
+    >
+      {pending ? (
+        <Loader2 size={18} className="animate-spin" />
+      ) : (
+        <GoogleIcon size={18} />
+      )}
+      {pending ? "Signing in..." : label}
+    </button>
   );
 }
