@@ -318,10 +318,23 @@ export function AppProvider({ children }) {
     pushToast("All data has been reset ✓");
   };
 
+  const validNotifications = useMemo(() => {
+    return notifications.filter(n => {
+      if (n.type === "mock") {
+        const match = n.body.match(/“(.+?)”/);
+        if (match) {
+          const title = match[1];
+          return mockTests.some(m => m.title === title);
+        }
+      }
+      return true;
+    });
+  }, [notifications, mockTests]);
+
   const value = useMemo(
     () => ({
       uploads,
-      notifications,
+      notifications: validNotifications,
       mockTests,
       testHistory,
       bookmarks,

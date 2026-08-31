@@ -2698,15 +2698,28 @@ export function PlansPage() {
 
 export function AdmissionsPage() {
   const { admissions = [], pushToast } = useApp();
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   const exportCSV = () => {
-    if (admissions.length === 0) {
-      pushToast("No data to export");
+    let dataToExport = admissions;
+    
+    if (startDate && endDate) {
+      const start = new Date(startDate).getTime();
+      const end = new Date(endDate).getTime() + (24 * 60 * 60 * 1000); // include full end day
+      dataToExport = admissions.filter(lead => {
+        const d = new Date(lead.createdAt?.toMillis ? lead.createdAt.toMillis() : Date.now()).getTime();
+        return d >= start && d < end;
+      });
+    }
+
+    if (dataToExport.length === 0) {
+      pushToast("No data to export for selected dates");
       return;
     }
     
     const headers = ["Date", "Name", "Mobile Number", "Email ID", "Target Exam", "Mode of Learning"];
-    const rows = admissions.map(lead => [
+    const rows = dataToExport.map(lead => [
       new Date(lead.createdAt?.toMillis ? lead.createdAt.toMillis() : Date.now()).toLocaleDateString("en-IN"),
       lead.fullName || lead.name || "Student",
       lead.mobileNumber || "",
@@ -2722,7 +2735,7 @@ export function AdmissionsPage() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `student_leads_${new Date().getTime()}.csv`);
+    link.setAttribute("download", `student_leads_${startDate||'all'}_to_${endDate||'all'}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2736,9 +2749,14 @@ export function AdmissionsPage() {
         title="Admission Inquiries"
         subtitle="Manage leads collected from the website popup."
         action={
-          <button onClick={exportCSV} className="btn-primary text-sm px-4 py-2.5">
-            <Download size={16} /> Export CSV
-          </button>
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <input type="date" className="input text-xs py-2 px-2 bg-white" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            <span className="text-xs text-ink-muted hidden sm:inline">to</span>
+            <input type="date" className="input text-xs py-2 px-2 bg-white" value={endDate} onChange={e => setEndDate(e.target.value)} />
+            <button onClick={exportCSV} className="btn-primary text-sm px-4 py-2 sm:py-2.5 ml-0 sm:ml-2 w-full sm:w-auto mt-2 sm:mt-0">
+              <Download size={16} /> Export
+            </button>
+          </div>
         }
       />
       

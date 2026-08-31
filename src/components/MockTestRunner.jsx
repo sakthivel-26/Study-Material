@@ -225,7 +225,7 @@ export default function MockTestRunner({ test, onClose }) {
             KEN
           </span>
           <div className="min-w-0">
-            <h2 className="font-bold text-xs sm:text-sm text-white truncate">{test?.title || "Online CBT Exam"}</h2>
+            <h2 className="font-bold text-xs sm:text-sm text-ink dark:text-white truncate">{test?.title || "Online CBT Exam"}</h2>
             <p className="text-[10px] sm:text-[11px] text-ink-muted dark:text-slate-400 truncate">{test?.category} · Official CBT Exam Pattern</p>
           </div>
         </div>
