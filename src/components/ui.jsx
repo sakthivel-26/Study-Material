@@ -5,12 +5,12 @@ export function Logo({ size = 40, dark = false }) {
   return (
     <div className="flex items-center gap-2.5 shrink-0">
       <img 
-        src="/logo.png" 
+        src="/image.png" 
         alt="Ken Academy"
         style={{ width: size, height: size }}
         className="object-contain shrink-0"
         onError={(e) => {
-          // Fallback if logo.png is missing
+          // Fallback if image.png is missing
           e.target.style.display = 'none';
           e.target.nextSibling.style.display = 'flex';
         }}
