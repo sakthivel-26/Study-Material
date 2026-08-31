@@ -450,8 +450,8 @@ export default function MockTestRunner({ test, onClose }) {
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="rounded-3xl bg-white dark:bg-slate-950 border border-black/10 dark:border-slate-800 p-6 md:p-8 shadow-2xl relative overflow-hidden">
             <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
               <div className="space-y-2 text-center md:text-left">
-                <span className="chip bg-brand-950 border border-brand-800 text-brand-300 font-semibold">{test?.category} Exam Report</span>
-                <h1 className="text-2xl md:text-3xl font-extrabold text-white">{test?.title}</h1>
+                <span className="chip bg-brand-100 dark:bg-brand-950 border border-brand-200 dark:border-brand-800 text-brand-700 dark:text-brand-300 font-semibold">{test?.category} Exam Report</span>
+                <h1 className="text-2xl md:text-3xl font-extrabold text-ink dark:text-white">{test?.title}</h1>
                 <p className="text-sm text-ink-muted dark:text-slate-400">Submitted on {results?.date} · Time Taken: {formatTimer(results?.timeSpentSeconds || 0)}</p>
               </div>
 
@@ -470,13 +470,13 @@ export default function MockTestRunner({ test, onClose }) {
 
             {/* Quick Metrics Grid */}
             <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-black/10 dark:border-slate-800/80 text-center">
-              <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-800/40">
-                <p className="text-xl font-bold text-emerald-400">{results?.correctCount}</p>
-                <p className="text-[11px] text-emerald-300">Correct</p>
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40">
+                <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{results?.correctCount}</p>
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-300">Correct</p>
               </div>
-              <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/40">
-                <p className="text-xl font-bold text-rose-400">{results?.incorrectCount}</p>
-                <p className="text-[11px] text-rose-300">Incorrect</p>
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/40">
+                <p className="text-xl font-bold text-rose-600 dark:text-rose-400">{results?.incorrectCount}</p>
+                <p className="text-[11px] text-rose-600 dark:text-rose-300">Incorrect</p>
               </div>
               <div className="p-3 rounded-xl bg-appbg dark:bg-slate-900 border border-black/10 dark:border-slate-800">
                 <p className="text-xl font-bold text-ink-muted dark:text-slate-400">{results?.unattemptedCount}</p>
@@ -488,8 +488,8 @@ export default function MockTestRunner({ test, onClose }) {
           {/* Solution Explorer */}
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <h3 className="font-extrabold text-lg text-white flex items-center gap-2">
-                <Eye size={20} className="text-brand-400" /> Detailed Question Solutions
+              <h3 className="font-extrabold text-lg text-ink dark:text-white flex items-center gap-2">
+                <Eye size={20} className="text-brand-500 dark:text-brand-400" /> Detailed Question Solutions
               </h3>
               <div className="flex gap-2">
                 {["all", "correct", "incorrect", "unattempted"].map((f) => (
@@ -524,15 +524,15 @@ export default function MockTestRunner({ test, onClose }) {
                   return (
                     <div key={q.id || idx} className="p-6 rounded-2xl bg-white dark:bg-slate-950 border border-black/10 dark:border-slate-800 space-y-4">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-brand-400">Question {idx + 1} ({q.section || "General"})</span>
-                        <span className={`px-2.5 py-1 rounded-md font-semibold ${isCorrect ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : isUnattempted ? "bg-appbg dark:bg-slate-900 text-ink-muted dark:text-slate-400" : "bg-rose-950 text-rose-400 border border-rose-800"}`}>
+                        <span className="font-bold text-brand-600 dark:text-brand-400">Question {idx + 1} ({q.section || "General"})</span>
+                        <span className={`px-2.5 py-1 rounded-md font-semibold ${isCorrect ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800" : isUnattempted ? "bg-appbg dark:bg-slate-900 text-ink-muted dark:text-slate-400" : "bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400 border border-rose-300 dark:border-rose-800"}`}>
                           {isCorrect ? "Correct ✓" : isUnattempted ? "Unattempted ⚪" : "Incorrect ✗"}
                         </span>
                       </div>
 
                       {q.passage && (
                         <div className="p-4 rounded-xl bg-appbg dark:bg-slate-900 border border-black/10 dark:border-slate-800/80 mb-3">
-                          <p className="text-[10px] font-bold text-brand-400 uppercase tracking-wider mb-1">Directions / Data</p>
+                          <p className="text-[10px] font-bold text-brand-600 dark:text-brand-400 uppercase tracking-wider mb-1">Directions / Data</p>
                           <p className="text-xs text-ink-soft dark:text-slate-300 whitespace-pre-line leading-relaxed">{formatMathText(q.passage)}</p>
                         </div>
                       )}
@@ -553,28 +553,28 @@ export default function MockTestRunner({ test, onClose }) {
                           const isStudentChoice = oIdx === studentAns;
 
                           let bgClass = "bg-appbg dark:bg-slate-900 border-black/10 dark:border-slate-800 text-ink-muted dark:text-slate-400";
-                          if (isRightChoice) bgClass = "bg-emerald-950/80 border-emerald-600 text-emerald-200 font-bold shadow-sm ring-1 ring-emerald-500/50";
-                          else if (isStudentChoice && !isRightChoice) bgClass = "bg-rose-950/80 border-rose-600 text-rose-200 font-semibold";
+                          if (isRightChoice) bgClass = "bg-emerald-100 dark:bg-emerald-950/80 border-emerald-500 dark:border-emerald-600 text-emerald-800 dark:text-emerald-200 font-bold shadow-sm ring-1 ring-emerald-500/30 dark:ring-emerald-500/50";
+                          else if (isStudentChoice && !isRightChoice) bgClass = "bg-rose-100 dark:bg-rose-950/80 border-rose-400 dark:border-rose-600 text-rose-800 dark:text-rose-200 font-semibold";
 
                           return (
                             <div key={oIdx} className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${bgClass}`}>
                               <div className="flex items-center gap-3">
-                                <span className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold ${isRightChoice ? 'bg-emerald-600 text-white' : isStudentChoice ? 'bg-rose-600 text-white' : 'bg-black/30 text-ink-muted dark:text-slate-400'}`}>
+                                <span className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold ${isRightChoice ? 'bg-emerald-600 text-white' : isStudentChoice ? 'bg-rose-600 text-white' : 'bg-black/10 dark:bg-black/30 text-ink-muted dark:text-slate-400'}`}>
                                   {String.fromCharCode(65 + oIdx)}
                                 </span>
                                 <span>{formatMathText(opt)}</span>
                               </div>
-                              {isRightChoice && <span className="text-emerald-400 font-extrabold text-[11px] shrink-0">✓ Correct Answer</span>}
-                              {isStudentChoice && !isRightChoice && <span className="text-rose-400 font-bold text-[11px] shrink-0">Your Choice ✗</span>}
+                              {isRightChoice && <span className="text-emerald-700 dark:text-emerald-400 font-extrabold text-[11px] shrink-0">✓ Correct Answer</span>}
+                              {isStudentChoice && !isRightChoice && <span className="text-rose-700 dark:text-rose-400 font-bold text-[11px] shrink-0">Your Choice ✗</span>}
                             </div>
                           );
                         })}
                       </div>
 
                       {/* Solution Explanation */}
-                      <div className="p-4 rounded-xl bg-appbg dark:bg-slate-900/90 border border-black/10 dark:border-slate-800 text-xs text-ink-soft dark:text-slate-300 space-y-1.5">
-                        <p className="font-bold text-amber-400 flex items-center gap-1">💡 Solution &amp; Explanation:</p>
-                        <p className="leading-relaxed text-slate-200 whitespace-pre-line">
+                      <div className="p-4 rounded-xl bg-amber-50/50 dark:bg-slate-900/90 border border-amber-200/50 dark:border-slate-800 text-xs text-ink-soft dark:text-slate-300 space-y-1.5">
+                        <p className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1">💡 Solution &amp; Explanation:</p>
+                        <p className="leading-relaxed text-ink-soft dark:text-slate-200 whitespace-pre-line">
                           {formatMathText(q.explanation) || `Correct Option is (${String.fromCharCode(65 + correctIdx)}): ${formatMathText(q.options?.[correctIdx] || "")}`}
                         </p>
                       </div>
