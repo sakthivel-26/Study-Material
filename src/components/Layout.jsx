@@ -26,8 +26,7 @@ function Footer() {
 
 export default function Layout() {
   const [menu, setMenu] = useState(false);
-  const [showPromo, setShowPromo] = useState(true);
-  const { notifications } = useApp();
+  const { notifications, promoBanner, updatePromoBanner } = useApp();
   const unread = notifications.filter((n) => !n.read).length;
 
   return (
@@ -35,13 +34,16 @@ export default function Layout() {
       <Sidebar open={menu} onClose={() => setMenu(false)} unread={unread} />
       <div className="flex-1 flex flex-col min-w-0 bg-appbg">
         <Header onMenu={() => setMenu(true)} unread={unread} />
-        {showPromo && (
-          <div className="bg-brand-600 text-white px-4 py-2.5 flex items-center justify-between text-sm shadow-sm z-10 relative">
+        {promoBanner?.enabled && (
+          <div className={`${promoBanner.color || "bg-brand-600"} text-white px-4 py-2.5 flex items-center justify-between text-sm shadow-sm z-10 relative`}>
             <div className="flex-1 flex items-center gap-3 min-w-0">
-              <span className="bg-white/20 px-2 py-0.5 rounded-md font-bold text-[10px] uppercase tracking-wider shrink-0">Offer</span>
-              <p className="font-medium truncate text-xs sm:text-sm">Festival Special: Get 50% OFF on all Full Mock Packages! Use code <b>FESTIVAL50</b> at checkout.</p>
+              {promoBanner.image && <img src={promoBanner.image} alt="Offer" className="h-6 w-auto object-contain rounded-md bg-white/10" />}
+              {!promoBanner.image && <span className="bg-white/20 px-2 py-0.5 rounded-md font-bold text-[10px] uppercase tracking-wider shrink-0">Offer</span>}
+              <p className="font-medium truncate text-xs sm:text-sm">
+                {promoBanner.text} {promoBanner.code && <b>{promoBanner.code}</b>}
+              </p>
             </div>
-            <button onClick={() => setShowPromo(false)} className="ml-4 shrink-0 text-white/80 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors">
+            <button onClick={() => updatePromoBanner({ ...promoBanner, enabled: false })} className="ml-4 shrink-0 text-white/80 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
           </div>

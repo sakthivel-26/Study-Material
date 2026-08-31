@@ -64,6 +64,30 @@ export function AppProvider({ children }) {
   });
 
   const [admissions, setAdmissions] = useState([]);
+  
+  const defaultBanner = {
+    enabled: true,
+    text: "Festival Special: Get 50% OFF on all Full Mock Packages! Use code",
+    code: "FESTIVAL50",
+    color: "bg-brand-600",
+    link: "",
+    image: ""
+  };
+  const [promoBanner, setPromoBanner] = useState(() => {
+    try {
+      const saved = localStorage.getItem("ken_ias_promobanner");
+      return saved ? JSON.parse(saved) : defaultBanner;
+    } catch {
+      return defaultBanner;
+    }
+  });
+
+  const updatePromoBanner = (newBanner) => {
+    setPromoBanner(newBanner);
+    try {
+      localStorage.setItem("ken_ias_promobanner", JSON.stringify(newBanner));
+    } catch (e) {}
+  };
 
   const [toast, setToast] = useState(null);
   const [ready, setReady] = useState(!useRealtimeBackend);
@@ -343,6 +367,8 @@ export function AppProvider({ children }) {
       ready,
       students,
       admissions,
+      promoBanner,
+      updatePromoBanner,
       deleteStudent,
       refreshStudents,
       addDownloadRecord,
@@ -358,7 +384,7 @@ export function AppProvider({ children }) {
       markAllRead,
       resetAllData,
     }),
-    [uploads, notifications, mockTests, testHistory, bookmarks, downloads, toast, ready, students, admissions]
+    [uploads, notifications, mockTests, testHistory, bookmarks, downloads, toast, ready, students, admissions, promoBanner]
   );
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

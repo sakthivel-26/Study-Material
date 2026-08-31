@@ -2678,7 +2678,7 @@ export function ManageCoursesPage() {
 
 /* -------------------------- Plans & Coupon Codes -------------------------- */
 export function PlansPage() {
-  const { pushToast } = useApp();
+  const { pushToast, promoBanner, updatePromoBanner } = useApp();
   const defaults = [
     { id: "banking", name: "Banking Full Mock Package", amount: "499", exams: "SBI, IBPS & RRB" },
     { id: "tnpsc", name: "TNPSC Full Mock Package", amount: "599", exams: "Group I, II, IV & VAO" },
@@ -2689,11 +2689,57 @@ export function PlansPage() {
   const [plans, setPlans] = useState(() => { try { return JSON.parse(localStorage.getItem("ken_plans")) || defaults; } catch { return defaults; } });
   const [coupon, setCoupon] = useState({ code: "", discount: "", description: "" });
   const [coupons, setCoupons] = useState(() => { try { return JSON.parse(localStorage.getItem("ken_coupons")) || []; } catch { return []; } });
+  
+  const [banner, setBanner] = useState(promoBanner);
+
   const savePlans = (next) => { setPlans(next); localStorage.setItem("ken_plans", JSON.stringify(next)); pushToast("Plans saved. Students will see the updated prices."); };
   const addCoupon = () => { if (!coupon.code.trim() || !Number(coupon.discount)) return pushToast("Enter a coupon code and discount percentage."); const next=[...coupons,{...coupon,code:coupon.code.trim().toUpperCase()}];setCoupons(next);localStorage.setItem("ken_coupons",JSON.stringify(next));setCoupon({code:"",discount:"",description:""});pushToast("Coupon created successfully."); };
+  
   return <><PageHeader icon={<ClipboardPlus size={22}/>} title="Plans, Pricing & Offers" subtitle="Set full mock-package amounts and promotional coupon codes."/>
     <div className="grid xl:grid-cols-[1.35fr_.85fr] gap-6"><section className="card p-6"><h3 className="font-bold text-ink mb-1">Full mock-test packages</h3><p className="text-sm text-ink-muted mb-5">The first mock remains free. Students see these amounts when a package is locked.</p><div className="space-y-3">{plans.map((plan,i)=><div key={plan.id} className="rounded-xl border border-black/5 p-4 grid sm:grid-cols-[1fr_120px] gap-3"><div><p className="font-semibold text-ink">{plan.name}</p><p className="text-xs text-ink-muted">{plan.exams}</p></div><label className="text-xs font-semibold text-ink-muted">Amount (₹)<input className="input mt-1 py-2" type="number" min="0" value={plan.amount} onChange={e=>savePlans(plans.map((p,x)=>x===i?{...p,amount:e.target.value}:p))}/></label></div>)}</div></section>
-    <section className="card p-6"><h3 className="font-bold text-ink">Create offer coupon</h3><p className="text-sm text-ink-muted mt-1 mb-5">Coupons can be applied at payment checkout.</p><div className="space-y-3"><input className="input" placeholder="Code e.g. BANK20" value={coupon.code} onChange={e=>setCoupon({...coupon,code:e.target.value})}/><input className="input" type="number" min="1" max="100" placeholder="Discount %" value={coupon.discount} onChange={e=>setCoupon({...coupon,discount:e.target.value})}/><input className="input" placeholder="Offer description (optional)" value={coupon.description} onChange={e=>setCoupon({...coupon,description:e.target.value})}/><button onClick={addCoupon} className="btn-primary w-full py-2.5"><Plus size={16}/>Create coupon</button></div><div className="mt-6 pt-5 border-t border-black/5 space-y-2">{coupons.length===0?<p className="text-sm text-ink-muted">No coupons created yet.</p>:coupons.map((c,i)=><div key={c.code} className="flex justify-between rounded-lg bg-brand-50 p-3"><span><b>{c.code}</b><small className="block text-ink-muted">{c.description}</small></span><span className="font-bold text-brand-700">{c.discount}% OFF <button onClick={()=>{const n=coupons.filter((_,x)=>x!==i);setCoupons(n);localStorage.setItem("ken_coupons",JSON.stringify(n))}} className="ml-2 text-rose-600">×</button></span></div>)}</div></section></div></>;
+    <section className="card p-6"><h3 className="font-bold text-ink">Create offer coupon</h3><p className="text-sm text-ink-muted mt-1 mb-5">Coupons can be applied at payment checkout.</p><div className="space-y-3"><input className="input" placeholder="Code e.g. BANK20" value={coupon.code} onChange={e=>setCoupon({...coupon,code:e.target.value})}/><input className="input" type="number" min="1" max="100" placeholder="Discount %" value={coupon.discount} onChange={e=>setCoupon({...coupon,discount:e.target.value})}/><input className="input" placeholder="Offer description (optional)" value={coupon.description} onChange={e=>setCoupon({...coupon,description:e.target.value})}/><button onClick={addCoupon} className="btn-primary w-full py-2.5"><Plus size={16}/>Create coupon</button></div><div className="mt-6 pt-5 border-t border-black/5 space-y-2">{coupons.length===0?<p className="text-sm text-ink-muted">No coupons created yet.</p>:coupons.map((c,i)=><div key={c.code} className="flex justify-between rounded-lg bg-brand-50 p-3"><span><b>{c.code}</b><small className="block text-ink-muted">{c.description}</small></span><span className="font-bold text-brand-700">{c.discount}% OFF <button onClick={()=>{const n=coupons.filter((_,x)=>x!==i);setCoupons(n);localStorage.setItem("ken_coupons",JSON.stringify(n))}} className="ml-2 text-rose-600">×</button></span></div>)}</div></section></div>
+    
+    <div className="mt-6 card p-6">
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h3 className="font-bold text-ink">Global Promo Banner</h3>
+          <p className="text-sm text-ink-muted mt-1">Configure the announcement banner displayed at the top of the student dashboard.</p>
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" className="sr-only peer" checked={banner.enabled} onChange={e => setBanner({...banner, enabled: e.target.checked})} />
+          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-600 relative"></div>
+        </label>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label className="text-xs font-semibold text-ink-muted">Offer Text</label>
+          <input className="input mt-1" value={banner.text} onChange={e => setBanner({...banner, text: e.target.value})} />
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-ink-muted">Coupon Code (optional)</label>
+          <input className="input mt-1" value={banner.code} onChange={e => setBanner({...banner, code: e.target.value})} />
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-ink-muted">Background Color</label>
+          <select className="input mt-1" value={banner.color} onChange={e => setBanner({...banner, color: e.target.value})}>
+             <option value="bg-brand-600">Blue (Default)</option>
+             <option value="bg-rose-600">Red</option>
+             <option value="bg-emerald-600">Green</option>
+             <option value="bg-orange-500">Orange</option>
+             <option value="bg-indigo-600">Indigo</option>
+             <option value="bg-slate-900">Dark</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-ink-muted">Image URL (optional logo/icon)</label>
+          <input className="input mt-1" placeholder="https://..." value={banner.image} onChange={e => setBanner({...banner, image: e.target.value})} />
+        </div>
+      </div>
+      <div className="mt-5 flex justify-end">
+        <button onClick={() => { updatePromoBanner(banner); pushToast("Promo banner updated!"); }} className="btn-primary py-2 px-6">Save Banner Settings</button>
+      </div>
+    </div>
+  </>;
 }
 
 export function AdmissionsPage() {
