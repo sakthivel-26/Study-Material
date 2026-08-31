@@ -217,22 +217,22 @@ export default function MockTestRunner({ test, onClose }) {
   const sections = Array.from(new Set(questions.map((q) => q.section || "General")));
 
   return (
-    <div className="fixed inset-0 z-[80] bg-slate-900 text-slate-100 flex flex-col font-sans overflow-hidden">
+    <div className="fixed inset-0 z-[80] bg-appbg dark:bg-slate-900 text-ink dark:text-slate-100 flex flex-col font-sans overflow-hidden">
       {/* Header Bar */}
-      <header className="h-16 bg-slate-950 border-b border-slate-800 px-3 sm:px-6 flex items-center justify-between shrink-0">
+      <header className="h-16 bg-white dark:bg-slate-950 border-b border-black/10 dark:border-slate-800 px-3 sm:px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 mr-2">
           <span className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-xl bg-brand-600 flex items-center justify-center font-bold text-white shadow">
             KEN
           </span>
           <div className="min-w-0">
             <h2 className="font-bold text-xs sm:text-sm text-white truncate">{test?.title || "Online CBT Exam"}</h2>
-            <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">{test?.category} · Official CBT Exam Pattern</p>
+            <p className="text-[10px] sm:text-[11px] text-ink-muted dark:text-slate-400 truncate">{test?.category} · Official CBT Exam Pattern</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           {!submitted && (
-            <div className={`flex flex-col sm:flex-row items-center sm:gap-2 px-2 sm:px-3.5 py-1 sm:py-1.5 rounded-xl border text-[10px] sm:text-sm font-bold transition-all ${timeLeft < 300 ? "bg-rose-950/80 border-rose-600 text-rose-300 animate-pulse" : "bg-slate-900 border-slate-700 text-amber-400"}`}>
+            <div className={`flex flex-col sm:flex-row items-center sm:gap-2 px-2 sm:px-3.5 py-1 sm:py-1.5 rounded-xl border text-[10px] sm:text-sm font-bold transition-all ${timeLeft < 300 ? "bg-rose-950/80 border-rose-600 text-rose-300 animate-pulse" : "bg-appbg dark:bg-slate-900 border-black/20 dark:border-slate-700 text-amber-400"}`}>
               <Clock size={14} className="hidden sm:block" />
               <span className="text-center leading-tight">Time<span className="hidden sm:inline"> Left</span>:<br className="sm:hidden" />{formatTimer(timeLeft)}</span>
             </div>
@@ -243,7 +243,7 @@ export default function MockTestRunner({ test, onClose }) {
               <Send size={12} className="sm:w-[14px] sm:h-[14px]" /> <span className="hidden sm:inline">Submit Test</span><span className="sm:hidden">Submit</span>
             </button>
           ) : (
-            <button onClick={onClose} className="btn-soft text-[10px] sm:text-xs px-2.5 sm:px-4 py-1.5 sm:py-2 bg-slate-800 hover:bg-slate-700 text-white flex items-center gap-1 whitespace-nowrap">
+            <button onClick={onClose} className="btn-soft text-[10px] sm:text-xs px-2.5 sm:px-4 py-1.5 sm:py-2 bg-black/5 dark:bg-slate-800 hover:bg-slate-700 text-white flex items-center gap-1 whitespace-nowrap">
               <X size={12} className="sm:w-[14px] sm:h-[14px]" /> Exit
             </button>
           )}
@@ -254,11 +254,11 @@ export default function MockTestRunner({ test, onClose }) {
       {!submitted ? (
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* Left / Main Question Area */}
-          <div className="flex-1 flex flex-col bg-slate-900 overflow-y-auto">
+          <div className="flex-1 flex flex-col bg-appbg dark:bg-slate-900 overflow-y-auto">
             {/* Section Switcher Tabs */}
             {sections.length > 1 && (
-              <div className="flex items-center gap-2 px-4 sm:px-6 py-2.5 bg-slate-950/60 border-b border-slate-800 text-xs overflow-x-auto shrink-0">
-                <span className="text-slate-400 font-medium mr-1 text-[11px] sm:text-xs">Sections:</span>
+              <div className="flex items-center gap-2 px-4 sm:px-6 py-2.5 bg-white dark:bg-slate-950/60 border-b border-black/10 dark:border-slate-800 text-xs overflow-x-auto shrink-0">
+                <span className="text-ink-muted dark:text-slate-400 font-medium mr-1 text-[11px] sm:text-xs">Sections:</span>
                 {sections.map((sec) => (
                   <button
                     key={sec}
@@ -267,7 +267,7 @@ export default function MockTestRunner({ test, onClose }) {
                       const firstIdx = questions.findIndex(q => (q.section || "General") === sec);
                       if (firstIdx !== -1) setCurrentIndex(firstIdx);
                     }}
-                    className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all whitespace-nowrap ${currentQ.section === sec ? "bg-brand-600 text-white shadow-sm ring-1 ring-brand-400" : "bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white"}`}
+                    className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all whitespace-nowrap ${currentQ.section === sec ? "bg-brand-600 text-white shadow-sm ring-1 ring-brand-400" : "bg-black/5 dark:bg-slate-800/80 text-ink-soft dark:text-slate-300 hover:bg-slate-700 hover:text-white"}`}
                   >
                     {sec}
                   </button>
@@ -281,8 +281,8 @@ export default function MockTestRunner({ test, onClose }) {
             )}
 
             {/* Question Details Header - Adda247 Style */}
-            <div className="px-6 py-4 flex items-center justify-between text-[11px] text-slate-400 font-medium shrink-0">
-              <span className="bg-slate-800/60 px-3 py-1.5 rounded-full border border-slate-700/50">Question Type : Multiple Choice</span>
+            <div className="px-6 py-4 flex items-center justify-between text-[11px] text-ink-muted dark:text-slate-400 font-medium shrink-0">
+              <span className="bg-black/5 dark:bg-slate-800/60 px-3 py-1.5 rounded-full border border-black/20 dark:border-slate-700/50">Question Type : Multiple Choice</span>
               <button onClick={markForReview} className="flex items-center gap-1.5 hover:text-white transition-colors">
                 Review <Bookmark size={14} className={status[currentQ.id] === "review" ? "text-purple-400 fill-purple-400" : ""} />
               </button>
@@ -300,7 +300,7 @@ export default function MockTestRunner({ test, onClose }) {
                   {/* Instructions Header */}
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <span className="w-6 h-6 flex items-center justify-center bg-slate-800 text-white font-bold rounded text-xs">{currentIndex + 1}</span>
+                      <span className="w-6 h-6 flex items-center justify-center bg-black/5 dark:bg-slate-800 text-white font-bold rounded text-xs">{currentIndex + 1}</span>
                       <span className="font-bold text-white text-[15px]">Instructions</span>
                     </div>
                     <div className="flex items-center gap-2 text-[10px] font-bold">
@@ -334,7 +334,7 @@ export default function MockTestRunner({ test, onClose }) {
                      <span className="font-bold text-white text-[15px]">Question</span>
                   ) : (
                      <div className="flex items-center gap-3">
-                       <span className="w-6 h-6 flex items-center justify-center bg-slate-800 text-white font-bold rounded text-xs">{currentIndex + 1}</span>
+                       <span className="w-6 h-6 flex items-center justify-center bg-black/5 dark:bg-slate-800 text-white font-bold rounded text-xs">{currentIndex + 1}</span>
                        <span className="font-bold text-white text-[15px]">Question</span>
                      </div>
                   )}
@@ -347,14 +347,14 @@ export default function MockTestRunner({ test, onClose }) {
                   )}
                 </div>
                 
-                <p className="text-slate-100 font-medium text-[15px] leading-relaxed whitespace-pre-line">
+                <p className="text-ink dark:text-slate-100 font-medium text-[15px] leading-relaxed whitespace-pre-line">
                   {formatMathText(currentQ.question)}
                 </p>
               </div>
 
               {/* Question Image / Chart Attachment - Right Above Options */}
               {(currentQ.imageUrl || currentQ.image || currentQ.chartUrl || currentQ.img) && (
-                <div className="my-4 rounded-xl border border-slate-700/80 max-w-xl bg-white p-2.5 shadow-xl overflow-hidden">
+                <div className="my-4 rounded-xl border border-black/20 dark:border-slate-700/80 max-w-xl bg-white p-2.5 shadow-xl overflow-hidden">
                   <img
                     src={currentQ.imageUrl || currentQ.image || currentQ.chartUrl || currentQ.img}
                     alt="Question Chart / Image"
@@ -371,9 +371,9 @@ export default function MockTestRunner({ test, onClose }) {
                     <div
                       key={optIdx}
                       onClick={() => selectOption(optIdx)}
-                      className={`p-2 sm:p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 sm:gap-4 ${isSelected ? "bg-slate-800/80 border-slate-500 text-white shadow-sm" : "bg-slate-800/30 border-slate-800/80 text-slate-300 hover:bg-slate-800/60 hover:border-slate-700"}`}
+                      className={`p-2 sm:p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 sm:gap-4 ${isSelected ? "bg-black/5 dark:bg-slate-800/80 border-slate-500 text-white shadow-sm" : "bg-black/5 dark:bg-slate-800/30 border-black/10 dark:border-slate-800/80 text-ink-soft dark:text-slate-300 hover:bg-black/5 dark:bg-slate-800/60 hover:border-black/20 dark:border-slate-700"}`}
                     >
-                      <span className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center font-bold text-[10px] sm:text-[11px] shrink-0 ${isSelected ? "bg-slate-600 text-white" : "bg-slate-700/60 text-slate-400"}`}>
+                      <span className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center font-bold text-[10px] sm:text-[11px] shrink-0 ${isSelected ? "bg-slate-600 text-white" : "bg-slate-700/60 text-ink-muted dark:text-slate-400"}`}>
                         {String.fromCharCode(65 + optIdx)}
                       </span>
                       <span className="text-xs sm:text-[14px] leading-relaxed">{formatMathText(opt)}</span>
@@ -384,9 +384,9 @@ export default function MockTestRunner({ test, onClose }) {
             </div>
 
             {/* Action Bar Footer */}
-            <div className="h-16 px-6 bg-slate-950 border-t border-slate-800 hidden sm:flex items-center justify-between shrink-0">
+            <div className="h-16 px-6 bg-white dark:bg-slate-950 border-t border-black/10 dark:border-slate-800 hidden sm:flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
-                <button onClick={clearResponse} className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-xs font-semibold text-slate-300">
+                <button onClick={clearResponse} className="px-3.5 py-2 rounded-xl bg-appbg dark:bg-slate-900 border border-black/10 dark:border-slate-800 hover:bg-black/5 dark:bg-slate-800 text-xs font-semibold text-ink-soft dark:text-slate-300">
                   Clear Response
                 </button>
                 <button onClick={markForReview} className="px-3.5 py-2 rounded-xl bg-purple-950/60 border border-purple-800 hover:bg-purple-900 text-xs font-semibold text-purple-300 flex items-center gap-1.5">
@@ -395,7 +395,7 @@ export default function MockTestRunner({ test, onClose }) {
               </div>
 
               <div className="flex items-center gap-2">
-                <button onClick={goPrev} disabled={currentIndex === 0} className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 disabled:opacity-40 text-xs font-semibold text-slate-300 flex items-center gap-1">
+                <button onClick={goPrev} disabled={currentIndex === 0} className="px-3 py-2 rounded-xl bg-appbg dark:bg-slate-900 border border-black/10 dark:border-slate-800 disabled:opacity-40 text-xs font-semibold text-ink-soft dark:text-slate-300 flex items-center gap-1">
                   <ChevronLeft size={15} /> Previous
                 </button>
                 <button onClick={saveAndNext} className="btn-primary text-xs px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white font-bold flex items-center gap-1">
@@ -406,8 +406,8 @@ export default function MockTestRunner({ test, onClose }) {
           </div>
 
           {/* Right Question Palette Drawer */}
-          <div className="w-full md:w-80 bg-slate-950 border-l border-slate-800 p-5 flex flex-col shrink-0">
-            <h3 className="font-bold text-xs text-slate-400 uppercase tracking-wider mb-4">Question Palette</h3>
+          <div className="w-full md:w-80 bg-white dark:bg-slate-950 border-l border-black/10 dark:border-slate-800 p-5 flex flex-col shrink-0">
+            <h3 className="font-bold text-xs text-ink-muted dark:text-slate-400 uppercase tracking-wider mb-4">Question Palette</h3>
 
             {/* Question Grid */}
             <div className="flex-1 overflow-y-auto grid grid-cols-5 gap-2 pr-1 max-h-[50vh] md:max-h-none">
@@ -417,7 +417,7 @@ export default function MockTestRunner({ test, onClose }) {
                 const isRev = status[q.id] === "review";
                 const isNotAns = status[q.id] === "not_answered" && !isAns;
 
-                let statusBg = "bg-slate-900 text-slate-400 border-slate-800";
+                let statusBg = "bg-appbg dark:bg-slate-900 text-ink-muted dark:text-slate-400 border-black/10 dark:border-slate-800";
                 if (isRev) statusBg = "bg-purple-600 text-white border-purple-500";
                 else if (isAns) statusBg = "bg-emerald-600 text-white border-emerald-500";
                 else if (isNotAns) statusBg = "bg-rose-600 text-white border-rose-500";
@@ -435,11 +435,11 @@ export default function MockTestRunner({ test, onClose }) {
             </div>
 
             {/* Legend */}
-            <div className="pt-4 border-t border-slate-800 space-y-2 text-[11px] text-slate-400">
+            <div className="pt-4 border-t border-black/10 dark:border-slate-800 space-y-2 text-[11px] text-ink-muted dark:text-slate-400">
               <div className="flex items-center gap-2"><span className="w-3.5 h-3.5 rounded bg-emerald-600 shrink-0"/> Answered</div>
               <div className="flex items-center gap-2"><span className="w-3.5 h-3.5 rounded bg-rose-600 shrink-0"/> Not Answered</div>
               <div className="flex items-center gap-2"><span className="w-3.5 h-3.5 rounded bg-purple-600 shrink-0"/> Marked for Review</div>
-              <div className="flex items-center gap-2"><span className="w-3.5 h-3.5 rounded bg-slate-900 border border-slate-800 shrink-0"/> Not Visited</div>
+              <div className="flex items-center gap-2"><span className="w-3.5 h-3.5 rounded bg-appbg dark:bg-slate-900 border border-black/10 dark:border-slate-800 shrink-0"/> Not Visited</div>
             </div>
           </div>
         </div>
@@ -447,29 +447,29 @@ export default function MockTestRunner({ test, onClose }) {
         /* Results & Detailed Solutions View */
         <div className="flex-1 overflow-y-auto p-6 md:p-10 max-w-5xl mx-auto w-full space-y-8">
           {/* Score Header Card */}
-          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="rounded-3xl bg-slate-950 border border-slate-800 p-6 md:p-8 shadow-2xl relative overflow-hidden">
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="rounded-3xl bg-white dark:bg-slate-950 border border-black/10 dark:border-slate-800 p-6 md:p-8 shadow-2xl relative overflow-hidden">
             <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
               <div className="space-y-2 text-center md:text-left">
                 <span className="chip bg-brand-950 border border-brand-800 text-brand-300 font-semibold">{test?.category} Exam Report</span>
                 <h1 className="text-2xl md:text-3xl font-extrabold text-white">{test?.title}</h1>
-                <p className="text-sm text-slate-400">Submitted on {results?.date} · Time Taken: {formatTimer(results?.timeSpentSeconds || 0)}</p>
+                <p className="text-sm text-ink-muted dark:text-slate-400">Submitted on {results?.date} · Time Taken: {formatTimer(results?.timeSpentSeconds || 0)}</p>
               </div>
 
-              <div className="flex items-center gap-6 bg-slate-900/80 p-5 rounded-2xl border border-slate-800">
+              <div className="flex items-center gap-6 bg-appbg dark:bg-slate-900/80 p-5 rounded-2xl border border-black/10 dark:border-slate-800">
                 <div className="text-center">
-                  <p className="text-xs text-slate-400 font-medium">Final Score</p>
-                  <p className="text-3xl font-extrabold text-amber-400">{results?.score} <span className="text-sm text-slate-500">/ {results?.totalMarks}</span></p>
+                  <p className="text-xs text-ink-muted dark:text-slate-400 font-medium">Final Score</p>
+                  <p className="text-3xl font-extrabold text-amber-400">{results?.score} <span className="text-sm text-ink-faint dark:text-slate-500">/ {results?.totalMarks}</span></p>
                 </div>
-                <div className="w-px h-10 bg-slate-800"/>
+                <div className="w-px h-10 bg-black/5 dark:bg-slate-800"/>
                 <div className="text-center">
-                  <p className="text-xs text-slate-400 font-medium">Accuracy</p>
+                  <p className="text-xs text-ink-muted dark:text-slate-400 font-medium">Accuracy</p>
                   <p className="text-3xl font-extrabold text-emerald-400">{results?.accuracy}%</p>
                 </div>
               </div>
             </div>
 
             {/* Quick Metrics Grid */}
-            <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-slate-800/80 text-center">
+            <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-black/10 dark:border-slate-800/80 text-center">
               <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-800/40">
                 <p className="text-xl font-bold text-emerald-400">{results?.correctCount}</p>
                 <p className="text-[11px] text-emerald-300">Correct</p>
@@ -478,9 +478,9 @@ export default function MockTestRunner({ test, onClose }) {
                 <p className="text-xl font-bold text-rose-400">{results?.incorrectCount}</p>
                 <p className="text-[11px] text-rose-300">Incorrect</p>
               </div>
-              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
-                <p className="text-xl font-bold text-slate-400">{results?.unattemptedCount}</p>
-                <p className="text-[11px] text-slate-400">Unattempted</p>
+              <div className="p-3 rounded-xl bg-appbg dark:bg-slate-900 border border-black/10 dark:border-slate-800">
+                <p className="text-xl font-bold text-ink-muted dark:text-slate-400">{results?.unattemptedCount}</p>
+                <p className="text-[11px] text-ink-muted dark:text-slate-400">Unattempted</p>
               </div>
             </div>
           </motion.div>
@@ -496,7 +496,7 @@ export default function MockTestRunner({ test, onClose }) {
                   <button
                     key={f}
                     onClick={() => setSolutionFilter(f)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize transition-colors ${solutionFilter === f ? "bg-brand-600 text-white" : "bg-slate-950 border border-slate-800 text-slate-400 hover:text-white"}`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize transition-colors ${solutionFilter === f ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-950 border border-black/10 dark:border-slate-800 text-ink-muted dark:text-slate-400 hover:text-white"}`}
                   >
                     {f}
                   </button>
@@ -522,28 +522,28 @@ export default function MockTestRunner({ test, onClose }) {
                   const qImg = q.imageUrl || q.image || q.chartUrl || q.img;
 
                   return (
-                    <div key={q.id || idx} className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
+                    <div key={q.id || idx} className="p-6 rounded-2xl bg-white dark:bg-slate-950 border border-black/10 dark:border-slate-800 space-y-4">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-bold text-brand-400">Question {idx + 1} ({q.section || "General"})</span>
-                        <span className={`px-2.5 py-1 rounded-md font-semibold ${isCorrect ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : isUnattempted ? "bg-slate-900 text-slate-400" : "bg-rose-950 text-rose-400 border border-rose-800"}`}>
+                        <span className={`px-2.5 py-1 rounded-md font-semibold ${isCorrect ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : isUnattempted ? "bg-appbg dark:bg-slate-900 text-ink-muted dark:text-slate-400" : "bg-rose-950 text-rose-400 border border-rose-800"}`}>
                           {isCorrect ? "Correct ✓" : isUnattempted ? "Unattempted ⚪" : "Incorrect ✗"}
                         </span>
                       </div>
 
                       {q.passage && (
-                        <div className="p-4 rounded-xl bg-slate-900 border border-slate-800/80 mb-3">
+                        <div className="p-4 rounded-xl bg-appbg dark:bg-slate-900 border border-black/10 dark:border-slate-800/80 mb-3">
                           <p className="text-[10px] font-bold text-brand-400 uppercase tracking-wider mb-1">Directions / Data</p>
-                          <p className="text-xs text-slate-300 whitespace-pre-line leading-relaxed">{formatMathText(q.passage)}</p>
+                          <p className="text-xs text-ink-soft dark:text-slate-300 whitespace-pre-line leading-relaxed">{formatMathText(q.passage)}</p>
                         </div>
                       )}
 
                       {qImg && (
-                        <div className="my-3 rounded-xl border border-slate-700/80 max-w-xl bg-white p-2.5 shadow-lg overflow-hidden">
+                        <div className="my-3 rounded-xl border border-black/20 dark:border-slate-700/80 max-w-xl bg-white p-2.5 shadow-lg overflow-hidden">
                           <img src={qImg} alt="Question Chart" className="w-full max-h-[300px] object-contain rounded-lg block" />
                         </div>
                       )}
 
-                      <p className="font-semibold text-slate-100 text-sm whitespace-pre-line leading-relaxed">
+                      <p className="font-semibold text-ink dark:text-slate-100 text-sm whitespace-pre-line leading-relaxed">
                         {formatMathText(q.question)}
                       </p>
 
@@ -552,14 +552,14 @@ export default function MockTestRunner({ test, onClose }) {
                           const isRightChoice = oIdx === correctIdx;
                           const isStudentChoice = oIdx === studentAns;
 
-                          let bgClass = "bg-slate-900 border-slate-800 text-slate-400";
+                          let bgClass = "bg-appbg dark:bg-slate-900 border-black/10 dark:border-slate-800 text-ink-muted dark:text-slate-400";
                           if (isRightChoice) bgClass = "bg-emerald-950/80 border-emerald-600 text-emerald-200 font-bold shadow-sm ring-1 ring-emerald-500/50";
                           else if (isStudentChoice && !isRightChoice) bgClass = "bg-rose-950/80 border-rose-600 text-rose-200 font-semibold";
 
                           return (
                             <div key={oIdx} className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${bgClass}`}>
                               <div className="flex items-center gap-3">
-                                <span className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold ${isRightChoice ? 'bg-emerald-600 text-white' : isStudentChoice ? 'bg-rose-600 text-white' : 'bg-black/30 text-slate-400'}`}>
+                                <span className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold ${isRightChoice ? 'bg-emerald-600 text-white' : isStudentChoice ? 'bg-rose-600 text-white' : 'bg-black/30 text-ink-muted dark:text-slate-400'}`}>
                                   {String.fromCharCode(65 + oIdx)}
                                 </span>
                                 <span>{formatMathText(opt)}</span>
@@ -572,7 +572,7 @@ export default function MockTestRunner({ test, onClose }) {
                       </div>
 
                       {/* Solution Explanation */}
-                      <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 space-y-1.5">
+                      <div className="p-4 rounded-xl bg-appbg dark:bg-slate-900/90 border border-black/10 dark:border-slate-800 text-xs text-ink-soft dark:text-slate-300 space-y-1.5">
                         <p className="font-bold text-amber-400 flex items-center gap-1">💡 Solution &amp; Explanation:</p>
                         <p className="leading-relaxed text-slate-200 whitespace-pre-line">
                           {formatMathText(q.explanation) || `Correct Option is (${String.fromCharCode(65 + correctIdx)}): ${formatMathText(q.options?.[correctIdx] || "")}`}
@@ -589,30 +589,30 @@ export default function MockTestRunner({ test, onClose }) {
       {/* Confirmation Modal before Submit */}
       {confirmSubmit && (
         <div className="fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm p-4 flex items-center justify-center" onClick={() => setConfirmSubmit(false)}>
-          <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-3xl p-6 text-center space-y-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md bg-white dark:bg-slate-950 border border-black/10 dark:border-slate-800 rounded-3xl p-6 text-center space-y-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <AlertCircle size={40} className="mx-auto text-amber-400" />
             <div>
               <h3 className="text-lg font-bold text-white">Are you sure you want to submit?</h3>
-              <p className="text-xs text-slate-400 mt-1">Review your summary before submitting your test.</p>
+              <p className="text-xs text-ink-muted dark:text-slate-400 mt-1">Review your summary before submitting your test.</p>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 bg-slate-900 p-3 rounded-2xl border border-slate-800 text-xs">
+            <div className="grid grid-cols-3 gap-2 bg-appbg dark:bg-slate-900 p-3 rounded-2xl border border-black/10 dark:border-slate-800 text-xs">
               <div>
                 <p className="font-bold text-emerald-400">{Object.keys(answers).length}</p>
-                <p className="text-[10px] text-slate-400">Answered</p>
+                <p className="text-[10px] text-ink-muted dark:text-slate-400">Answered</p>
               </div>
               <div>
                 <p className="font-bold text-rose-400">{questions.length - Object.keys(answers).length}</p>
-                <p className="text-[10px] text-slate-400">Unanswered</p>
+                <p className="text-[10px] text-ink-muted dark:text-slate-400">Unanswered</p>
               </div>
               <div>
                 <p className="font-bold text-purple-400">{Object.values(status).filter((s) => s === "review").length}</p>
-                <p className="text-[10px] text-slate-400">In Review</p>
+                <p className="text-[10px] text-ink-muted dark:text-slate-400">In Review</p>
               </div>
             </div>
 
             <div className="flex gap-2 pt-2">
-              <button onClick={() => setConfirmSubmit(false)} className="btn-soft flex-1 text-xs py-2.5 bg-slate-900 text-slate-300 hover:bg-slate-800">
+              <button onClick={() => setConfirmSubmit(false)} className="btn-soft flex-1 text-xs py-2.5 bg-appbg dark:bg-slate-900 text-ink-soft dark:text-slate-300 hover:bg-black/5 dark:bg-slate-800">
                 Continue Test
               </button>
               <button onClick={handleSubmitTest} className="btn-primary flex-1 text-xs py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold">

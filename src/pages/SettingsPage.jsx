@@ -22,10 +22,21 @@ export default function SettingsPage() {
     push: true,
     email: true,
     pdf: true,
-    dark: false,
+    dark: document.documentElement.classList.contains("dark"),
     dataSaver: false,
   });
-  const set = (k) => setPref((p) => ({ ...p, [k]: !p[k] }));
+
+  const set = (k) => {
+    setPref((p) => {
+      const nextVal = !p[k];
+      if (k === "dark") {
+        if (nextVal) document.documentElement.classList.add("dark");
+        else document.documentElement.classList.remove("dark");
+        localStorage.setItem("theme", nextVal ? "dark" : "light");
+      }
+      return { ...p, [k]: nextVal };
+    });
+  };
 
   const groups = [
     { icon: Bell, title: "Notifications", desc: "Push & in-app alerts",
@@ -40,7 +51,7 @@ export default function SettingsPage() {
       ] },
     { icon: Palette, title: "Appearance", desc: "Theme options",
       items: [
-        { k: "dark", label: "Dark mode (coming soon)" },
+        { k: "dark", label: "Dark mode (Mock Test UI)" },
       ] },
   ];
 

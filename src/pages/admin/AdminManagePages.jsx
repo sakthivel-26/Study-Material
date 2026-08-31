@@ -1101,41 +1101,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                 onChange={handlePDFUpload}
               />
 
-              {/* LLM Connection Status Card */}
-              <div className="p-4 rounded-2xl bg-gradient-to-r from-brand-50 to-indigo-50 border border-brand-200 flex items-center justify-between flex-wrap gap-3 shadow-xs">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center font-extrabold shadow-sm shrink-0">
-                    <Sparkles size={20} className="animate-pulse" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-xs font-extrabold text-brand-950">AI LLM Model Status:</h4>
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
-                        localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY") || localStorage.getItem("VITE_DEEPSEEK_API_KEY")
-                          ? "bg-emerald-500 text-white shadow-xs"
-                          : "bg-amber-500 text-white"
-                      }`}>
-                        {localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY") || localStorage.getItem("VITE_DEEPSEEK_API_KEY")
-                          ? "🟢 LLM Connected (100% Accuracy)"
-                          : "⚡ Auto-LLM Active"}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-brand-700 font-medium mt-0.5">
-                      {localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY")
-                        ? "Connected with direct API Key! PDF questions are extracted with 100% precision."
-                        : "Connect your Google Gemini or Groq API Key to ensure 100% LLM PDF extraction accuracy."}
-                    </p>
-                  </div>
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => setShowKeyModal(true)}
-                  className="btn-primary text-xs px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5"
-                >
-                  ⚙️ {localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") ? "API Key Connected" : "Connect LLM API Key"}
-                </button>
-              </div>
 
               <div
                 onClick={() => pdfInputRef.current?.click()}
@@ -2686,18 +2652,18 @@ export function ManageCoursesPage() {
     <>
       <PageHeader icon={<BookOpen size={22} />} title="Manage Courses" subtitle="Edit or add new courses" action={<button onClick={()=>pushToast("New course form opened")} className="btn-primary text-sm px-4 py-2.5"><Plus size={16}/> Add Course</button>} />
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {COURSE_PROGRESS.map((c,i)=>(
+        {CATEGORIES.map((c,i)=>(
           <div key={c.id} className="card card-hover p-5">
             <div className="flex items-start justify-between mb-3">
-              <span className="text-4xl">{c.thumb}</span>
-              <Badge color={c.color}>{c.category}</Badge>
+              <span className="text-4xl">{c.icon}</span>
+              <Badge color={c.color}>{c.group}</Badge>
             </div>
-            <h3 className="font-bold text-ink mb-1">{c.title}</h3>
-            <p className="text-xs text-ink-muted mb-3">{c.lessons} lessons · 0 completed</p>
-            <ProgressBar value={c.progress} color={c.color}/>
+            <h3 className="font-bold text-ink mb-1">{c.name}</h3>
+            <p className="text-xs text-ink-muted mb-3">{c.materials} total materials</p>
+            <ProgressBar value={100} color={c.color}/>
             <div className="flex gap-2 mt-4">
-              <button onClick={()=>pushToast(`Editing ${c.title}`)} className="btn-soft flex-1 text-xs py-2">Edit</button>
-              <button onClick={()=>pushToast(`${c.title} disabled`)} className="btn-soft flex-1 text-xs py-2">Disable</button>
+              <button onClick={()=>pushToast(`Editing ${c.name}`)} className="btn-soft flex-1 text-xs py-2">Edit</button>
+              <button onClick={()=>pushToast(`${c.name} disabled`)} className="btn-soft flex-1 text-xs py-2">Disable</button>
             </div>
           </div>
         ))}
@@ -2731,7 +2697,37 @@ export function PlansPage() {
 }
 
 export function AdmissionsPage() {
-  const { admissions = [] } = useApp();
+  const { admissions = [], pushToast } = useApp();
+
+  const exportCSV = () => {
+    if (admissions.length === 0) {
+      pushToast("No data to export");
+      return;
+    }
+    
+    const headers = ["Date", "Name", "Mobile Number", "Email ID", "Target Exam", "Mode of Learning"];
+    const rows = admissions.map(lead => [
+      new Date(lead.createdAt?.toMillis ? lead.createdAt.toMillis() : Date.now()).toLocaleDateString("en-IN"),
+      lead.fullName || lead.name || "Student",
+      lead.mobileNumber || "",
+      lead.emailId || "",
+      lead.targetExam || "General",
+      lead.modeOfLearning || "Online"
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + headers.join(",") + "\n"
+      + rows.map(e => e.map(field => `"${field}"`).join(",")).join("\n");
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `student_leads_${new Date().getTime()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    pushToast("Exported to Excel (CSV)");
+  };
 
   return (
     <>
@@ -2739,6 +2735,11 @@ export function AdmissionsPage() {
         icon={<Users size={22} />}
         title="Admission Inquiries"
         subtitle="Manage leads collected from the website popup."
+        action={
+          <button onClick={exportCSV} className="btn-primary text-sm px-4 py-2.5">
+            <Download size={16} /> Export CSV
+          </button>
+        }
       />
       
       <div className="card p-0 overflow-hidden">
