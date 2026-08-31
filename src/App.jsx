@@ -30,9 +30,9 @@ export default function App() {
       <Routes>
       {/* Public auth screens (redirect away if signed in) */}
       <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
-      <Route path="/mobile-login" element={<PublicOnly><MobileLoginPage /></PublicOnly>} />
-      <Route path="/signup" element={<PublicOnly><SignupPage /></PublicOnly>} />
-      <Route path="/forgot-password" element={<PublicOnly><ForgotPasswordPage /></PublicOnly>} />
+      <Route path="/mobile-login" element={<Navigate to="/login" replace />} />
+      <Route path="/signup" element={<Navigate to="/login" replace />} />
+      <Route path="/forgot-password" element={<Navigate to="/login" replace />} />
 
       {/* Student (Publicly accessible dashboard) */}
       <Route element={<Layout />}>

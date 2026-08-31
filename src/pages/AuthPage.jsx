@@ -133,33 +133,7 @@ function AuthToast({ msg }) {
 
 /* ------------------------------- LOGIN ----------------------------------- */
 export function LoginPage() {
-  const { signIn, loading, error, toastMsg, isFirebaseConfigured } = useAuth();
-  const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-
-  const submit = async (e) => {
-    e.preventDefault();
-    try {
-      const u = await signIn({ email, password });
-      navigate(u.role === "admin" ? "/admin" : "/", { replace: true });
-    } catch {
-      /* handled in state */
-    }
-  };
-
-  const quick = async (role) => {
-    try {
-      const u = await signIn(
-        role === "admin"
-          ? { email: "admin@kenias.academy", password: "admin123" }
-          : { email: "arjun.kumar@gmail.com", password: "student123" }
-      );
-      navigate(u.role === "admin" ? "/admin" : "/", { replace: true });
-    } catch {
-      /* handled */
-    }
-  };
+  const { error, toastMsg } = useAuth();
 
   return (
     <div className="min-h-screen flex bg-appbg">
@@ -172,33 +146,14 @@ export function LoginPage() {
             <p className="text-sm text-ink-muted mt-1 mb-6">Log in to continue learning.</p>
 
             <ErrorBanner message={error} />
-            <form onSubmit={submit} className="space-y-4 mt-4">
-              <Field icon={Mail} label="Email address" type="email" value={email} onChange={setEmail} placeholder="you@example.com" autoComplete="email" />
-              <div>
-                <Field icon={Lock} label="Password" type="password" value={password} onChange={setPassword} placeholder="••••••••" autoComplete="current-password" />
-                <div className="text-right mt-1.5">
-                  <button type="button" onClick={() => navigate("/forgot-password")} className="text-xs font-semibold text-brand-700 hover:text-brand-800">
-                    Forgot password?
-                  </button>
-                </div>
-              </div>
-              <button type="submit" disabled={loading} className="btn-primary w-full py-3 text-sm">
-                {loading ? <><Loader2 size={16} className="animate-spin" /> Signing in...</> : <>Log in <ArrowRight size={16} /></>}
-              </button>
-            </form>
-
-            <div className="flex items-center gap-3 my-5">
-              <div className="h-px flex-1 bg-black/10" /><span className="text-xs text-ink-faint">or</span><div className="h-px flex-1 bg-black/10" />
-            </div>
-            <GoogleButton />
-            <button type="button" onClick={() => navigate("/mobile-login")} className="btn-ghost w-full mt-3 py-2.5 text-sm"><Phone size={16} /> Log in with mobile OTP</button>
-            <div className="mt-3 text-center">
-              <button type="button" onClick={() => navigate("/signup")} className="text-sm font-semibold text-brand-700 hover:text-brand-800">
-                New here? Create an account
-              </button>
+            
+            <div className="mt-4">
+              <GoogleButton />
             </div>
 
-
+            <div className="mt-6 px-4 py-4 bg-black/5 rounded-xl text-xs text-ink-muted text-center leading-relaxed">
+              We now exclusively use Google Sign-In for enhanced security. Please log in or create an account using your Google profile.
+            </div>
           </motion.div>
         </div>
       </div>
