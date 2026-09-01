@@ -243,7 +243,7 @@ export default function MockTestRunner({ test, onClose }) {
               <Send size={12} className="sm:w-[14px] sm:h-[14px]" /> <span className="hidden sm:inline">Submit Test</span><span className="sm:hidden">Submit</span>
             </button>
           ) : (
-            <button onClick={onClose} className="btn-soft text-[10px] sm:text-xs px-2.5 sm:px-4 py-1.5 sm:py-2 bg-black/5 dark:bg-slate-800 hover:bg-slate-700 text-white flex items-center gap-1 whitespace-nowrap">
+            <button onClick={onClose} className="btn-soft text-[10px] sm:text-xs px-2.5 sm:px-4 py-1.5 sm:py-2 bg-black/5 dark:bg-slate-800 hover:bg-black/10 dark:hover:bg-slate-700 text-ink dark:text-white flex items-center gap-1 whitespace-nowrap">
               <X size={12} className="sm:w-[14px] sm:h-[14px]" /> Exit
             </button>
           )}
@@ -304,8 +304,8 @@ export default function MockTestRunner({ test, onClose }) {
                       <span className="font-bold text-ink dark:text-white text-[15px]">Instructions</span>
                     </div>
                     <div className="flex items-center gap-2 text-[10px] font-bold">
-                      <span className="bg-emerald-950/50 text-emerald-400 px-2 py-0.5 rounded">+1.0</span>
-                      <span className="bg-rose-950/50 text-rose-400 px-2 py-0.5 rounded">-0.25</span>
+                      <span className="bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded">+1.0</span>
+                      <span className="bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded">-0.25</span>
                     </div>
                   </div>
                   
@@ -341,8 +341,8 @@ export default function MockTestRunner({ test, onClose }) {
                   
                   {!currentQ.passage && (
                     <div className="flex items-center gap-2 text-[10px] font-bold">
-                      <span className="bg-emerald-950/50 text-emerald-400 px-2 py-0.5 rounded">+1.0</span>
-                      <span className="bg-rose-950/50 text-rose-400 px-2 py-0.5 rounded">-0.25</span>
+                      <span className="bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded">+1.0</span>
+                      <span className="bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded">-0.25</span>
                     </div>
                   )}
                 </div>
