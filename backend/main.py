@@ -34,11 +34,12 @@ SYSTEM_PROMPT = """
 You are a strict data extraction AI. You MUST output ONLY valid JSON. DO NOT output any markdown, explanations, or conversational text.
 Extract: question number, question text, A, B, C, D, source answer, page number, and any associated passage/directions.
 If the question is part of a reading comprehension, puzzle, seating arrangement, or data interpretation chart, include the full passage/directions text in the 'passage' field. Otherwise, 'passage': null.
+If there are tabular data or data interpretation tables in the passage or question, format them precisely as Markdown tables in the 'passage' or 'question_text' field.
 Return ONLY JSON matching this schema:
 {
   "questions": [
     {
-      "passage": "Directions (1-5): Study the following information carefully...",
+      "passage": "Directions (1-5): Study the following information carefully...\n\n| Months | Visitors |\n|---|---|\n| Jan | 20 |",
       "question_number": 1,
       "question_text": "...",
       "options": { "A": "...", "B": "...", "C": "...", "D": "..." },

@@ -221,6 +221,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       question: "",
       passage: "",
       imageUrl: "",
+      solutionImageUrl: "",
       options: ["Option A", "Option B", "Option C", "Option D"],
       correctAnswerIndex: 0,
       explanation: "",
@@ -235,6 +236,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         question: "",
         passage: "",
         imageUrl: "",
+        solutionImageUrl: "",
         options: ["Option A", "Option B", "Option C", "Option D"],
         correctAnswerIndex: 0,
         explanation: "",
@@ -385,6 +387,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         section: approvalStatus?.section || q.section || "General",
         passage: approvalStatus?.passage ?? (q.passage || ""),
         imageUrl: approvalStatus?.imageUrl ?? (q.imageUrl || ""),
+        solutionImageUrl: approvalStatus?.solutionImageUrl ?? (q.solutionImageUrl || ""),
         question: approvalStatus?.questionText ?? (q.question_text || q.question || `Question ${idx + 1}`),
         options: optsArray,
         correctAnswerIndex: ansIndex < optsArray.length ? ansIndex : 0,
@@ -459,6 +462,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           correctAnswerIndex: +q.correctAnswerIndex || 0,
           explanation: q.explanation.trim() || "No explanation provided.",
           ...(q.imageUrl && { imageUrl: q.imageUrl }),
+          ...(q.solutionImageUrl && { solutionImageUrl: q.solutionImageUrl }),
           ...(q.passage && { passage: q.passage })
         })).filter((q, idx) => q.question !== `Question ${idx + 1}`);
 
@@ -960,7 +964,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   };
 
   const attachImageToQuestion = (idx, file) => {
-    if (!file) return;
+    if (!file) {
+      setApprovedQuestions(prev => ({
+        ...prev,
+        [idx]: {
+          ...prev[idx],
+          imageUrl: ""
+        }
+      }));
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       setApprovedQuestions(prev => ({
@@ -968,6 +981,30 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         [idx]: {
           ...prev[idx],
           imageUrl: reader.result
+        }
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const attachSolutionImageToQuestion = (idx, file) => {
+    if (!file) {
+      setApprovedQuestions(prev => ({
+        ...prev,
+        [idx]: {
+          ...prev[idx],
+          solutionImageUrl: ""
+        }
+      }));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setApprovedQuestions(prev => ({
+        ...prev,
+        [idx]: {
+          ...prev[idx],
+          solutionImageUrl: reader.result
         }
       }));
     };
@@ -1467,6 +1504,40 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                            <img src={q.imageUrl} className="w-full h-auto object-contain max-h-48" alt="Preview" />
                         </div>
                       )}
+
+                      {/* Solution Image Upload */}
+                      <label className="text-xs font-bold text-ink-muted mb-1 mt-4 block">Attach Solution Image (Optional)</label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          id={`sol-img-upload-${qIdx}`}
+                          onChange={(e) => {
+                            const file = e.target.files[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                updateManualQuestion(qIdx, "solutionImageUrl", reader.result);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                        <label htmlFor={`sol-img-upload-${qIdx}`} className="btn-soft text-xs px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 cursor-pointer flex items-center gap-1.5 rounded-xl text-emerald-700 font-bold shadow-xs">
+                          <ImageIcon size={14} /> {q.solutionImageUrl ? "Change Solution Image" : "Attach Solution Image"}
+                        </label>
+                        {q.solutionImageUrl && (
+                          <button type="button" onClick={() => updateManualQuestion(qIdx, "solutionImageUrl", "")} className="text-rose-500 hover:bg-rose-50 p-1.5 rounded-xl border border-rose-100 text-xs font-bold flex items-center gap-1">
+                            <X size={14} /> Remove Solution Image
+                          </button>
+                        )}
+                      </div>
+                      {q.solutionImageUrl && (
+                        <div className="mt-2 max-w-sm rounded-xl border border-black/10 overflow-hidden relative bg-white p-2">
+                           <img src={q.solutionImageUrl} className="w-full h-auto object-contain max-h-48" alt="Solution Preview" />
+                        </div>
+                      )}
                     </div>
 
                   </div>
@@ -1697,6 +1768,28 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         <label className="btn-soft px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 cursor-pointer flex items-center gap-1 font-semibold rounded-lg border border-slate-200">
                           <Upload size={13} /> {approvedQuestions[idx]?.imageUrl ? "Change Chart/Image" : "Attach Chart/Image"}
                           <input type="file" accept="image/*" className="hidden" onChange={(e) => attachImageToQuestion(idx, e.target.files[0])} />
+                        </label>
+                      </div>
+
+                      {/* Solution Image Attachment */}
+                      {approvedQuestions[idx]?.solutionImageUrl && (
+                        <div className="mt-2 relative max-w-sm rounded-lg overflow-hidden border border-black/10 bg-white p-2">
+                          <p className="text-[10px] font-bold text-ink-muted mb-1 block">Solution Image Preview:</p>
+                          <img src={approvedQuestions[idx].solutionImageUrl} alt="Solution" className="w-full h-auto object-contain" />
+                          <button 
+                            type="button"
+                            className="absolute top-1 right-1 bg-rose-600 text-white rounded p-1 shadow-sm"
+                            onClick={() => attachSolutionImageToQuestion(idx, null)}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2 pt-1 mt-1">
+                        <label className="btn-soft px-3 py-1.5 text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 cursor-pointer flex items-center gap-1 font-semibold rounded-lg border border-emerald-200">
+                          <Upload size={13} /> {approvedQuestions[idx]?.solutionImageUrl ? "Change Solution Image" : "Attach Solution Image"}
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => attachSolutionImageToQuestion(idx, e.target.files[0])} />
                         </label>
                       </div>
 
