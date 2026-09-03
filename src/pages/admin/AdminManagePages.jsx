@@ -298,42 +298,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     }));
   };
 
-  const handleOptionPaste = (e, qIdx, optIdx) => {
-    if (optIdx !== 0) return; // Only process paste on Option A
-    const pastedData = e.clipboardData.getData("Text");
-    if (!pastedData) return;
-
-    let optionsParsed = [];
-    
-    // Try splitting by newline first
-    const lines = pastedData.split(/\n+/).map(l => l.trim()).filter(l => l);
-    if (lines.length > 1) {
-      optionsParsed = lines.map(line => {
-        // Strip common prefixes like A), a., B)
-        const match = line.match(/^[a-eA-E][)\.-]\s*(.*)/);
-        return match ? match[1].trim() : line.trim();
-      });
-    } else {
-      // Try splitting by inline A), B), C)
-      const inlineOptRegex = /(?:\b|\s|\(|\[)([A-Ea-e])[\)\.\:\-\]\s]+(.*?)(?=(?:\s*(?:\b|\s|\(|\[)[A-Ea-e][\)\.\:\-\]\s]+)|$|\n)/gi;
-      let m;
-      while ((m = inlineOptRegex.exec(pastedData)) !== null) {
-        optionsParsed.push(m[2].trim());
-      }
-    }
-
-    if (optionsParsed.length > 1) {
-      e.preventDefault();
-      setManualQuestions(prev => prev.map((q, i) => {
-        if (i !== qIdx) return q;
-        let newOpts = [...q.options];
-        for (let j = 0; j < optionsParsed.length && j < 7; j++) {
-           newOpts[j] = optionsParsed[j];
-        }
-        return { ...q, options: newOpts };
-      }));
-    }
-  };
 
   const attachImageToManual = (idx, file) => {
     if (!file) {
@@ -1481,7 +1445,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                 value={opt}
                                 onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => updateManualOption(qIdx, optIdx, e.target.value)}
-                                onPaste={(e) => handleOptionPaste(e, qIdx, optIdx)}
                                 placeholder={`Option ${letter}`}
                               />
 
