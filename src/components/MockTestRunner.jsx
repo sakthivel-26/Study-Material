@@ -828,7 +828,7 @@ export default function MockTestRunner({ test, onClose }) {
                 Yes, Submit Now
               </button>
             </div>
-          </motion.div>
+          </div>
         </div>
       )}
 
