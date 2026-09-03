@@ -686,12 +686,18 @@ function genSpeedMathApproximation(idx) {
 const buildExtractionPrompt = (pdfChunk, category) => `You are a high-accuracy Indian Competitive Exam Question Extractor.
 Extract ALL questions from the supplied PDF text with 100% precision.
 
+CRITICAL OCR & FORMATTING RULES:
+- The input text may be messy due to PDF OCR. Sentences might be broken across lines.
+- YOU MUST reconstruct broken sentences into a single continuous "question_text".
+- DO NOT mistake words starting with "A", "B", "C" as option letters unless they are clearly formatted as options (e.g. "A)", "(A)", "a.", "1.").
+- Example of bad parsing: Question="Simple interest on", Option A="A certain sum at...". This is WRONG! Reconstruct the full sentence: "Simple interest on a certain sum at..."
+
 INSTRUCTIONS:
 1. "section": Subject section e.g. "Quantitative Aptitude", "Reasoning Ability", "English Language", "General Awareness", or "General".
 2. "passage": If there is a Reading Comprehension passage, Data Interpretation (DI) table context, or Directions (e.g. "Directions (Q. 1-5)..."), put it in the "passage" field.
-3. "question_text": The clean question statement.
-4. "options": Key-value object for options A, B, C, D, E, F, G (e.g. {"A": "10", "B": "20", "C": "30", "D": "40"}).
-5. "source_answer": Correct option letter e.g. "A", "B", "C", "D", "E", "F", or "G". Solve the question if no answer key is present.
+3. "question_text": The clean, reconstructed question statement (combine broken lines).
+4. "options": Key-value object for options A, B, C, D, E (e.g. {"A": "10", "B": "20", "C": "30", "D": "40"}). Extract exactly what the option says.
+5. "source_answer": Correct option letter e.g. "A", "B", "C", "D", "E". Solve the question if no answer key is present.
 6. "explanation": Brief step-by-step math solution or reasoning logic.
 
 Return ONLY a raw valid JSON object (no markdown fences):
