@@ -1085,9 +1085,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           <div className="grid sm:grid-cols-3 gap-4">
             <div>
               <label className="text-sm font-medium text-ink-soft mb-1.5 block">Category / Exam</label>
-              <select className="input" value={f.category} onChange={(e) => set("category", e.target.value)}>
-                {CATEGORIES.map((c) => <option key={c.id}>{c.name}</option>)}
-              </select>
+              <input 
+                list="category-options"
+                className="input" 
+                placeholder="Select or type category..." 
+                value={f.category} 
+                onChange={(e) => set("category", e.target.value)} 
+              />
+              <datalist id="category-options">
+                {CATEGORIES.map((c) => <option key={c.id} value={c.name} />)}
+              </datalist>
             </div>
             <div>
               <label className="text-sm font-medium text-ink-soft mb-1.5 block">Subject</label>
