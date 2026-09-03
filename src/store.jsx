@@ -12,6 +12,7 @@ import {
   fsUpdateMockTest,
   fsDeleteUpload,
   fsDeleteAdmission,
+  fsDeleteNotification,
   useRealtimeBackend,
 } from "./backend.js";
 
@@ -304,17 +305,29 @@ export function AppProvider({ children }) {
   };
 
   const deleteUpload = async (id) => {
-    if (isFirebaseConfigured) {
-      try {
+    try {
+      if (isFirebaseConfigured) {
         await fsDeleteUpload(id);
         pushToast("Upload deleted successfully 🗑️");
-        return;
-      } catch (err) {
-        console.warn("Firestore delete failed", err);
       }
+    } catch (err) {
+      console.warn("Firestore delete failed", err);
     }
-    setUploads((prev) => prev.filter(u => u.id !== id));
-    pushToast("Upload deleted successfully 🗑️");
+    setUploads((prev) => prev.filter((u) => u.id !== id));
+    if (!isFirebaseConfigured) pushToast("Upload deleted successfully 🗑️");
+  };
+
+  const deleteNotification = async (id) => {
+    try {
+      if (isFirebaseConfigured) {
+        await fsDeleteNotification(id);
+        pushToast("Notification deleted successfully 🗑️");
+      }
+    } catch (err) {
+      console.warn("Firestore delete failed", err);
+    }
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    if (!isFirebaseConfigured) pushToast("Notification deleted successfully 🗑️");
   };
 
   const deleteAdmission = async (id) => {
@@ -410,6 +423,7 @@ export function AppProvider({ children }) {
       deleteMockTest,
       deleteUpload,
       deleteAdmission,
+      deleteNotification,
       announce,
       toggleBookmark,
       markAllRead,

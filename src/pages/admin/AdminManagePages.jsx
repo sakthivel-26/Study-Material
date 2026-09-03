@@ -2713,7 +2713,7 @@ export function ManageStudentsPage() {
 
 /* -------------------------------- Announcements ---------------------------- */
 export function AnnouncementsPage() {
-  const { announce, notifications, pushToast } = useApp();
+  const { announce, notifications, pushToast, deleteNotification } = useApp();
   const [f, setF] = useState({ title: "", body: "", image: "", pdf: "" });
   
   const handleImageUpload = (e) => {
@@ -2772,14 +2772,25 @@ export function AnnouncementsPage() {
           <h3 className="font-bold text-ink mb-4">Recently sent</h3>
           <div className="space-y-3">
             {notifications.map((n)=>(
-              <div key={n.id} className="flex gap-3 items-start p-3 rounded-xl hover:bg-black/[0.03]">
+              <div key={n.id} className="flex gap-3 items-start p-3 rounded-xl hover:bg-black/[0.03] group relative">
                 <span className="text-lg">{n.icon}</span>
-                <div>
+                <div className="flex-1 pr-6">
                   <p className="text-sm font-semibold text-ink">{n.title}</p>
                   <p className="text-xs text-ink-muted">{n.body}</p>
                   {n.image && <img src={n.image} alt="Announcement" className="mt-2 rounded-lg max-h-32 object-contain border border-black/10" />}
                   {n.pdf && <a href={n.pdf} download="Announcement.pdf" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-rose-600 hover:underline"><span className="text-base">📄</span> Download PDF</a>}
                 </div>
+                <button 
+                  onClick={() => {
+                    if (window.confirm("Are you sure you want to delete this notification? It will be removed for all students.")) {
+                      deleteNotification(n.id);
+                    }
+                  }} 
+                  className="absolute right-3 top-3 p-1.5 rounded-lg text-ink-faint hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
+                  title="Delete notification"
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
             ))}
           </div>

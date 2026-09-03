@@ -154,6 +154,12 @@ export async function fsNotify(type, title, body, image, pdf) {
   await addDoc(collection(db, COLLECTIONS.notifications), data);
 }
 
+export async function fsDeleteNotification(id) {
+  const { doc, deleteDoc } = await import("firebase/firestore");
+  const db = await getFirebaseDb();
+  await deleteDoc(doc(db, COLLECTIONS.notifications, id));
+}
+
 export async function fsMarkAllRead() {
   const { collection, query, where, getDocs, updateDoc, doc } = await import("firebase/firestore");
   const db = await getFirebaseDb();
