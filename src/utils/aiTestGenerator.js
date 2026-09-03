@@ -690,7 +690,10 @@ CRITICAL OCR & FORMATTING RULES:
 - The input text may be messy due to PDF OCR. Sentences might be broken across lines.
 - YOU MUST reconstruct broken sentences into a single continuous "question_text".
 - DO NOT mistake words starting with "A", "B", "C" as option letters unless they are clearly formatted as options (e.g. "A)", "(A)", "a.", "1.").
-- Example of bad parsing: Question="Simple interest on", Option A="A certain sum at...". This is WRONG! Reconstruct the full sentence: "Simple interest on a certain sum at..."
+- IGNORE document titles (e.g. "Chapter 3"), headers, footers, page numbers, and watermarks (e.g. "Ken Academy", "Tg : NextGenBankers").
+- ONLY extract actual valid questions that have options. If a block of text is just a title or introduction without options, DO NOT extract it as a question.
+- Example of bad parsing: Extracting "Chapter 3: Simple Interest" as a question. This is WRONG!
+- Example of bad parsing: Question="Simple interest on", Option A="A certain sum at...". This is WRONG! Reconstruct the full sentence.
 
 INSTRUCTIONS:
 1. "section": Subject section e.g. "Quantitative Aptitude", "Reasoning Ability", "English Language", "General Awareness", or "General".
