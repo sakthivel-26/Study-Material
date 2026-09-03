@@ -862,118 +862,77 @@ function chunkText(text, maxLen = 20000) {
       if (lastNewline > currentIndex + 1000) nextIndex = lastNewline;
       else if (lastPeriod > currentIndex + 1000) nextIndex = lastPeriod + 1;
     }
-    chunks.push(text.slice(currentIndex, nextIndex));
-    currentIndex = nextIndex;
-  }
-  return chunks;
-}
-
-/**
- * Generate a mock test by extracting questions from an uploaded PDF.
- * PHASE 1: Fast Extraction via Chunking & Concurrency.
- */
 export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "60 min", title, onProgress }) {
   if (!pdfText || pdfText.trim().length < 50) {
     throw new Error("PDF text content is too short or empty. Please upload a valid question paper PDF.");
   }
 
-  const chunks = chunkText(pdfText);
-  let allQuestions = [];
-  let completedChunks = 0;
+  if (onProgress) onProgress(10, 100);
+
+  const cleanText = pdfText.replace(/\r\n/g, '\n');
   
-  if (onProgress) onProgress(0, chunks.length);
-
-  // Process up to 3 chunks concurrently
-  const CONCURRENCY = 3;
-  let activePromises = [];
+  // Split by Question markers: start of line, optional 'Ques', 'Question', 'Q', optional dot, number, dot or parenthesis
+  const qRegex = /(?:^|\n)\s*(?:Ques|Question|Q)?\.?\s*\d+\s*[\.\)]/i;
+  const rawBlocks = cleanText.split(qRegex).filter(b => b.trim().length > 10);
   
-  for (let i = 0; i < chunks.length; i++) {
-    const p = (async () => {
-      let chunkQuestions = [];
-      let retries = 0;
-      while (retries < 1 && (!chunkQuestions || chunkQuestions.length === 0)) {
-        try {
-          const prompt = buildExtractionPrompt(chunks[i], category);
-          chunkQuestions = await callLLMChain(prompt);
-          if (!Array.isArray(chunkQuestions)) {
-            // Handle if model returned an object with 'questions' key instead of array directly
-            if (chunkQuestions.questions) chunkQuestions = chunkQuestions.questions;
-            else chunkQuestions = [];
-          }
-        } catch (err) {
-          console.warn(`Chunk ${i+1} extraction failed on try ${retries+1}`, err);
-        }
-        retries++;
-      }
-      
-      if (chunkQuestions && chunkQuestions.length > 0) {
-        allQuestions.push(...chunkQuestions);
-      }
-      
-      completedChunks++;
-      if (onProgress) onProgress(completedChunks, chunks.length);
-    })();
-
-    activePromises.push(p);
-    
-    if (activePromises.length >= CONCURRENCY) {
-      await Promise.all(activePromises);
-      activePromises = [];
-    }
-  }
-  
-  if (activePromises.length > 0) {
-    await Promise.all(activePromises);
-  }
-
-  if (allQuestions.length === 0) {
-    throw new Error("Failed to extract any valid questions from the PDF.");
-  }
-
-  // Normalize and deduplicate questions
   const uniqueQuestions = [];
-  const seen = new Set();
-  for (const q of allQuestions) {
-    const qText = q.question || q.question_text || "";
-    const cleanText = qText.trim().toLowerCase();
-    if (cleanText && !seen.has(cleanText)) {
-      seen.add(cleanText);
 
-      // Normalize options array
-      let opts = [];
-      if (Array.isArray(q.options)) {
-        opts = q.options;
-      } else if (q.options && typeof q.options === "object") {
-        opts = Object.keys(q.options).sort().map(k => q.options[k]);
+  for (let i = 0; i < rawBlocks.length; i++) {
+    const block = rawBlocks[i];
+    let qText = block;
+    let options = ["Option A", "Option B", "Option C", "Option D"];
+    
+    // Look for options like (a), (A), a), A), a. , A.
+    // Use a robust regex to capture option markers
+    const optRegex = /(?:^|\n|\s)\(([a-eA-E])\)\s+|(?:^|\n|\s)([a-eA-E])\)\s+|(?:^|\n|\s)([a-eA-E])\.\s+/g;
+    const matches = [...block.matchAll(optRegex)];
+    
+    if (matches.length >= 2) {
+      const firstOptIndex = matches[0].index;
+      qText = block.substring(0, firstOptIndex).trim();
+      
+      const optValues = [];
+      for (let j = 0; j < matches.length; j++) {
+        const start = matches[j].index + matches[j][0].length;
+        const end = j + 1 < matches.length ? matches[j+1].index : block.length;
+        optValues.push(block.substring(start, end).replace(/\n/g, ' ').trim());
       }
-      if (!opts || opts.length === 0) {
-        opts = ["Option A", "Option B", "Option C", "Option D"];
+      
+      // Assign options up to the length found
+      options = [];
+      for(let k = 0; k < Math.min(optValues.length, 5); k++) {
+        options.push(optValues[k] || `Option ${String.fromCharCode(65 + k)}`);
       }
-
-      // Calculate correct answer index
-      let correctIndex = 0;
-      if (typeof q.correctAnswerIndex === "number") {
-        correctIndex = q.correctAnswerIndex;
-      } else if (q.source_answer && typeof q.source_answer === "string") {
-        const code = q.source_answer.trim().toUpperCase().charCodeAt(0);
-        if (code >= 65 && code <= 71) {
-          correctIndex = code - 65;
-        }
+      // Fill missing options up to 4
+      while(options.length < 4) {
+        options.push(`Option ${String.fromCharCode(65 + options.length)}`);
       }
-
+    }
+    
+    // Clean up qText (remove newlines inside sentences, but preserve some structure)
+    qText = qText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    
+    // Ignore blocks that are likely just headers (very short and no options found)
+    if (qText.length > 10 && matches.length > 0) {
       uniqueQuestions.push({
-        id: q.id || `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
+        id: `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
         question: qText,
         question_text: qText,
-        options: opts,
-        correctAnswerIndex: correctIndex,
-        source_answer: q.source_answer || String.fromCharCode(65 + correctIndex),
-        passage: q.passage || "",
-        section: q.section || category || "General",
-        explanation: q.explanation || "",
-        imageUrl: q.imageUrl || ""
+        options: options,
+        correctAnswerIndex: 0, 
+        source_answer: "A", 
+        passage: "",
+        section: category || "General",
+        explanation: "",
+        imageUrl: ""
       });
     }
+  }
+
+  if (onProgress) onProgress(100, 100);
+
+  if (uniqueQuestions.length === 0) {
+    throw new Error("Regex extraction failed. No valid questions with options were found in the PDF.");
   }
 
   return {
