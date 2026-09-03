@@ -37,7 +37,10 @@ export default function NotificationsPage() {
                 {!n.read && <span className="w-2 h-2 rounded-full bg-brand-600" />}
               </div>
               <p className="text-sm text-ink-muted">{n.body}</p>
-              <p className="text-xs text-ink-faint mt-0.5">{n.time}</p>
+              {n.image && (
+                <img src={n.image} alt="Notification" className="mt-2 rounded-lg max-h-48 object-contain border border-black/10" />
+              )}
+              <p className="text-xs text-ink-faint mt-1">{n.time}</p>
             </div>
           </motion.div>
         ))}

@@ -99,6 +99,12 @@ export async function fsAddAdmission(data) {
   return { ...data, id: ref.id };
 }
 
+export async function fsDeleteAdmission(id) {
+  const { doc, deleteDoc } = await import("firebase/firestore");
+  const db = await getFirebaseDb();
+  await deleteDoc(doc(db, COLLECTIONS.admissions, id));
+}
+
 export async function fsAddMockTest(test) {
   const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
   const db = await getFirebaseDb();
@@ -127,10 +133,10 @@ export async function fsDeleteUpload(id) {
   await deleteDoc(doc(db, COLLECTIONS.uploads, id));
 }
 
-export async function fsNotify(type, title, body) {
+export async function fsNotify(type, title, body, image) {
   const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
   const db = await getFirebaseDb();
-  await addDoc(collection(db, COLLECTIONS.notifications), {
+  const data = {
     type,
     icon: NOTIF_ICONS[type] || "🔔",
     title,
@@ -138,7 +144,11 @@ export async function fsNotify(type, title, body) {
     read: false,
     color: NOTIF_COLORS[type] || "#1B4F72",
     createdAt: serverTimestamp(),
-  });
+  };
+  if (image) {
+    data.image = image;
+  }
+  await addDoc(collection(db, COLLECTIONS.notifications), data);
 }
 
 export async function fsMarkAllRead() {

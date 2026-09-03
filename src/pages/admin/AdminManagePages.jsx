@@ -2547,8 +2547,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
 /* ------------------------------ Manage Students ---------------------------- */
 export function ManageStudentsPage() {
-  const { students = [], pushToast } = useApp();
+  const { students = [], deleteStudent, pushToast, refreshStudents } = useApp();
   const [q, setQ] = useState("");
+  const [selectedStudents, setSelectedStudents] = useState([]);
   const [, refresh] = useState(0);
   
   const EXAMS = [
@@ -2591,7 +2592,7 @@ export function ManageStudentsPage() {
     else if (nextAccess.length === 0) nextAccess = "payment_required";
 
     setStudentAccess(student.id, nextAccess);
-    refresh(v => v + 1);
+    refreshStudents();
 
     if (useRealtimeBackend) {
       try {
@@ -2621,7 +2622,7 @@ export function ManageStudentsPage() {
 
   const grantAll = async (student) => {
     setStudentAccess(student.id, "academy");
-    refresh(v => v + 1);
+    refreshStudents();
     if (useRealtimeBackend) {
       try {
         const { doc, setDoc } = await import("firebase/firestore");
@@ -2646,12 +2647,26 @@ export function ManageStudentsPage() {
     pushToast(`Full Academy access granted to ${student.name || "Student"}`);
   };
 
-  return <><PageHeader icon={<Users size={22}/>} title="Manage Students" subtitle={`${students.length} registered student${students.length === 1 ? "" : "s"}`} action={<button onClick={exportCsv} className="btn-primary text-sm px-4 py-2.5"><Download size={16}/>Download Excel CSV</button>}/>
-    <div className="card overflow-hidden"><div className="p-4 border-b border-black/5"><div className="relative max-w-sm"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"/><input className="input pl-9" placeholder="Search student name or mobile number..." value={q} onChange={e=>setQ(e.target.value)}/></div></div><div className="overflow-x-auto"><table className="w-full text-sm min-w-[690px]"><thead><tr className="text-left text-xs text-ink-muted uppercase tracking-wide border-b border-black/5"><th className="px-5 py-3 font-semibold w-[200px]">Student name</th><th className="px-5 py-3 font-semibold w-[150px]">Mobile number</th><th className="px-5 py-3 font-semibold min-w-[280px]">Category-wise Mock Access</th></tr></thead><tbody className="divide-y divide-black/5">{list.length===0?<tr><td colSpan={3} className="px-5 py-8 text-center text-ink-muted">No registered students found yet.</td></tr>:list.map(s=>{
+  return <><PageHeader icon={<Users size={22}/>} title="Manage Students" subtitle={`${students.length} registered student${students.length === 1 ? "" : "s"}`} action={
+    <div className="flex items-center gap-2">
+      {selectedStudents.length > 0 && (
+        <button onClick={() => {
+          if(window.confirm(`Delete ${selectedStudents.length} students?`)) {
+            selectedStudents.forEach(id => deleteStudent(id));
+            setSelectedStudents([]);
+          }
+        }} className="btn-primary bg-rose-600 hover:bg-rose-700 text-sm px-4 py-2.5">
+          Delete Selected ({selectedStudents.length})
+        </button>
+      )}
+      <button onClick={exportCsv} className="btn-primary text-sm px-4 py-2.5"><Download size={16}/>Download Excel CSV</button>
+    </div>
+  }/>
+    <div className="card overflow-hidden"><div className="p-4 border-b border-black/5"><div className="relative max-w-sm"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"/><input className="input pl-9" placeholder="Search student name or mobile number..." value={q} onChange={e=>setQ(e.target.value)}/></div></div><div className="overflow-x-auto"><table className="w-full text-sm min-w-[690px]"><thead><tr className="text-left text-xs text-ink-muted uppercase tracking-wide border-b border-black/5"><th className="px-5 py-3 w-10"><input type="checkbox" checked={selectedStudents.length === list.length && list.length > 0} onChange={(e) => setSelectedStudents(e.target.checked ? list.map(s => s.id) : [])} className="cursor-pointer" /></th><th className="px-5 py-3 font-semibold w-[200px]">Student name</th><th className="px-5 py-3 font-semibold w-[150px]">Mobile number</th><th className="px-5 py-3 font-semibold min-w-[280px]">Category-wise Mock Access</th></tr></thead><tbody className="divide-y divide-black/5">{list.length===0?<tr><td colSpan={4} className="px-5 py-8 text-center text-ink-muted">No registered students found yet.</td></tr>:list.map(s=>{
       const isAll = s.access === "academy";
       const accessArr = Array.isArray(s.access) ? s.access : (isAll ? EXAMS.map(e => e.id) : []);
       
-      return <tr key={s.id||s.phone} className="hover:bg-black/[0.02]"><td className="px-5 py-3 font-semibold text-ink">{s.name||"Student"} <span className="block text-xs font-normal text-ink-muted mt-0.5">{s.joined}</span></td><td className="px-5 py-3 text-ink-soft">{s.phone||"Not provided"}</td><td className="px-5 py-3">
+      return <tr key={s.id||s.phone} className="hover:bg-black/[0.02]"><td className="px-5 py-3"><input type="checkbox" checked={selectedStudents.includes(s.id)} onChange={(e) => { if (e.target.checked) setSelectedStudents([...selectedStudents, s.id]); else setSelectedStudents(selectedStudents.filter(id => id !== s.id)); }} className="cursor-pointer" /></td><td className="px-5 py-3 font-semibold text-ink">{s.name||"Student"} <span className="block text-xs font-normal text-ink-muted mt-0.5">{s.joined}</span></td><td className="px-5 py-3 text-ink-soft">{s.phone||"Not provided"}</td><td className="px-5 py-3">
         <div className="flex flex-wrap gap-2">
           {EXAMS.map(e => {
             const hasAccess = accessArr.includes(e.id);
@@ -2674,11 +2689,22 @@ export function ManageStudentsPage() {
 /* -------------------------------- Announcements ---------------------------- */
 export function AnnouncementsPage() {
   const { announce, notifications, pushToast } = useApp();
-  const [f, setF] = useState({ title: "", body: "" });
+  const [f, setF] = useState({ title: "", body: "", image: "" });
+  
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setF({ ...f, image: ev.target.result });
+    };
+    reader.readAsDataURL(file);
+  };
+  
   const send = () => {
     if (!f.title || !f.body) return pushToast("Fill both fields");
-    announce(f.title, f.body);
-    setF({ title: "", body: "" });
+    announce(f.title, f.body, f.image);
+    setF({ title: "", body: "", image: "" });
   };
   return (
     <>
@@ -2688,6 +2714,14 @@ export function AnnouncementsPage() {
           <h3 className="font-bold text-ink flex items-center gap-2"><Bell size={17} className="text-brand-600"/> New announcement</h3>
           <input className="input" placeholder="Title (e.g. Mock test schedule)" value={f.title} onChange={(e)=>setF({...f,title:e.target.value})} />
           <textarea className="input min-h-[110px] resize-none" placeholder="Message body..." value={f.body} onChange={(e)=>setF({...f,body:e.target.value})} />
+          <div>
+            <label className="text-xs font-semibold text-ink-muted mb-1 block">Upload Image (optional)</label>
+            <div className="flex items-center gap-3">
+              {f.image && <img src={f.image} alt="Preview" className="h-10 w-10 object-cover rounded shadow-sm border border-black/10" />}
+              <input type="file" accept="image/*" onChange={handleImageUpload} className="input text-xs" />
+              {f.image && <button onClick={() => setF({...f, image: ""})} className="text-rose-500 font-medium text-xs whitespace-nowrap">Remove</button>}
+            </div>
+          </div>
           <button onClick={send} className="btn-primary px-5 py-2.5"><Send size={16}/> Send to all students</button>
         </div>
         <div className="card p-6">
@@ -2696,7 +2730,11 @@ export function AnnouncementsPage() {
             {notifications.map((n)=>(
               <div key={n.id} className="flex gap-3 items-start p-3 rounded-xl hover:bg-black/[0.03]">
                 <span className="text-lg">{n.icon}</span>
-                <div><p className="text-sm font-semibold text-ink">{n.title}</p><p className="text-xs text-ink-muted">{n.body}</p></div>
+                <div>
+                  <p className="text-sm font-semibold text-ink">{n.title}</p>
+                  <p className="text-xs text-ink-muted">{n.body}</p>
+                  {n.image && <img src={n.image} alt="Announcement" className="mt-2 rounded-lg max-h-32 object-contain border border-black/10" />}
+                </div>
               </div>
             ))}
           </div>
@@ -2854,9 +2892,10 @@ export function PlansPage() {
 }
 
 export function AdmissionsPage() {
-  const { admissions = [], pushToast } = useApp();
+  const { admissions = [], deleteAdmission, pushToast } = useApp();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [selectedLeads, setSelectedLeads] = useState([]);
 
   const exportCSV = () => {
     let dataToExport = admissions;
@@ -2907,6 +2946,16 @@ export function AdmissionsPage() {
         subtitle="Manage leads collected from the website popup."
         action={
           <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            {selectedLeads.length > 0 && (
+              <button onClick={() => {
+                if(window.confirm(`Delete ${selectedLeads.length} leads?`)) {
+                  selectedLeads.forEach(id => deleteAdmission(id));
+                  setSelectedLeads([]);
+                }
+              }} className="btn-primary bg-rose-600 hover:bg-rose-700 text-sm px-4 py-2 sm:py-2.5 ml-0 sm:ml-2 w-full sm:w-auto mt-2 sm:mt-0">
+                Delete Selected ({selectedLeads.length})
+              </button>
+            )}
             <input type="date" className="input text-xs py-2 px-2 bg-white" value={startDate} onChange={e => setStartDate(e.target.value)} />
             <span className="text-xs text-ink-muted hidden sm:inline">to</span>
             <input type="date" className="input text-xs py-2 px-2 bg-white" value={endDate} onChange={e => setEndDate(e.target.value)} />
@@ -2922,6 +2971,9 @@ export function AdmissionsPage() {
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-50 border-b border-black/5 text-ink-muted">
               <tr>
+                <th className="py-3 px-4 w-10">
+                  <input type="checkbox" checked={selectedLeads.length === admissions.length && admissions.length > 0} onChange={(e) => setSelectedLeads(e.target.checked ? admissions.map(a => a.id) : [])} className="cursor-pointer" />
+                </th>
                 <th className="py-3 px-4 font-medium">Date</th>
                 <th className="py-3 px-4 font-medium">Name</th>
                 <th className="py-3 px-4 font-medium">Mobile Number</th>
@@ -2940,6 +2992,12 @@ export function AdmissionsPage() {
               ) : (
                 admissions.map((lead) => (
                   <tr key={lead.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="py-3 px-4">
+                      <input type="checkbox" checked={selectedLeads.includes(lead.id)} onChange={(e) => {
+                        if (e.target.checked) setSelectedLeads([...selectedLeads, lead.id]);
+                        else setSelectedLeads(selectedLeads.filter(id => id !== lead.id));
+                      }} className="cursor-pointer" />
+                    </td>
                     <td className="py-3 px-4 text-ink-muted text-xs font-semibold">
                       {new Date(lead.createdAt?.toMillis ? lead.createdAt.toMillis() : Date.now()).toLocaleDateString("en-IN", {
                         day: "numeric", month: "short", year: "numeric"

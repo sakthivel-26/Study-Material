@@ -101,9 +101,9 @@ export const setStudentAccess = (id, access) => {
   return getRegisteredStudents();
 };
 
-export const removeStudentByEmail = (email) => {
+export const removeStudentById = (id) => {
   const users = loadUsers().filter(
-    (u) => u.email.toLowerCase() !== email.toLowerCase()
+    (u) => u.id !== id
   );
   persistUsers(users);
   return getRegisteredStudents();
@@ -504,6 +504,10 @@ export function AuthProvider({ children }) {
           const { updateProfile } = await import("firebase/auth");
           await updateProfile(auth.currentUser, { displayName: name || session.name });
         }
+        const { doc, setDoc } = await import("firebase/firestore");
+        const { getFirebaseDb } = await import("./firebase.js");
+        const db = await getFirebaseDb();
+        await setDoc(doc(db, "users", session.id), { phone: mobile, name: name || session.name }, { merge: true });
       } catch (err) {
         console.warn("Failed to update firebase profile", err);
       }

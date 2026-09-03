@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { UPLOADS, NOTIFICATIONS, MOCK_TESTS, MOCK_TESTS_HISTORY, CATEGORIES } from "./data.js";
-import { useAuth, getRegisteredStudents, removeStudentByEmail } from "./auth.jsx";
+import { useAuth, getRegisteredStudents, removeStudentById } from "./auth.jsx";
 import { isFirebaseConfigured } from "./firebase.js";
 import {
   subscribeBackend,
@@ -11,6 +11,7 @@ import {
   fsDeleteMockTest,
   fsUpdateMockTest,
   fsDeleteUpload,
+  fsDeleteAdmission,
   useRealtimeBackend,
 } from "./backend.js";
 
@@ -95,8 +96,18 @@ export function AppProvider({ children }) {
 
   const refreshStudents = () => setStudents(getRegisteredStudents());
 
-  const deleteStudent = (email) => {
-    const updated = removeStudentByEmail(email);
+  const deleteStudent = async (id) => {
+    if (isFirebaseConfigured) {
+      try {
+        const { doc, deleteDoc } = await import("firebase/firestore");
+        const { getFirebaseDb } = await import("./firebase.js");
+        const db = await getFirebaseDb();
+        await deleteDoc(doc(db, "users", id));
+      } catch (e) {
+        console.warn("Failed to delete user from Firestore", e);
+      }
+    }
+    const updated = removeStudentById(id);
     setStudents(updated);
     pushToast("Student account removed");
   };
@@ -301,20 +312,34 @@ export function AppProvider({ children }) {
     pushToast("Upload deleted successfully 🗑️");
   };
 
-  const announce = async (title, body) => {
+  const deleteAdmission = async (id) => {
     if (isFirebaseConfigured) {
-      await fsNotify("announcement", title, body);
+      try {
+        await fsDeleteAdmission(id);
+        pushToast("Lead deleted successfully 🗑️");
+        return;
+      } catch (err) {
+        console.warn("Firestore delete failed", err);
+      }
+    }
+    setAdmissions((prev) => prev.filter(a => a.id !== id));
+    pushToast("Lead deleted successfully 🗑️");
+  };
+
+  const announce = async (title, body, image) => {
+    if (isFirebaseConfigured) {
+      await fsNotify("announcement", title, body, image);
       pushToast("Announcement broadcast to all students 📢");
       return;
     }
-    pushNotification("announcement", title, body);
+    pushNotification("announcement", title, body, image);
     pushToast("Announcement broadcast to all students 📢");
   };
 
-  const pushNotification = (type, title, body) => {
+  const pushNotification = (type, title, body, image) => {
     const icons = { pdf: "📄", video: "🎥", mock: "📝", announcement: "📢" };
     const colors = { pdf: "#8B5CF6", video: "#0EA5E9", mock: "#10B981", announcement: "#EF4444" };
-    const n = { id: Date.now(), type, icon: icons[type] || "🔔", title, body, time: "just now", read: false, color: colors[type] || "#1B4F72" };
+    const n = { id: Date.now(), type, icon: icons[type] || "🔔", title, body, image, time: "just now", read: false, color: colors[type] || "#1B4F72" };
     setNotifications((prev) => [n, ...prev]);
   };
 
@@ -379,6 +404,7 @@ export function AppProvider({ children }) {
       updateMockTest,
       deleteMockTest,
       deleteUpload,
+      deleteAdmission,
       announce,
       toggleBookmark,
       markAllRead,
