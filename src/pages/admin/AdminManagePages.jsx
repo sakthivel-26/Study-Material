@@ -232,9 +232,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     setManualQuestions((prev) => [
       ...prev,
       {
-        section: "General Knowledge",
+        section: f.subject || "Quantitative Aptitude",
         question: "",
-        passage: "",
+        passage: prev.length > 0 ? prev[prev.length - 1].passage : "", // Inherit passage from previous question if any
         imageUrl: "",
         solutionImageUrl: "",
         options: ["Option A", "Option B", "Option C", "Option D"],
@@ -296,6 +296,43 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         correctAnswerIndex: newAnsIdx
       };
     }));
+  };
+
+  const handleOptionPaste = (e, qIdx, optIdx) => {
+    if (optIdx !== 0) return; // Only process paste on Option A
+    const pastedData = e.clipboardData.getData("Text");
+    if (!pastedData) return;
+
+    let optionsParsed = [];
+    
+    // Try splitting by newline first
+    const lines = pastedData.split(/\n+/).map(l => l.trim()).filter(l => l);
+    if (lines.length > 1) {
+      optionsParsed = lines.map(line => {
+        // Strip common prefixes like A), a., B)
+        const match = line.match(/^[a-eA-E][)\.-]\s*(.*)/);
+        return match ? match[1].trim() : line.trim();
+      });
+    } else {
+      // Try splitting by inline A), B), C)
+      const inlineOptRegex = /(?:\b|\s|\(|\[)([A-Ea-e])[\)\.\:\-\]\s]+(.*?)(?=(?:\s*(?:\b|\s|\(|\[)[A-Ea-e][\)\.\:\-\]\s]+)|$|\n)/gi;
+      let m;
+      while ((m = inlineOptRegex.exec(pastedData)) !== null) {
+        optionsParsed.push(m[2].trim());
+      }
+    }
+
+    if (optionsParsed.length > 1) {
+      e.preventDefault();
+      setManualQuestions(prev => prev.map((q, i) => {
+        if (i !== qIdx) return q;
+        let newOpts = [...q.options];
+        for (let j = 0; j < optionsParsed.length && j < 7; j++) {
+           newOpts[j] = optionsParsed[j];
+        }
+        return { ...q, options: newOpts };
+      }));
+    }
   };
 
   const attachImageToManual = (idx, file) => {
@@ -1331,6 +1368,17 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       </button>
                     </div>
 
+                    {/* Paragraph / Passage Context */}
+                    <div>
+                      <label className="text-xs font-bold text-ink-muted mb-1 block">Paragraph / Passage Context (Optional)</label>
+                      <textarea
+                        className="input text-xs min-h-[60px] bg-white border-black/10 focus:border-brand-500"
+                        placeholder="e.g. Read the following passage and answer the questions..."
+                        value={q.passage || ""}
+                        onChange={(e) => updateManualQuestion(qIdx, "passage", e.target.value)}
+                      />
+                    </div>
+
                     {/* Question Statement */}
                     <div>
                       <label className="text-xs font-bold text-ink-muted mb-1 block">Question Statement</label>
@@ -1433,6 +1481,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                 value={opt}
                                 onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => updateManualOption(qIdx, optIdx, e.target.value)}
+                                onPaste={(e) => handleOptionPaste(e, qIdx, optIdx)}
                                 placeholder={`Option ${letter}`}
                               />
 
@@ -1449,17 +1498,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       </div>
                     </div>
 
-                    {/* Passage Context & Explanation */}
-                    <div className="grid sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs font-bold text-ink-muted mb-1 block">Paragraph / Passage Context (Optional)</label>
-                        <textarea
-                          className="input text-xs min-h-[60px] bg-white border-black/10"
-                          placeholder="e.g. Read the following passage and answer the questions..."
-                          value={q.passage || ""}
-                          onChange={(e) => updateManualQuestion(qIdx, "passage", e.target.value)}
-                        />
-                      </div>
+                    {/* Solution Explanation */}
+                    <div className="grid sm:grid-cols-1 gap-3">
                       <div>
                         <label className="text-xs font-bold text-ink-muted mb-1 block">Solution Explanation (Optional)</label>
                         <textarea
@@ -1822,7 +1862,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             <div className="space-y-3">
               <div className="p-4 rounded-xl bg-brand-50 border border-brand-200">
                 <p className="font-bold text-brand-900 text-sm">{f.title || "Untitled Manual Test"}</p>
-                <p className="text-xs text-brand-700 mt-1">{f.category} · {manualQuestions.length} Qs · {f.time}</p>
+                <p className="text-xs text-brand-700 mt-1">{f.category}{f.subject ? ` · ${f.subject}` : ""}{f.topic ? ` · ${f.topic}` : ""} · {manualQuestions.length} Qs · {f.time}</p>
               </div>
 
               <div className="max-h-[450px] overflow-y-auto space-y-3 pr-1">
