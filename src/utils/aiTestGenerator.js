@@ -695,6 +695,9 @@ CRITICAL OCR & FORMATTING RULES:
 - Example of bad parsing: Extracting "Chapter 3: Simple Interest" as a question. This is WRONG!
 - Example of bad parsing: Question="Simple interest on", Option A="A certain sum at...". This is WRONG! Reconstruct the full sentence.
 
+- DO NOT SKIP ANY QUESTIONS! Extract EVERY SINGLE QUESTION present in the chunk. Even if the option formatting is inconsistent, missing, or the OCR text is garbled, YOU MUST extract the question. Never silently drop a question just because parsing is difficult.
+- Process the ENTIRE chunk from start to finish. Ensure no questions are left behind.
+
 INSTRUCTIONS:
 1. "section": Subject section e.g. "Quantitative Aptitude", "Reasoning Ability", "English Language", "General Awareness", or "General".
 2. "passage": If there is a Reading Comprehension passage, Data Interpretation (DI) table context, or Directions (e.g. "Directions (Q. 1-5)..."), put it in the "passage" field.
@@ -850,7 +853,7 @@ async function callLLMChain(prompt) {
 /**
  * Splits text into chunks of approx 3000-4000 characters without breaking words.
  */
-function chunkText(text, maxLen = 20000) {
+function chunkText(text, maxLen = 12000) {
   const chunks = [];
   let currentIndex = 0;
   while (currentIndex < text.length) {
@@ -862,58 +865,43 @@ function chunkText(text, maxLen = 20000) {
       if (lastNewline > currentIndex + 1000) nextIndex = lastNewline;
       else if (lastPeriod > currentIndex + 1000) nextIndex = lastPeriod + 1;
     }
-export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "60 min", title, onProgress }) {
-  if (!pdfText || pdfText.trim().length < 50) {
-    throw new Error("PDF text content is too short or empty. Please upload a valid question paper PDF.");
+    chunks.push(text.slice(currentIndex, nextIndex));
+    currentIndex = nextIndex;
   }
+  return chunks;
+}
 
-  if (onProgress) onProgress(10, 100);
-
+function regexExtractQuestions(pdfText, category) {
   const cleanText = pdfText.replace(/\r\n/g, '\n');
-  
-  // PDF.js often joins text with spaces, losing newlines. We use \b or \s instead of \n.
-  // Split by Question markers: 'Ques 1.', 'Q1.', '1.', etc.
   const qRegex = /(?:^|\s)(?:Ques|Question|Q)[\s\.]*\d+\s*[\.\)]\s+|(?:^|\s)\d+\s*[\.\)]\s+(?=[A-Z])/i;
   const rawBlocks = cleanText.split(qRegex).filter(b => b.trim().length > 10);
-  
   const uniqueQuestions = [];
-
+  
   for (let i = 0; i < rawBlocks.length; i++) {
     const block = rawBlocks[i];
     let qText = block;
     let options = ["Option A", "Option B", "Option C", "Option D"];
-    
-    // Look for options like (a), (A), a), A), a. , A.
-    // Use a robust regex to capture option markers without requiring newlines.
     const optRegex = /(?:\s|^)\(([a-eA-E])\)\s+|(?:\s|^)([a-eA-E])\)\s+|(?:\s|^)([a-eA-E])\.\s+/g;
     const matches = [...block.matchAll(optRegex)];
     
     if (matches.length >= 2) {
       const firstOptIndex = matches[0].index;
       qText = block.substring(0, firstOptIndex).trim();
-      
       const optValues = [];
       for (let j = 0; j < matches.length; j++) {
         const start = matches[j].index + matches[j][0].length;
         const end = j + 1 < matches.length ? matches[j+1].index : block.length;
         optValues.push(block.substring(start, end).replace(/\n/g, ' ').trim());
       }
-      
-      // Assign options up to the length found
       options = [];
       for(let k = 0; k < Math.min(optValues.length, 5); k++) {
         options.push(optValues[k] || `Option ${String.fromCharCode(65 + k)}`);
       }
-      // Fill missing options up to 4
       while(options.length < 4) {
         options.push(`Option ${String.fromCharCode(65 + options.length)}`);
       }
     }
-    
-    // Clean up qText (remove newlines inside sentences, but preserve some structure)
     qText = qText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-    
-    // Ignore blocks that are likely just headers (very short and no options found)
     if (qText.length > 10 && matches.length > 0) {
       uniqueQuestions.push({
         id: `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
@@ -929,11 +917,111 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
       });
     }
   }
+  return uniqueQuestions;
+}
 
-  if (onProgress) onProgress(100, 100);
+export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "60 min", title, onProgress }) {
+  if (!pdfText || pdfText.trim().length < 50) {
+    throw new Error("PDF text content is too short or empty. Please upload a valid question paper PDF.");
+  }
+
+  const chunks = chunkText(pdfText, 12000);
+  let allQuestions = [];
+  let completedChunks = 0;
+  
+  if (onProgress) onProgress(0, chunks.length);
+
+  const CONCURRENCY = 3;
+  let activePromises = [];
+  
+  for (let i = 0; i < chunks.length; i++) {
+    const p = (async () => {
+      let chunkQuestions = [];
+      let retries = 0;
+      while (retries < 1 && (!chunkQuestions || chunkQuestions.length === 0)) {
+        try {
+          const prompt = buildExtractionPrompt(chunks[i], category);
+          chunkQuestions = await callLLMChain(prompt);
+          if (!Array.isArray(chunkQuestions)) {
+            if (chunkQuestions.questions) chunkQuestions = chunkQuestions.questions;
+            else chunkQuestions = [];
+          }
+        } catch (err) {
+          console.warn(`Chunk ${i+1} extraction failed on try ${retries+1}`, err);
+        }
+        retries++;
+      }
+      
+      if (chunkQuestions && chunkQuestions.length > 0) {
+        allQuestions.push(...chunkQuestions);
+      }
+      
+      completedChunks++;
+      if (onProgress) onProgress(completedChunks, chunks.length);
+    })();
+
+    activePromises.push(p);
+    
+    if (activePromises.length >= CONCURRENCY) {
+      await Promise.all(activePromises);
+      activePromises = [];
+    }
+  }
+  
+  if (activePromises.length > 0) {
+    await Promise.all(activePromises);
+  }
+
+  let uniqueQuestions = [];
+  const seen = new Set();
+  
+  for (const q of allQuestions) {
+    const qText = q.question || q.question_text || "";
+    const cleanQ = qText.trim().toLowerCase();
+    if (cleanQ && !seen.has(cleanQ)) {
+      seen.add(cleanQ);
+      let opts = [];
+      if (Array.isArray(q.options)) {
+        opts = q.options;
+      } else if (q.options && typeof q.options === "object") {
+        opts = Object.keys(q.options).sort().map(k => q.options[k]);
+      }
+      if (!opts || opts.length === 0) {
+        opts = ["Option A", "Option B", "Option C", "Option D"];
+      }
+      
+      let correctIndex = 0;
+      if (typeof q.correctAnswerIndex === "number") {
+        correctIndex = q.correctAnswerIndex;
+      } else if (q.source_answer && typeof q.source_answer === "string") {
+        const code = q.source_answer.trim().toUpperCase().charCodeAt(0);
+        if (code >= 65 && code <= 71) {
+          correctIndex = code - 65;
+        }
+      }
+
+      uniqueQuestions.push({
+        id: q.id || `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
+        question: qText,
+        question_text: qText,
+        options: opts,
+        correctAnswerIndex: correctIndex,
+        source_answer: q.source_answer || String.fromCharCode(65 + correctIndex),
+        passage: q.passage || "",
+        section: q.section || category || "General",
+        explanation: q.explanation || "",
+        imageUrl: q.imageUrl || ""
+      });
+    }
+  }
 
   if (uniqueQuestions.length === 0) {
-    throw new Error("Regex extraction failed. No valid questions with options were found in the PDF.");
+    console.warn("AI extraction returned 0 questions. Falling back to regex extraction...");
+    uniqueQuestions = regexExtractQuestions(pdfText, category);
+  }
+
+  if (uniqueQuestions.length === 0) {
+    throw new Error("Extraction failed. No valid questions were found in the PDF by both AI and fallback engines.");
   }
 
   return {
