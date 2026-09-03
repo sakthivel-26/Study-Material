@@ -123,11 +123,8 @@ async function callGemini(apiKey, prompt) {
   const cleanKey = apiKey.trim();
 
   const candidateEndpoints = [
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${cleanKey}`,
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cleanKey}`,
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${cleanKey}`,
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${cleanKey}`,
-    `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=${cleanKey}`,
   ];
 
   let lastErr = null;
@@ -251,8 +248,8 @@ async function callNvidia(apiKey, prompt, model = "nvidia/nemotron-3-nano-30b-a3
   }
 }
 
-// 5. OpenRouter API Provider (google/gemma-4-31b-it:free)
-async function callOpenRouter(apiKey, prompt, model = "nvidia/nemotron-3.5-lightning:free") {
+// 5. OpenRouter API Provider (openrouter/free)
+async function callOpenRouter(apiKey, prompt, model = "openrouter/free") {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), 20000); // 20-second timeout
 
@@ -407,7 +404,7 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
   const prompt = buildPrompt(category, questionsCount);
 
   const openRouterKey = getEnvKey("VITE_OPENROUTER_API_KEY") || getEnvKey("OPENROUTER_API_KEY");
-  const openRouterModel = getEnvKey("VITE_OPENROUTER_MODEL") || getEnvKey("OPENROUTER_MODEL") || "google/gemma-4-31b-it:free";
+  const openRouterModel = getEnvKey("VITE_OPENROUTER_MODEL") || getEnvKey("OPENROUTER_MODEL") || "openrouter/free";
   const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
   const nvidiaModel = getEnvKey("VITE_NVIDIA_MODEL") || "nvidia/nemotron-ocr-v2";
   const gemmaKey = getEnvKey("VITE_GEMMA_API_KEY") || getEnvKey("GEMMA_API_KEY");
@@ -416,7 +413,7 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
   const openAIKey = getEnvKey("VITE_OPENAI_API_KEY") || getEnvKey("OPENAI_API_KEY");
   const deepSeekKey = getEnvKey("VITE_DEEPSEEK_API_KEY") || getEnvKey("DEEPSEEK_API_KEY");
 
-  let lastError = null;
+  const errors = [];
 
   // 0. Try NVIDIA LLM
   if (nvidiaKey) {
@@ -424,20 +421,22 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
       console.log(`🤖 Generating mock test via NVIDIA (${nvidiaModel})...`);
       questions = await callNvidia(nvidiaKey, prompt, nvidiaModel);
     } catch (err) {
-      lastError = err;
-      console.warn("Nvidia LLM error:", err);
+      errors.push(`NVIDIA: ${err.message}`);
     }
+  } else {
+    errors.push("NVIDIA: no API key configured");
   }
 
-  // 1. Try OpenRouter (google/gemma-4-31b-it:free)
+  // 1. Try OpenRouter (openrouter/free)
   if ((!questions || questions.length === 0) && openRouterKey) {
     try {
       console.log(`🤖 Generating mock test via OpenRouter (${openRouterModel})...`);
       questions = await callOpenRouter(openRouterKey, prompt, openRouterModel);
     } catch (err) {
-      lastError = err;
-      console.warn("OpenRouter LLM error:", err);
+      errors.push(`OpenRouter: ${err.message}`);
     }
+  } else if (!openRouterKey) {
+    errors.push("OpenRouter: no API key configured");
   }
 
   // 2. Try Google Gemma (HuggingFace / Groq / Ollama)
@@ -446,9 +445,10 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
       console.log("🤖 Generating mock test via Google Gemma...");
       questions = await callGemma7B(gemmaKey, prompt, gemmaEndpoint);
     } catch (err) {
-      lastError = err;
-      console.warn("Gemma LLM error:", err);
+      errors.push(`Gemma: ${err.message}`);
     }
+  } else if (!gemmaKey && !gemmaEndpoint) {
+    errors.push("Gemma: no API key configured");
   }
 
   // 2. Try Google Gemini LLM
@@ -457,9 +457,10 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
       console.log("🤖 Generating mock test via Google Gemini API...");
       questions = await callGemini(geminiKey, prompt);
     } catch (err) {
-      lastError = err;
-      console.warn("Gemini LLM error:", err);
+      errors.push(`Gemini: ${err.message}`);
     }
+  } else if (!geminiKey) {
+    errors.push("Gemini: no API key configured");
   }
 
   // 3. Try OpenAI LLM
@@ -468,9 +469,10 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
       console.log("🤖 Generating mock test via OpenAI ChatGPT API...");
       questions = await callOpenAI(openAIKey, prompt);
     } catch (err) {
-      lastError = err;
-      console.warn("OpenAI LLM error:", err);
+      errors.push(`OpenAI: ${err.message}`);
     }
+  } else if (!openAIKey) {
+    errors.push("OpenAI: no API key configured");
   }
 
   // 4. Try DeepSeek LLM
@@ -479,13 +481,14 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
       console.log("🤖 Generating mock test via DeepSeek API...");
       questions = await callDeepSeek(deepSeekKey, prompt);
     } catch (err) {
-      lastError = err;
-      console.warn("DeepSeek LLM error:", err);
+      errors.push(`DeepSeek: ${err.message}`);
     }
+  } else if (!deepSeekKey) {
+    errors.push("DeepSeek: no API key configured");
   }
 
-  if ((!questions || questions.length === 0) && lastError) {
-    console.error("All AI providers failed. Last error:", lastError);
+  if (!questions || questions.length === 0) {
+    console.error("All AI providers failed. Reasons:\n- " + errors.join("\n- "));
     // Proceeding to fallback generator automatically...
   }
 
@@ -766,15 +769,19 @@ async function callLLMChain(prompt) {
   const deepSeekKey = getEnvKey("VITE_DEEPSEEK_API_KEY") || getEnvKey("DEEPSEEK_API_KEY");
 
   const openRouterKey = getEnvKey("VITE_OPENROUTER_API_KEY") || getEnvKey("OPENROUTER_API_KEY");
-  const openRouterModel = getEnvKey("VITE_OPENROUTER_MODEL") || "nvidia/nemotron-4-340b-instruct:free";
+  const openRouterModel = getEnvKey("VITE_OPENROUTER_MODEL") || "openrouter/free";
+
+  const errors = [];
 
   // 1. Try OpenRouter if key exists
   if (openRouterKey && openRouterKey !== "sk-or-v1-free") {
     try {
       return await callOpenRouter(openRouterKey, prompt, openRouterModel);
     } catch (e) {
-      console.warn("OpenRouter API call failed, falling back...", e);
+      errors.push(`OpenRouter: ${e.message}`);
     }
+  } else {
+    errors.push("OpenRouter: no API key configured");
   }
 
   // 2. Try Gemini API if key exists
@@ -782,8 +789,10 @@ async function callLLMChain(prompt) {
     try {
       return await callGemini(geminiKey, prompt);
     } catch (e) {
-      console.warn("Gemini API call failed, falling back...", e);
+      errors.push(`Gemini: ${e.message}`);
     }
+  } else {
+    errors.push("Gemini: no API key configured");
   }
 
   // 3. Try Groq / Gemma API if key exists
@@ -791,8 +800,10 @@ async function callLLMChain(prompt) {
     try {
       return await callNvidia(groqKey, prompt, "llama-3.3-70b-versatile");
     } catch (e) {
-      console.warn("Groq API call failed, falling back...", e);
+      errors.push(`Groq: ${e.message}`);
     }
+  } else {
+    errors.push("Groq: no API key configured");
   }
 
   // 4. Try OpenAI if key exists
@@ -800,8 +811,10 @@ async function callLLMChain(prompt) {
     try {
       return await callOpenAI(openAIKey, prompt);
     } catch (e) {
-      console.warn("OpenAI API call failed, falling back...", e);
+      errors.push(`OpenAI: ${e.message}`);
     }
+  } else {
+    errors.push("OpenAI: no API key configured");
   }
 
   // 5. Try DeepSeek if key exists
@@ -809,8 +822,10 @@ async function callLLMChain(prompt) {
     try {
       return await callDeepSeek(deepSeekKey, prompt);
     } catch (e) {
-      console.warn("DeepSeek API call failed, falling back...", e);
+      errors.push(`DeepSeek: ${e.message}`);
     }
+  } else {
+    errors.push("DeepSeek: no API key configured");
   }
 
   // 5. Try backend /api/chat
@@ -835,18 +850,20 @@ async function callLLMChain(prompt) {
         return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed;
       }
     }
+    errors.push("Backend: response not successful or missing text");
   } catch (err) {
-    console.error("Backend LLMChain error:", err);
+    errors.push(`Backend: ${err.message}`);
   }
 
   // 6. Try OpenRouter free tier fallback
   try {
-    const openRouterKey = getEnvKey("VITE_OPENROUTER_API_KEY") || "sk-or-v1-free";
-    return await callOpenRouter(openRouterKey, prompt, "google/gemma-2-9b-it:free");
+    const openRouterKeyFallback = getEnvKey("VITE_OPENROUTER_API_KEY") || "sk-or-v1-free";
+    return await callOpenRouter(openRouterKeyFallback, prompt, "openrouter/free");
   } catch (e) {
-    console.warn("OpenRouter API call failed...", e);
+    errors.push(`OpenRouter Free Fallback: ${e.message}`);
   }
 
+  console.error("All AI providers failed during chunk extraction. Reasons:\n- " + errors.join("\n- "));
   return [];
 }
 
