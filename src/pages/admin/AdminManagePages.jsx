@@ -311,12 +311,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   };
 
   const set = (k, v) => setF((s) => {
-    const newState = { ...s, [k]: v };
-    // Auto-update topic if subject changes
-    if (k === "subject" && SUBJECT_TOPICS[v]) {
-      newState.topic = SUBJECT_TOPICS[v][0];
-    }
-    return newState;
+    return { ...s, [k]: v };
   });
   const color = CATEGORIES.find((c) => c.name === f.category)?.color || "#1B4F72";
 
