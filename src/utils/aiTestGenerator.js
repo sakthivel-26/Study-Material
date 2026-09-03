@@ -871,8 +871,9 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
   const cleanText = pdfText.replace(/\r\n/g, '\n');
   
-  // Split by Question markers: start of line, optional 'Ques', 'Question', 'Q', optional dot, number, dot or parenthesis
-  const qRegex = /(?:^|\n)\s*(?:Ques|Question|Q)?\.?\s*\d+\s*[\.\)]/i;
+  // PDF.js often joins text with spaces, losing newlines. We use \b or \s instead of \n.
+  // Split by Question markers: 'Ques 1.', 'Q1.', '1.', etc.
+  const qRegex = /(?:^|\s)(?:Ques|Question|Q)[\s\.]*\d+\s*[\.\)]\s+|(?:^|\s)\d+\s*[\.\)]\s+(?=[A-Z])/i;
   const rawBlocks = cleanText.split(qRegex).filter(b => b.trim().length > 10);
   
   const uniqueQuestions = [];
@@ -883,8 +884,8 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     let options = ["Option A", "Option B", "Option C", "Option D"];
     
     // Look for options like (a), (A), a), A), a. , A.
-    // Use a robust regex to capture option markers
-    const optRegex = /(?:^|\n|\s)\(([a-eA-E])\)\s+|(?:^|\n|\s)([a-eA-E])\)\s+|(?:^|\n|\s)([a-eA-E])\.\s+/g;
+    // Use a robust regex to capture option markers without requiring newlines.
+    const optRegex = /(?:\s|^)\(([a-eA-E])\)\s+|(?:\s|^)([a-eA-E])\)\s+|(?:\s|^)([a-eA-E])\.\s+/g;
     const matches = [...block.matchAll(optRegex)];
     
     if (matches.length >= 2) {

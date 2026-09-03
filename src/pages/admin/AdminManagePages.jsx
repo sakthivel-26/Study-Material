@@ -815,8 +815,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       }
 
       if (!llmSuccess || extractedQuestions.length === 0) {
-        setPdfPageInfo("Parsing questions locally using fallback engine...");
-        extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 200);
+        throw new Error("Failed to extract any valid questions from the PDF.");
       }
 
       setF(prev => ({ ...prev, questions: extractedQuestions.length }));
