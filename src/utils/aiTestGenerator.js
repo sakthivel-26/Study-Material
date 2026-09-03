@@ -123,8 +123,8 @@ async function callGemini(apiKey, prompt) {
   const cleanKey = apiKey.trim();
 
   const candidateEndpoints = [
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${cleanKey}`,
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cleanKey}`,
   ];
 
   let lastErr = null;
@@ -281,11 +281,15 @@ async function callOpenRouter(apiKey, prompt, model = "openrouter/free") {
     const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
     const jsonStart = cleaned.indexOf("[");
     const jsonEnd = cleaned.lastIndexOf("]");
-    if (jsonStart !== -1 && jsonEnd !== -1) {
-      return JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+    try {
+      if (jsonStart !== -1 && jsonEnd !== -1) {
+        return JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+      }
+      const parsed = JSON.parse(cleaned);
+      return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
+    } catch (parseErr) {
+      throw new Error(`Invalid JSON response: ${cleaned.substring(0, 50)}...`);
     }
-    const parsed = JSON.parse(cleaned);
-    return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
   } catch (err) {
     clearTimeout(id);
     throw err;
@@ -404,7 +408,7 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
   const prompt = buildPrompt(category, questionsCount);
 
   const openRouterKey = getEnvKey("VITE_OPENROUTER_API_KEY") || getEnvKey("OPENROUTER_API_KEY");
-  const openRouterModel = getEnvKey("VITE_OPENROUTER_MODEL") || getEnvKey("OPENROUTER_MODEL") || "openrouter/free";
+  const openRouterModel = "openrouter/free"; // Hardcoded to bypass deprecated env variables
   const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
   const nvidiaModel = getEnvKey("VITE_NVIDIA_MODEL") || "nvidia/nemotron-ocr-v2";
   const gemmaKey = getEnvKey("VITE_GEMMA_API_KEY") || getEnvKey("GEMMA_API_KEY");
@@ -769,7 +773,7 @@ async function callLLMChain(prompt) {
   const deepSeekKey = getEnvKey("VITE_DEEPSEEK_API_KEY") || getEnvKey("DEEPSEEK_API_KEY");
 
   const openRouterKey = getEnvKey("VITE_OPENROUTER_API_KEY") || getEnvKey("OPENROUTER_API_KEY");
-  const openRouterModel = getEnvKey("VITE_OPENROUTER_MODEL") || "openrouter/free";
+  const openRouterModel = "openrouter/free"; // Hardcoded to bypass deprecated env variables
 
   const errors = [];
 
