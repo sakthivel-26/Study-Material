@@ -133,7 +133,7 @@ export async function fsDeleteUpload(id) {
   await deleteDoc(doc(db, COLLECTIONS.uploads, id));
 }
 
-export async function fsNotify(type, title, body, image) {
+export async function fsNotify(type, title, body, image, pdf) {
   const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
   const db = await getFirebaseDb();
   const data = {
@@ -147,6 +147,9 @@ export async function fsNotify(type, title, body, image) {
   };
   if (image) {
     data.image = image;
+  }
+  if (pdf) {
+    data.pdf = pdf;
   }
   await addDoc(collection(db, COLLECTIONS.notifications), data);
 }

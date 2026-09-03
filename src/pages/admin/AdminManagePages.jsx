@@ -2689,7 +2689,7 @@ export function ManageStudentsPage() {
 /* -------------------------------- Announcements ---------------------------- */
 export function AnnouncementsPage() {
   const { announce, notifications, pushToast } = useApp();
-  const [f, setF] = useState({ title: "", body: "", image: "" });
+  const [f, setF] = useState({ title: "", body: "", image: "", pdf: "" });
   
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
@@ -2700,11 +2700,22 @@ export function AnnouncementsPage() {
     };
     reader.readAsDataURL(file);
   };
+
+  const handlePdfUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") return pushToast("Only PDF files are allowed");
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setF({ ...f, pdf: ev.target.result });
+    };
+    reader.readAsDataURL(file);
+  };
   
   const send = () => {
     if (!f.title || !f.body) return pushToast("Fill both fields");
-    announce(f.title, f.body, f.image);
-    setF({ title: "", body: "", image: "" });
+    announce(f.title, f.body, f.image, f.pdf);
+    setF({ title: "", body: "", image: "", pdf: "" });
   };
   return (
     <>
@@ -2722,6 +2733,14 @@ export function AnnouncementsPage() {
               {f.image && <button onClick={() => setF({...f, image: ""})} className="text-rose-500 font-medium text-xs whitespace-nowrap">Remove</button>}
             </div>
           </div>
+          <div>
+            <label className="text-xs font-semibold text-ink-muted mb-1 block">Upload PDF (optional)</label>
+            <div className="flex items-center gap-3">
+              {f.pdf && <span className="text-xs font-semibold px-2 py-1 bg-rose-50 text-rose-600 rounded">PDF Attached</span>}
+              <input type="file" accept="application/pdf" onChange={handlePdfUpload} className="input text-xs" />
+              {f.pdf && <button onClick={() => setF({...f, pdf: ""})} className="text-rose-500 font-medium text-xs whitespace-nowrap">Remove</button>}
+            </div>
+          </div>
           <button onClick={send} className="btn-primary px-5 py-2.5"><Send size={16}/> Send to all students</button>
         </div>
         <div className="card p-6">
@@ -2734,6 +2753,7 @@ export function AnnouncementsPage() {
                   <p className="text-sm font-semibold text-ink">{n.title}</p>
                   <p className="text-xs text-ink-muted">{n.body}</p>
                   {n.image && <img src={n.image} alt="Announcement" className="mt-2 rounded-lg max-h-32 object-contain border border-black/10" />}
+                  {n.pdf && <a href={n.pdf} download="Announcement.pdf" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-rose-600 hover:underline"><span className="text-base">📄</span> Download PDF</a>}
                 </div>
               </div>
             ))}

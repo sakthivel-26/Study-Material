@@ -99,10 +99,15 @@ export function AppProvider({ children }) {
   const deleteStudent = async (id) => {
     if (isFirebaseConfigured) {
       try {
-        const { doc, deleteDoc } = await import("firebase/firestore");
+        const { doc, deleteDoc, setDoc } = await import("firebase/firestore");
         const { getFirebaseDb } = await import("./firebase.js");
         const db = await getFirebaseDb();
-        await deleteDoc(doc(db, "users", id));
+        try {
+          await deleteDoc(doc(db, "users", id));
+        } catch (e) {
+          // Fallback if security rules prevent deletion
+          await setDoc(doc(db, "users", id), { deleted: true }, { merge: true });
+        }
       } catch (e) {
         console.warn("Failed to delete user from Firestore", e);
       }
@@ -161,10 +166,10 @@ export function AppProvider({ children }) {
         onTests: setMockTests,
         onNotifications: setNotifications,
         onStudents: (users) => {
-          // Keep only student role
-          const studentUsers = users.filter(u => u.role !== "admin").map(u => ({
+          // Keep only student role and filter out deleted users
+          const studentUsers = users.filter(u => u.role !== "admin" && !u.deleted).map(u => ({
             id: u.id,
-            name: u.name,
+            name: u.name || u.displayName || (u.email ? u.email.split("@")[0] : "") || "Student",
             email: u.email || "",
             phone: u.phone || "",
             access: u.paid_packages ? Object.keys(u.paid_packages) : "payment_required",
@@ -326,20 +331,20 @@ export function AppProvider({ children }) {
     pushToast("Lead deleted successfully 🗑️");
   };
 
-  const announce = async (title, body, image) => {
+  const announce = async (title, body, image, pdf) => {
     if (isFirebaseConfigured) {
-      await fsNotify("announcement", title, body, image);
+      await fsNotify("announcement", title, body, image, pdf);
       pushToast("Announcement broadcast to all students 📢");
       return;
     }
-    pushNotification("announcement", title, body, image);
+    pushNotification("announcement", title, body, image, pdf);
     pushToast("Announcement broadcast to all students 📢");
   };
 
-  const pushNotification = (type, title, body, image) => {
+  const pushNotification = (type, title, body, image, pdf) => {
     const icons = { pdf: "📄", video: "🎥", mock: "📝", announcement: "📢" };
     const colors = { pdf: "#8B5CF6", video: "#0EA5E9", mock: "#10B981", announcement: "#EF4444" };
-    const n = { id: Date.now(), type, icon: icons[type] || "🔔", title, body, image, time: "just now", read: false, color: colors[type] || "#1B4F72" };
+    const n = { id: Date.now(), type, icon: icons[type] || "🔔", title, body, image, pdf, time: "just now", read: false, color: colors[type] || "#1B4F72" };
     setNotifications((prev) => [n, ...prev]);
   };
 

@@ -40,6 +40,11 @@ export default function NotificationsPage() {
               {n.image && (
                 <img src={n.image} alt="Notification" className="mt-2 rounded-lg max-h-48 object-contain border border-black/10" />
               )}
+              {n.pdf && (
+                <a href={n.pdf} download="Announcement.pdf" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-brand-600 hover:underline">
+                  <span className="text-base">📄</span> Download PDF
+                </a>
+              )}
               <p className="text-xs text-ink-faint mt-1">{n.time}</p>
             </div>
           </motion.div>
