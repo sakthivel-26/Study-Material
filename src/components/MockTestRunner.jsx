@@ -52,6 +52,8 @@ export default function MockTestRunner({ test, onClose }) {
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [viewState, setViewState] = useState("test"); // "test" | "results" | "solutions"
   const [results, setResults] = useState(null);
+  const [cheatWarnings, setCheatWarnings] = useState(0);
+  const [showCheatModal, setShowCheatModal] = useState(false);
   
   const [showMobilePalette, setShowMobilePalette] = useState(false);
 
@@ -312,6 +314,62 @@ export default function MockTestRunner({ test, onClose }) {
     const s = secs % 60;
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
+
+  useEffect(() => {
+    // Attempt fullscreen
+    const requestFullscreen = async () => {
+      try {
+        if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch (err) {
+        console.warn("Fullscreen request failed", err);
+      }
+    };
+    if (viewState === "test") {
+      requestFullscreen();
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.hidden && viewState === "test") {
+        setCheatWarnings(prev => {
+          const next = prev + 1;
+          if (next >= 3) {
+            pushToast("Test auto-submitted due to multiple tab switches.");
+            handleSubmitTest();
+            setShowCheatModal(false);
+          } else {
+            setShowCheatModal(true);
+          }
+          return next;
+        });
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && viewState === "test") {
+        setCheatWarnings(prev => {
+          const next = prev + 1;
+          if (next >= 3) {
+            pushToast("Test auto-submitted due to multiple fullscreen exits.");
+            handleSubmitTest();
+            setShowCheatModal(false);
+          } else {
+            setShowCheatModal(true);
+          }
+          return next;
+        });
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, [viewState]);
 
   const sections = Array.from(new Set(questions.map((q) => q.section || "General")));
 
@@ -770,7 +828,32 @@ export default function MockTestRunner({ test, onClose }) {
                 Yes, Submit Now
               </button>
             </div>
-          </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Cheat Warning Modal */}
+      {showCheatModal && (
+        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm p-4 flex items-center justify-center">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-8 max-w-sm w-full shadow-2xl border border-rose-500 text-center">
+            <div className="w-16 h-16 bg-rose-100 dark:bg-rose-950/30 text-rose-600 rounded-2xl mx-auto flex items-center justify-center mb-4">
+              <AlertCircle size={32} />
+            </div>
+            <h3 className="text-xl font-bold text-ink dark:text-white mb-2">Warning!</h3>
+            <p className="text-sm text-ink-muted dark:text-slate-400 mb-6">
+              Switching tabs, minimizing the browser, or exiting full screen is not allowed during the mock test. You have <strong>{3 - cheatWarnings}</strong> warning(s) left before your test is automatically submitted.
+            </p>
+            <button onClick={() => {
+              setShowCheatModal(false);
+              try {
+                if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+                  document.documentElement.requestFullscreen();
+                }
+              } catch(e) {}
+            }} className="btn-primary w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm">
+              I Understand, Return to Test
+            </button>
+          </motion.div>
         </div>
       )}
     </div>

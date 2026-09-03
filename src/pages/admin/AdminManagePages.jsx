@@ -21,7 +21,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [pdfStatus, setPdfStatus] = useState(""); // "extracting" | "analyzing" | "done" | ""
   const [pdfPageInfo, setPdfPageInfo] = useState("");
   const pdfInputRef = useRef(null);
-  const [f, setF] = useState({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault, isSectionalTimed: false });
+  const DEFAULT_SECTIONS = ["Quantitative Aptitude", "Reasoning Ability", "English Language", "General Awareness", "General"];
+  const [f, setF] = useState({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault, isSectionalTimed: false, sections: [...DEFAULT_SECTIONS] });
   const [generating, setGenerating] = useState(false);
   const [generatedTest, setGeneratedTest] = useState(null);
   const [approvedQuestions, setApprovedQuestions] = useState({});
@@ -430,7 +431,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       setGeneratedTest(null);
       setPdfFile(null);
       setApprovedQuestions({});
-      setF({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault, isSectionalTimed: false });
+      setF({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault, isSectionalTimed: false, sections: [...DEFAULT_SECTIONS] });
       pushToast(`🎉 Test published successfully with ${finalQuestions.length} questions!`);
     } catch (err) {
       console.error("Publishing error:", err);
@@ -1129,6 +1130,39 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             </div>
           </div>
 
+          {/* Section Management */}
+          <div className="pt-4 border-t border-black/5">
+            <label className="text-sm font-medium text-ink-soft mb-1.5 block">Test Sections Management</label>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {(f.sections || DEFAULT_SECTIONS).map((sec, i) => (
+                <div key={i} className="flex items-center gap-1 bg-brand-50 border border-brand-200 text-brand-700 px-2 py-1 rounded-lg text-xs font-semibold">
+                  {sec}
+                  <button onClick={() => set("sections", (f.sections || DEFAULT_SECTIONS).filter((_, idx) => idx !== i))} className="text-rose-500 hover:text-rose-700 ml-1 p-0.5">
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 max-w-sm">
+              <input type="text" id="newSectionInput" placeholder="Add custom section..." className="input text-xs py-1.5 flex-1" onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (e.target.value.trim()) {
+                    set("sections", [...new Set([...(f.sections || DEFAULT_SECTIONS), e.target.value.trim()])]);
+                    e.target.value = '';
+                  }
+                }
+              }} />
+              <button onClick={(e) => {
+                const input = document.getElementById('newSectionInput');
+                if (input.value.trim()) {
+                  set("sections", [...new Set([...(f.sections || DEFAULT_SECTIONS), input.value.trim()])]);
+                  input.value = '';
+                }
+              }} className="btn-primary text-xs px-3 py-1.5">Add Section</button>
+            </div>
+          </div>
+
           {/* PDF Upload Zone */}
           {mode === "pdf" && (
             <div className="pt-4 border-t border-black/5 space-y-4">
@@ -1312,14 +1346,10 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         </span>
                         <select
                           className="input text-xs py-1 px-3 font-bold bg-white border-black/10 rounded-xl"
-                          value={q.section || "Quantitative Aptitude"}
+                          value={q.section || (f.sections && f.sections[0]) || "Quantitative Aptitude"}
                           onChange={(e) => updateManualQuestion(qIdx, "section", e.target.value)}
                         >
-                          <option value="Quantitative Aptitude">Quantitative Aptitude</option>
-                          <option value="Reasoning Ability">Reasoning Ability</option>
-                          <option value="English Language">English Language</option>
-                          <option value="General Awareness">General Awareness</option>
-                          <option value="General">General</option>
+                          {(f.sections || DEFAULT_SECTIONS).map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
                       </div>
 
@@ -1622,11 +1652,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             value={approvedQuestions[idx]?.section || q.section || "General"}
                             onChange={(e) => editQuestionSection(idx, e.target.value)}
                           >
-                            <option value="Quantitative Aptitude">Quantitative Aptitude</option>
-                            <option value="Reasoning Ability">Reasoning Ability</option>
-                            <option value="English Language">English Language</option>
-                            <option value="General Awareness">General Awareness</option>
-                            <option value="General">General</option>
+                            {(f.sections || DEFAULT_SECTIONS).map(s => <option key={s} value={s}>{s}</option>)}
                           </select>
                         </div>
 
@@ -1931,11 +1957,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           value={approvedQuestions[idx]?.section || q.section || "General"}
                           onChange={(e) => editQuestionSection(idx, e.target.value)}
                         >
-                          <option value="Quantitative Aptitude">Quantitative Aptitude</option>
-                          <option value="Reasoning Ability">Reasoning Ability</option>
-                          <option value="English Language">English Language</option>
-                          <option value="General Awareness">General Awareness</option>
-                          <option value="General">General</option>
+                          {(f.sections || DEFAULT_SECTIONS).map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
                       </div>
 
@@ -2335,11 +2357,10 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             value={q.section || "General"}
                             onChange={(e) => updateEditingQuestion(qIdx, "section", e.target.value)}
                           >
-                            <option value="Quantitative Aptitude">Quantitative Aptitude</option>
-                            <option value="Reasoning Ability">Reasoning Ability</option>
-                            <option value="English Language">English Language</option>
-                            <option value="General Awareness">General Awareness</option>
-                            <option value="General">General</option>
+                            {/* In editing modal, derive sections from the questions themselves plus defaults */}
+                            {Array.from(new Set([...DEFAULT_SECTIONS, ...(editingTest.questionsList || editingTest.questions || []).map(q => q.section)])).filter(Boolean).map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
                           </select>
                         </div>
 

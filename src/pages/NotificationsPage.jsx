@@ -1,11 +1,15 @@
-import { Bell, CheckCheck } from "lucide-react";
+import { useState } from "react";
+import { Bell, CheckCheck, X, FileText, Download } from "lucide-react";
 import PageHeader from "../components/PageHeader.jsx";
 import { useApp } from "../store.jsx";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function NotificationsPage() {
   const { notifications, markAllRead, pushToast } = useApp();
   const unread = notifications.filter((n) => !n.read).length;
+  
+  // selectedMedia can be an object: { type: "image" | "pdf", url: string, title: string }
+  const [selectedMedia, setSelectedMedia] = useState(null);
 
   return (
     <>
@@ -38,18 +42,65 @@ export default function NotificationsPage() {
               </div>
               <p className="text-sm text-ink-muted">{n.body}</p>
               {n.image && (
-                <img src={n.image} alt="Notification" className="mt-2 rounded-lg max-h-48 object-contain border border-black/10" />
+                <div 
+                  className="mt-2 rounded-lg max-h-48 overflow-hidden border border-black/10 inline-block cursor-pointer hover:opacity-90 transition-opacity"
+                  onClick={() => setSelectedMedia({ type: "image", url: n.image, title: n.title })}
+                >
+                  <img src={n.image} alt="Notification" className="w-auto h-48 object-contain" />
+                </div>
               )}
               {n.pdf && (
-                <a href={n.pdf} download="Announcement.pdf" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-brand-600 hover:underline">
-                  <span className="text-base">📄</span> Download PDF
-                </a>
+                <button 
+                  onClick={() => setSelectedMedia({ type: "pdf", url: n.pdf, title: n.title })} 
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-brand-600 hover:underline"
+                >
+                  <span className="text-base">📄</span> View PDF Attachment
+                </button>
               )}
-              <p className="text-xs text-ink-faint mt-1">{n.time}</p>
+              <p className="text-xs text-ink-faint mt-2">{n.time}</p>
             </div>
           </motion.div>
         ))}
       </div>
+
+      {/* Media Viewer Modal */}
+      <AnimatePresence>
+        {selectedMedia && (
+          <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm p-4 flex items-center justify-center" onClick={() => setSelectedMedia(null)}>
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()} 
+              className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-black/5 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  {selectedMedia.type === "pdf" ? <FileText size={18} className="text-brand-600" /> : <Bell size={18} className="text-brand-600" />}
+                  <h3 className="font-bold text-ink dark:text-white truncate">{selectedMedia.title}</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  {selectedMedia.type === "pdf" && (
+                    <a href={selectedMedia.url} download="Announcement.pdf" className="btn-ghost p-2 text-ink-soft hover:bg-black/5 rounded-xl">
+                      <Download size={18} />
+                    </a>
+                  )}
+                  <button onClick={() => setSelectedMedia(null)} className="btn-ghost p-2 text-ink-soft hover:bg-black/5 rounded-xl">
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto bg-slate-100 dark:bg-slate-950 flex items-center justify-center min-h-[50vh]">
+                {selectedMedia.type === "image" ? (
+                  <img src={selectedMedia.url} alt="Attachment" className="max-w-full max-h-full object-contain" />
+                ) : (
+                  <iframe src={selectedMedia.url} className="w-full h-full border-0 min-h-[65vh]" title="PDF Viewer" />
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
