@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Clock, HelpCircle, CheckCircle2, XCircle, AlertCircle, Bookmark, Award, RotateCcw, ChevronLeft, ChevronRight, Send, X, Eye, Menu, ChevronDown, ChevronUp } from "lucide-react";
 import { useApp } from "../store.jsx";
+import { Logo } from "./ui.jsx";
 
 export default function MockTestRunner({ test, onClose }) {
   const { pushToast } = useApp();
@@ -325,9 +326,9 @@ export default function MockTestRunner({ test, onClose }) {
       <div className="fixed inset-0 z-[80] bg-appbg dark:bg-slate-900 text-ink dark:text-slate-100 flex flex-col font-sans overflow-hidden">
         <header className="h-16 bg-white dark:bg-slate-950 border-b border-black/10 dark:border-slate-800 px-3 sm:px-6 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2 sm:gap-3">
-            <span className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-xl bg-brand-600 flex items-center justify-center font-bold text-white shadow">
-              KEN
-            </span>
+            <div className="scale-90 sm:scale-100 origin-left">
+              <Logo size={32} />
+            </div>
             <div className="min-w-0">
               <h2 className="font-bold text-xs sm:text-sm text-ink dark:text-white truncate">Test Results</h2>
             </div>
@@ -397,9 +398,9 @@ export default function MockTestRunner({ test, onClose }) {
               <ChevronLeft size={20} />
             </button>
           )}
-          <span className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-xl bg-brand-600 flex items-center justify-center font-bold text-white shadow">
-            KEN
-          </span>
+          <div className="scale-90 sm:scale-100 origin-left">
+            <Logo size={32} />
+          </div>
           <div className="min-w-0">
             <h2 className="font-bold text-xs sm:text-sm text-ink dark:text-white truncate">
               {isSolutions ? `Solutions: ${test?.title}` : (test?.title || "Online CBT Exam")}
