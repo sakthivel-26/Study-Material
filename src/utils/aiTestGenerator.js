@@ -1063,7 +1063,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
  * Iterates through raw extracted questions and verifies them against the AI independently.
  */
 export async function verifyQuestionsBackground(questions, onProgress) {
-  const verifiedQuestions = [];
+  const verifiedQuestions = [...questions];
   const CONCURRENCY = 3;
   let activePromises = [];
   let completed = 0;
