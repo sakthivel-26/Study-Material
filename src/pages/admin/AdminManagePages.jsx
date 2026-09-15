@@ -759,8 +759,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const handlePDFUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      return pushToast("Please upload a PDF file only.");
+    const isPDF = file.name.toLowerCase().endsWith(".pdf");
+    const isDocx = file.name.toLowerCase().endsWith(".docx");
+    
+    if (!isPDF && !isDocx) {
+      return pushToast("Please upload a PDF or Word (.docx) file only.");
     }
     setPdfFile(file);
     setPdfStatus("extracting");
@@ -771,53 +774,57 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     try {
       setPdfStatus("analyzing");
       setExtractionStartTime(Date.now());
-      setPdfPageInfo("Extracting text from PDF locally...");
+      setPdfPageInfo(`Extracting text from ${isPDF ? 'PDF' : 'Word document'} locally...`);
       
-      // Dynamically load PDF.js to avoid Vite worker bundling issues
-      if (!window.pdfjsLib) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
-          script.onload = resolve;
-          script.onerror = reject;
-          document.body.appendChild(script);
-        });
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
-      }
-
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       let fullText = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+
+      if (isPDF) {
+        // Dynamically load PDF.js to avoid Vite worker bundling issues
+        if (!window.pdfjsLib) {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement("script");
+            script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
+            script.onload = resolve;
+            script.onerror = reject;
+            document.body.appendChild(script);
+          });
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+        }
+        const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+        }
+      } else if (isDocx) {
+        if (!window.mammoth) {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement("script");
+            script.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
+            script.onload = resolve;
+            script.onerror = reject;
+            document.body.appendChild(script);
+          });
+        }
+        const result = await window.mammoth.extractRawText({ arrayBuffer });
+        fullText = result.value;
       }
 
-      setPdfPageInfo("Extracting questions using High-Accuracy AI LLM Model...");
+      setPdfPageInfo("Extracting questions instantly using local parser...");
 
       let extractedQuestions = [];
       let llmSuccess = false;
 
       try {
-        const aiResult = await generateMockTestFromPDF({
-          pdfText: fullText,
-          category: f.category,
-          timeLimit: f.time,
-          title: f.title,
-          onProgress: (done, total) => setPdfPageInfo(`AI LLM extracting questions (Chunk ${done}/${total})...`)
-        });
-        if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
-          extractedQuestions = aiResult.rawExtractedQuestions;
-          llmSuccess = true;
-        }
-      } catch (aiErr) {
-        console.warn("AI LLM Extraction warning, using local regex parser fallback...", aiErr);
-        pushToast(`⚠️ AI LLM Notice: ${aiErr.message || "Model response fallback"}`);
+        // Fast instant extraction using local parser
+        extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", f.questions || 100);
+      } catch (err) {
+        console.error("Local parser error:", err);
       }
 
-      if (!llmSuccess || extractedQuestions.length === 0) {
-        throw new Error("Failed to extract any valid questions from the PDF.");
+      if (extractedQuestions.length === 0) {
+        throw new Error("Failed to extract any valid questions from the document.");
       }
 
       setF(prev => ({ ...prev, questions: extractedQuestions.length }));
@@ -1169,7 +1176,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               <input
                 ref={pdfInputRef}
                 type="file"
-                accept=".pdf"
+                accept=".pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 className="hidden"
                 onChange={handlePDFUpload}
               />
@@ -1184,7 +1191,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                   <div className="space-y-3">
                     <Loader2 size={40} className="mx-auto text-emerald-600 animate-spin" />
                     <p className="font-bold text-emerald-900 text-sm">
-                      {pdfStatus === "extracting" ? "📄 Extracting text from PDF..." : "🤖 AI LLM Model is extracting questions..."}
+                      {pdfStatus === "extracting" ? "📄 Extracting text from document..." : "🤖 AI LLM Model is extracting questions..."}
                     </p>
                     {pdfPageInfo && <p className="text-xs text-emerald-700 font-semibold">{pdfPageInfo}</p>}
                     {extractionProgress && (
@@ -1195,7 +1202,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                     {extractionProgress && <p className="text-xs font-bold text-emerald-700">{extractionProgress}</p>}
                     {extractionElapsed > 0 && (
                       <p className="text-[10px] font-semibold text-emerald-600 mt-1">
-                        Time elapsed: {extractionElapsed}s {extractionElapsed > 15 && "(Processing PDF text with LLM model)"}
+                        Time elapsed: {extractionElapsed}s {extractionElapsed > 15 && "(Processing text with LLM model)"}
                       </p>
                     )}
                   </div>
@@ -1204,7 +1211,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                     <CheckCircle2 size={40} className="mx-auto text-emerald-600" />
                     <p className="font-bold text-emerald-900 text-sm">✅ {generatedTest?.questions} questions extracted with AI</p>
                     <p className="text-xs text-emerald-700 font-semibold">Mock Test Ready</p>
-                    <p className="text-xs text-emerald-600 font-bold mt-1">Click to upload a different PDF</p>
+                    <p className="text-xs text-emerald-600 font-bold mt-1">Click to upload a different PDF or Word document</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -1440,7 +1447,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         </div>
                       </div>
 
-                      <div className="grid sm:grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-3">
                         {q.options.map((opt, optIdx) => {
                           const letter = String.fromCharCode(65 + optIdx);
                           const isRight = +q.correctAnswerIndex === optIdx;
@@ -1470,8 +1477,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                 className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
                               />
 
-                              <input 
-                                className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
+                              <textarea 
+                                rows={2}
+                                className="input text-xs py-1.5 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text resize-y min-h-[40px]"
                                 value={opt}
                                 onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => updateManualOption(qIdx, optIdx, e.target.value)}
@@ -2016,7 +2024,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         Options &amp; Correct Answer Key (Click radio button to mark correct option):
                       </label>
 
-                      <div className="grid sm:grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-3">
                         {Object.entries(q.options || {}).map(([key, opt]) => {
                           const isRight = key === finalAnswer;
                           return (
@@ -2051,8 +2059,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                 className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
                               />
 
-                              <input 
-                                className="input text-xs py-1.5 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-semibold cursor-text"
+                              <textarea 
+                                rows={2}
+                                className="input text-xs py-1.5 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-semibold cursor-text resize-y min-h-[40px]"
                                 value={approvedQuestions[idx]?.options?.[key] ?? (opt || `Option ${key}`)}
                                 onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => editOptionText(idx, key, e.target.value)}

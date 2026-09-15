@@ -1,5 +1,5 @@
 import { ShieldCheck, Scale, Cookie, ScrollText, Mail } from "lucide-react";
-import { PageHeader } from "../components/PageHeader.jsx";
+import PageHeader from "../components/PageHeader.jsx";
 
 function LegalLayout({ icon: Icon, title, lastUpdated, children }) {
   return (
