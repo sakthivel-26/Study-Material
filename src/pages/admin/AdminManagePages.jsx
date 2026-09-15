@@ -34,6 +34,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENROUTER_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY") || "");
   const [openRouterModel, setOpenRouterModel] = useState(() => localStorage.getItem("VITE_OPENROUTER_MODEL") || "nvidia/nemotron-4-340b-instruct:free");
   const [keyType, setKeyType] = useState(() => localStorage.getItem("LLM_PROVIDER_TYPE") || "gemini");
+  const [pdfExtractionMethod, setPdfExtractionMethod] = useState("ai"); // "ai" | "regex"
+  const [bulkAddCount, setBulkAddCount] = useState(1);
 
   const saveLLMKey = () => {
     if (!apiKey.trim()) {
@@ -230,19 +232,24 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   ]);
 
   const addManualQuestion = () => {
-    setManualQuestions((prev) => [
-      ...prev,
-      {
-        section: f.subject || "Quantitative Aptitude",
-        question: "",
-        passage: prev.length > 0 ? prev[prev.length - 1].passage : "", // Inherit passage from previous question if any
-        imageUrl: "",
-        solutionImageUrl: "",
-        options: ["Option A", "Option B", "Option C", "Option D"],
-        correctAnswerIndex: 0,
-        explanation: "",
-      },
-    ]);
+    const count = parseInt(bulkAddCount) || 1;
+    setManualQuestions((prev) => {
+      const newQuestions = [];
+      const inheritedPassage = prev.length > 0 ? prev[prev.length - 1].passage : "";
+      for (let i = 0; i < count; i++) {
+        newQuestions.push({
+          section: f.subject || "Quantitative Aptitude",
+          question: "",
+          passage: inheritedPassage,
+          imageUrl: "",
+          solutionImageUrl: "",
+          options: ["Option A", "Option B", "Option C", "Option D"],
+          correctAnswerIndex: 0,
+          explanation: "",
+        });
+      }
+      return [...prev, ...newQuestions];
+    });
   };
 
   const removeManualQuestion = (idx) => {
@@ -811,14 +818,34 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         fullText = result.value;
       }
 
-      setPdfPageInfo("Extracting questions instantly using local parser...");
+      setPdfPageInfo(pdfExtractionMethod === "ai" ? "Extracting questions using High-Accuracy AI LLM Model..." : "Extracting questions instantly using local parser...");
 
       let extractedQuestions = [];
       let llmSuccess = false;
 
       try {
-        // Fast instant extraction using local parser
-        extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", f.questions || 100);
+        if (pdfExtractionMethod === "ai") {
+          try {
+            const aiResult = await generateMockTestFromPDF({
+              pdfText: fullText,
+              category: f.category,
+              timeLimit: f.time,
+              title: f.title,
+              onProgress: (done, total) => setPdfPageInfo(`AI LLM extracting questions (Chunk ${done}/${total})...`)
+            });
+            if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
+              extractedQuestions = aiResult.rawExtractedQuestions;
+              llmSuccess = true;
+            }
+          } catch (aiErr) {
+            console.warn("AI LLM Extraction warning, using local regex parser fallback...", aiErr);
+            pushToast(`⚠️ AI LLM Notice: ${aiErr.message || "Model response fallback"}`);
+            extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", f.questions || 100);
+          }
+        } else {
+          // Fast instant extraction using local parser
+          extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", f.questions || 100);
+        }
       } catch (err) {
         console.error("Local parser error:", err);
       }
@@ -1228,6 +1255,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         {pdfFile.name}
                       </div>
                     )}
+                    <div className="mt-4 flex items-center justify-center gap-4 bg-white p-2 rounded-xl border border-black/5" onClick={(e) => e.stopPropagation()}>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="extractionMethod" value="ai" checked={pdfExtractionMethod === "ai"} onChange={() => setPdfExtractionMethod("ai")} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
+                        <span className="text-xs font-bold text-ink">High Accuracy AI (Slower)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="extractionMethod" value="regex" checked={pdfExtractionMethod === "regex"} onChange={() => setPdfExtractionMethod("regex")} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
+                        <span className="text-xs font-bold text-ink">Fast Offline (Instant)</span>
+                      </label>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1336,9 +1373,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                   </h4>
                   <p className="text-xs text-ink-muted mt-0.5">Build questions manually with custom statements, passage context, images, and options up to G.</p>
                 </div>
-                <button type="button" onClick={addManualQuestion} className="btn-primary text-xs px-4 py-2 text-white bg-brand-600 hover:bg-brand-500 flex items-center gap-1.5 font-bold shadow-sm rounded-xl">
-                  <Plus size={16} /> Add New Question
-                </button>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-black/10 shadow-sm">
+                    <span className="text-xs font-bold text-ink-muted">Add</span>
+                    <input type="number" min="1" max="50" className="input text-xs w-14 px-2 py-1 text-center font-bold" value={bulkAddCount} onChange={(e) => setBulkAddCount(e.target.value)} />
+                    <span className="text-xs font-bold text-ink-muted">Questions</span>
+                  </div>
+                  <button type="button" onClick={addManualQuestion} className="btn-primary text-xs px-4 py-2 h-[38px] text-white bg-brand-600 hover:bg-brand-500 flex items-center gap-1.5 font-bold shadow-sm rounded-xl">
+                    <Plus size={16} /> Add Now
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-6 max-h-[75vh] md:max-h-[850px] overflow-y-auto pr-1">
