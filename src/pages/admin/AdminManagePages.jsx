@@ -703,15 +703,65 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       for (const slot of activeSlots) {
         setPdfPageInfo(`Extracting section: ${slot.name}...`);
         const arrayBuffer = await slot.file.arrayBuffer();
-        const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        
         let fullText = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const textContent = await page.getTextContent();
-          fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+        const isDocx = slot.file.name.toLowerCase().endsWith(".docx");
+
+        if (isDocx) {
+          if (!window.mammoth) {
+            await new Promise((resolve, reject) => {
+              const script = document.createElement("script");
+              script.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
+              script.onload = resolve;
+              script.onerror = reject;
+              document.body.appendChild(script);
+            });
+          }
+          const result = await window.mammoth.extractRawText({ arrayBuffer });
+          fullText = result.value;
+        } else {
+          try {
+            const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            for (let i = 1; i <= pdf.numPages; i++) {
+              const page = await pdf.getPage(i);
+              const textContent = await page.getTextContent();
+              fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+            }
+          } catch (pdfErr) {
+            console.error("PDF parsing error:", pdfErr);
+            throw new Error(`Failed to parse ${slot.file.name}. Ensure it's a valid PDF or Word document.`);
+          }
         }
 
-        const sectionQuestions = parseQuestionsFromPDFText(fullText, slot.name, slot.count);
+        let sectionQuestions = [];
+        
+        if (pdfExtractionMethod === "ai") {
+          try {
+            const aiResult = await generateMockTestFromPDF({
+              pdfText: fullText,
+              category: f.category,
+              timeLimit: `${slot.time} min`,
+              title: slot.name,
+              onProgress: (done, total) => setPdfPageInfo(`AI LLM extracting ${slot.name} (Chunk ${done}/${total})...`)
+            });
+            if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
+              sectionQuestions = aiResult.rawExtractedQuestions;
+            } else {
+              sectionQuestions = parseQuestionsFromPDFText(fullText, slot.name, slot.count);
+            }
+          } catch (aiErr) {
+            console.warn(`AI LLM Extraction warning for ${slot.name}, using fallback...`, aiErr);
+            sectionQuestions = parseQuestionsFromPDFText(fullText, slot.name, slot.count);
+          }
+        } else {
+          sectionQuestions = parseQuestionsFromPDFText(fullText, slot.name, slot.count);
+        }
+
+        // Limit to target questions count
+        if (sectionQuestions.length > slot.count) {
+          sectionQuestions = sectionQuestions.slice(0, slot.count);
+        }
+
         combinedRawQuestions.push(...sectionQuestions);
         totalTimeMinutes += parseInt(slot.time) || 20;
       }
@@ -1320,7 +1370,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                     <div>
                       <input
                         type="file"
-                        accept=".pdf"
+                        accept=".pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         id={`multi_pdf_${sec.key}`}
                         className="hidden"
                         onChange={(e) => {
@@ -1343,6 +1393,17 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              <div className="flex items-center justify-center gap-4 bg-white p-3 rounded-xl border border-black/5 mt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="multiExtractionMethod" value="ai" checked={pdfExtractionMethod === "ai"} onChange={() => setPdfExtractionMethod("ai")} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
+                  <span className="text-xs font-bold text-ink">High Accuracy AI (Slower)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="multiExtractionMethod" value="regex" checked={pdfExtractionMethod === "regex"} onChange={() => setPdfExtractionMethod("regex")} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
+                  <span className="text-xs font-bold text-ink">Fast Offline (Instant)</span>
+                </label>
               </div>
 
               <button
