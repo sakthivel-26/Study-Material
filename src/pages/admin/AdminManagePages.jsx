@@ -854,6 +854,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           const textContent = await page.getTextContent();
           fullText += textContent.items.map(item => item.str).join(" ") + "\n";
         }
+        setExtractionProgress(`${pdf.numPages} pages scanned · ${fullText.length.toLocaleString()} characters extracted`);
       } else if (isDocx) {
         if (!window.mammoth) {
           await new Promise((resolve, reject) => {
@@ -866,6 +867,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         }
         const result = await window.mammoth.extractRawText({ arrayBuffer });
         fullText = result.value;
+        setExtractionProgress(`Word Document scanned · ${fullText.length.toLocaleString()} characters extracted`);
       }
 
       setPdfPageInfo(pdfExtractionMethod === "ai" ? "Extracting questions using High-Accuracy AI LLM Model..." : "Extracting questions instantly using local parser...");
