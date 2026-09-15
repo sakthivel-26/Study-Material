@@ -13,7 +13,7 @@ import ProfilePage from "./pages/ProfilePage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import AdminDashboard from "./pages/admin/AdminDashboard.jsx";
 import UploadPage from "./pages/admin/UploadPage.jsx";
-import { CreateMockTestPage, ManageStudentsPage, AnnouncementsPage, ManageCoursesPage, PlansPage, AdmissionsPage } from "./pages/admin/AdminManagePages.jsx";
+import { CreateMockTestPage, ManageStudentsPage, AnnouncementsPage, PlansPage, AdmissionsPage } from "./pages/admin/AdminManagePages.jsx";
 import AdminAccountPage from "./pages/admin/AdminAccountPage.jsx";
 import { AdmissionModal } from "./components/AdmissionModal.jsx";
 
@@ -71,7 +71,6 @@ export default function App() {
         <Route path="/admin/students" element={<ManageStudentsPage />} />
         <Route path="/admin/admissions" element={<AdmissionsPage />} />
         <Route path="/admin/announcements" element={<AnnouncementsPage />} />
-        <Route path="/admin/courses" element={<ManageCoursesPage />} />
         <Route path="/admin/plans" element={<PlansPage />} />
         <Route path="/admin/account" element={<AdminAccountPage />} />
       </Route>

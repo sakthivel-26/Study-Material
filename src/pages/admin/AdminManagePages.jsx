@@ -2885,37 +2885,6 @@ export function AnalyticsPage() {
   );
 }
 
-/* ------------------------------ Manage Courses ------------------------------ */
-export function ManageCoursesPage() {
-  const { pushToast } = useApp();
-  return (
-    <>
-      <PageHeader icon={<BookOpen size={22} />} title="Manage Courses" subtitle="Edit or add new courses" action={<button onClick={()=>pushToast("New course form opened")} className="btn-primary text-sm px-4 py-2.5"><Plus size={16}/> Add Course</button>} />
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {CATEGORIES.map((c,i)=>(
-          <div key={c.id} className="card card-hover p-5">
-            <div className="flex items-start justify-between mb-3">
-              <span className="text-4xl">{c.icon}</span>
-              <Badge color={c.color}>{c.group}</Badge>
-            </div>
-            <h3 className="font-bold text-ink mb-1">{c.name}</h3>
-            <p className="text-xs text-ink-muted mb-3">{c.materials} total materials</p>
-            <ProgressBar value={100} color={c.color}/>
-            <div className="flex gap-2 mt-4">
-              <button onClick={()=>pushToast(`Editing ${c.name}`)} className="btn-soft flex-1 text-xs py-2">Edit</button>
-              <button onClick={()=>pushToast(`${c.name} disabled`)} className="btn-soft flex-1 text-xs py-2">Disable</button>
-            </div>
-          </div>
-        ))}
-        <button onClick={()=>pushToast("New course form opened")} className="rounded-card border-2 border-dashed border-black/10 p-5 flex flex-col items-center justify-center text-ink-muted hover:border-brand-300 hover:text-brand-600 hover:bg-brand-50/40 transition-colors min-h-[180px]">
-          <Plus size={28}/>
-          <span className="text-sm font-semibold mt-2">Add new course</span>
-        </button>
-      </div>
-    </>
-  );
-}
-
 /* -------------------------- Plans & Coupon Codes -------------------------- */
 export function PlansPage() {
   const { pushToast, promoBanner, updatePromoBanner } = useApp();

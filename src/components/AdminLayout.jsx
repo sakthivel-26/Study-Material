@@ -18,7 +18,6 @@ const NAV = [
   { to: "/admin/free-mock-test", label: "Create Free Mock Test", icon: ClipboardPlus },
   { to: "/admin/students", label: "Manage Students", icon: Users },
   { to: "/admin/announcements", label: "Notifications", icon: Megaphone },
-  { to: "/admin/courses", label: "Manage Courses", icon: BookOpen },
   { to: "/admin/plans", label: "Plans & Offers", icon: Tags },
   { to: "/admin/account", label: "Admin Profile & Payments", icon: Settings },
 ];
