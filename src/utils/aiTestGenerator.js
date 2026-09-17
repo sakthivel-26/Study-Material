@@ -946,52 +946,50 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     throw new Error("PDF text content is too short or empty. Please upload a valid question paper PDF.");
   }
 
-  const chunks = chunkText(pdfText, 12000);
+  const chunks = chunkText(pdfText, 3500);
   let allQuestions = [];
   let completedChunks = 0;
   
   if (onProgress) onProgress(0, chunks.length);
 
-  const CONCURRENCY = 3;
-  let activePromises = [];
+  const CONCURRENCY = 4;
   
-  for (let i = 0; i < chunks.length; i++) {
-    const p = (async () => {
-      let chunkQuestions = [];
-      let retries = 0;
-      while (retries < 1 && (!chunkQuestions || chunkQuestions.length === 0)) {
-        try {
-          const prompt = buildExtractionPrompt(chunks[i], category);
-          chunkQuestions = await callLLMChain(prompt);
-          if (!Array.isArray(chunkQuestions)) {
-            if (chunkQuestions.questions) chunkQuestions = chunkQuestions.questions;
-            else chunkQuestions = [];
-          }
-        } catch (err) {
-          console.warn(`Chunk ${i+1} extraction failed on try ${retries+1}`, err);
+  async function processChunk(chunk, index) {
+    let chunkQuestions = [];
+    let retries = 0;
+    while (retries < 1 && (!chunkQuestions || chunkQuestions.length === 0)) {
+      try {
+        const prompt = buildExtractionPrompt(chunk, category);
+        chunkQuestions = await callLLMChain(prompt);
+        if (!Array.isArray(chunkQuestions)) {
+          if (chunkQuestions.questions) chunkQuestions = chunkQuestions.questions;
+          else chunkQuestions = [];
         }
-        retries++;
+      } catch (err) {
+        console.warn(`Chunk ${index+1} extraction failed on try ${retries+1}`, err);
       }
-      
-      if (chunkQuestions && chunkQuestions.length > 0) {
-        allQuestions.push(...chunkQuestions);
-      }
-      
-      completedChunks++;
-      if (onProgress) onProgress(completedChunks, chunks.length);
-    })();
-
-    activePromises.push(p);
+      retries++;
+    }
     
-    if (activePromises.length >= CONCURRENCY) {
-      await Promise.all(activePromises);
-      activePromises = [];
+    if (chunkQuestions && chunkQuestions.length > 0) {
+      allQuestions.push(...chunkQuestions);
+    }
+    
+    completedChunks++;
+    if (onProgress) onProgress(completedChunks, chunks.length);
+  }
+
+  // True async worker pool for map-reduce
+  let currentIndex = 0;
+  async function worker() {
+    while (currentIndex < chunks.length) {
+      const idx = currentIndex++;
+      await processChunk(chunks[idx], idx);
     }
   }
-  
-  if (activePromises.length > 0) {
-    await Promise.all(activePromises);
-  }
+
+  const workers = Array.from({ length: CONCURRENCY }, () => worker());
+  await Promise.all(workers);
 
   let uniqueQuestions = [];
   const seen = new Set();
