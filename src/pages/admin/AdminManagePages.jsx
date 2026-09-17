@@ -1465,13 +1465,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         >
                           {(f.sections || DEFAULT_SECTIONS).map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
-                        <input
-                          type="text"
-                          placeholder="Time (e.g. 20s)"
-                          className="input text-xs py-1 px-2 font-bold bg-white border-black/10 rounded-xl w-28"
-                          value={q.timing || ""}
-                          onChange={(e) => updateManualQuestion(qIdx, "timing", e.target.value)}
-                        />
                       </div>
 
                       <button
@@ -2485,13 +2478,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                               <option key={s} value={s}>{s}</option>
                             ))}
                           </select>
-                          <input
-                            type="text"
-                            placeholder="Time (e.g. 20s)"
-                            className="input text-xs py-1 px-2 font-bold bg-white border-black/10 rounded-xl w-28"
-                            value={q.timing || ""}
-                            onChange={(e) => updateEditingQuestion(qIdx, "timing", e.target.value)}
-                          />
                         </div>
 
                         <button
