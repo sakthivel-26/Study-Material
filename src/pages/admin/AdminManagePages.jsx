@@ -725,7 +725,23 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             for (let i = 1; i <= pdf.numPages; i++) {
               const page = await pdf.getPage(i);
               const textContent = await page.getTextContent();
-              fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+              let pageText = textContent.items.map(item => item.str).join(" ");
+              
+              if (pageText.trim().length < 50) {
+                 setPdfPageInfo(`Running OCR on ${slot.name} (Page ${i}/${pdf.numPages})... This may take a moment.`);
+                 const Tesseract = await import('tesseract.js');
+                 const viewport = page.getViewport({ scale: 2.0 });
+                 const canvas = document.createElement("canvas");
+                 const context = canvas.getContext("2d");
+                 canvas.height = viewport.height;
+                 canvas.width = viewport.width;
+                 await page.render({ canvasContext: context, viewport }).promise;
+                 
+                 const dataUrl = canvas.toDataURL("image/png");
+                 const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
+                 pageText = text;
+              }
+              fullText += pageText + "\n";
             }
           } catch (pdfErr) {
             console.error("PDF parsing error:", pdfErr);

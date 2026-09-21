@@ -696,6 +696,7 @@ Extract ALL questions from the supplied PDF text with 100% precision.
 CRITICAL OCR & FORMATTING RULES:
 - The input text may be messy due to PDF OCR. Sentences might be broken across lines.
 - YOU MUST reconstruct broken sentences into a single continuous "question_text".
+- Fix common OCR typos intelligently (e.g., mistaking '0' for 'O', '1' for 'I' or 'l', or garbled symbols in mathematical equations).
 - DO NOT mistake words starting with "A", "B", "C" as option letters unless they are clearly formatted as options (e.g. "A)", "(A)", "a.", "1.").
 - IGNORE document titles (e.g. "Chapter 3"), headers, footers, page numbers, and watermarks (e.g. "Ken Academy", "Tg : NextGenBankers").
 - ONLY extract actual valid questions that have options. If a block of text is just a title or introduction without options, DO NOT extract it as a question.
