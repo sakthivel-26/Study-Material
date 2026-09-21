@@ -1314,8 +1314,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       <FileUp size={32} className="text-emerald-600" />
                     </div>
                     <div>
-                      <p className="font-bold text-ink text-sm">Drop your Previous Year Question Paper PDF here</p>
-                      <p className="text-xs text-ink-muted mt-1">or click to browse · Supports IBPS, SBI, TNPSC, SSC question papers</p>
+                      <p className="font-bold text-ink text-sm">Drop your Previous Year Question Paper PDF or Word Document here</p>
+                      <p className="text-xs text-ink-muted mt-1">or click to browse · Supports IBPS, SBI, TNPSC, SSC question papers in .pdf or .docx format</p>
                     </div>
                     {pdfFile && (
                       <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white rounded-xl text-xs text-ink-soft border border-black/5 font-semibold">
