@@ -704,6 +704,7 @@ CRITICAL OCR & FORMATTING RULES:
 - Example of bad parsing: Question="Simple interest on", Option A="A certain sum at...". This is WRONG! Reconstruct the full sentence.
 
 - DO NOT SKIP ANY QUESTIONS! Extract EVERY SINGLE QUESTION present in the chunk. Even if the option formatting is inconsistent, missing, or the OCR text is garbled, YOU MUST extract the question. Never silently drop a question just because parsing is difficult.
+- CRITICAL: DO NOT GROUP MULTIPLE QUESTIONS INTO ONE! If there are 10 questions in a section, you MUST output 10 separate JSON objects. Separate every distinct question (e.g. 1., 2., 3.) into its own JSON object in the "questions" array.
 - Process the ENTIRE chunk from start to finish. Ensure no questions are left behind.
 
 INSTRUCTIONS:
