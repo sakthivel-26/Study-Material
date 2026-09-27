@@ -423,7 +423,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         question: approvalStatus?.questionText ?? (q.question_text || q.question || `Question ${idx + 1}`),
         options: optsArray,
         correctAnswerIndex: ansIndex < optsArray.length ? ansIndex : 0,
-        explanation: q.verification_explanation || "Verified by teacher."
+        explanation: approvalStatus?.solutionText ?? (q.solutionText || q.verification_explanation || "Verified by teacher.")
       });
     });
 
@@ -980,6 +980,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       }));
     };
     reader.readAsDataURL(file);
+  };
+
+  const editSolutionText = (idx, text) => {
+    setApprovedQuestions(prev => ({
+      ...prev,
+      [idx]: {
+        ...prev[idx],
+        solutionText: text
+      }
+    }));
   };
 
   const approveAllVerified = (e) => {
@@ -1563,6 +1573,19 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         </button>
                       </div>
 
+                      {/* Paragraph Context (Optional) */}
+                      <div>
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">
+                          Paragraph / Passage Directions Context (Optional):
+                        </label>
+                        <textarea
+                          className="input text-xs min-h-[60px] bg-white border border-black/10 mb-2"
+                          placeholder="Paragraph Context (Optional) - e.g. Read the following passage..."
+                          value={approvedQuestions[idx]?.passage ?? (q.passage || "")}
+                          onChange={(e) => editPassage(idx, e.target.value)}
+                        />
+                      </div>
+
                       {/* Question Statement */}
                       <div>
                         <label className="text-[11px] font-bold text-ink-muted mb-1 block">Question Statement</label>
@@ -1666,18 +1689,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         </div>
                       </div>
 
-                      {/* Paragraph Context (Optional) */}
-                      <div>
-                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">
-                          Paragraph / Passage Directions Context (Optional):
-                        </label>
-                        <textarea
-                          className="input text-xs min-h-[60px] bg-white border border-black/10"
-                          placeholder="Paragraph Context (Optional) - e.g. Read the following passage..."
-                          value={approvedQuestions[idx]?.passage ?? (q.passage || "")}
-                          onChange={(e) => editPassage(idx, e.target.value)}
-                        />
-                      </div>
+
 
                       {/* Image Preview & Attachment */}
                       {approvedQuestions[idx]?.imageUrl && (
@@ -1720,6 +1732,19 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           <Upload size={13} /> {approvedQuestions[idx]?.solutionImageUrl ? "Change Solution Image" : "Attach Solution Image"}
                           <input type="file" accept="image/*" className="hidden" onChange={(e) => attachSolutionImageToQuestion(idx, e.target.files[0])} />
                         </label>
+                      </div>
+
+                      {/* Solution Text */}
+                      <div className="mt-2">
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">
+                          Answer / Solution Explanation (Optional):
+                        </label>
+                        <textarea
+                          className="input text-xs min-h-[60px] bg-white border border-black/10"
+                          placeholder="Enter solution explanation..."
+                          value={approvedQuestions[idx]?.solutionText ?? (q.solutionText || "")}
+                          onChange={(e) => editSolutionText(idx, e.target.value)}
+                        />
                       </div>
 
                     </div>
@@ -1869,6 +1894,19 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       </button>
                     </div>
 
+                    {/* Paragraph Context */}
+                    <div>
+                      <label className="text-xs font-bold text-ink-muted mb-1 block">
+                        Paragraph / Passage Directions Context (Optional):
+                      </label>
+                      <textarea
+                        className="input text-xs min-h-[70px] bg-white border border-black/10 p-2.5 mb-3"
+                        placeholder="Paragraph Context (Optional) - e.g. Read the following passage..."
+                        value={approvedQuestions[idx]?.passage ?? (q.passage || "")}
+                        onChange={(e) => editPassage(idx, e.target.value)}
+                      />
+                    </div>
+
                     {/* Question Statement */}
                     <div>
                       <label className="text-xs font-bold text-ink-muted mb-1 block">Question Statement</label>
@@ -1973,18 +2011,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       </div>
                     </div>
 
-                    {/* Paragraph Context */}
-                    <div>
-                      <label className="text-xs font-bold text-ink-muted mb-1 block">
-                        Paragraph / Passage Directions Context (Optional):
-                      </label>
-                      <textarea
-                        className="input text-xs min-h-[70px] bg-white border border-black/10 p-2.5"
-                        placeholder="Paragraph Context (Optional) - e.g. Read the following passage..."
-                        value={approvedQuestions[idx]?.passage ?? (q.passage || "")}
-                        onChange={(e) => editPassage(idx, e.target.value)}
-                      />
-                    </div>
+
 
                     {/* Image Preview & Attachment */}
                     {approvedQuestions[idx]?.imageUrl && (
@@ -2005,6 +2032,41 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         <Upload size={14} /> {approvedQuestions[idx]?.imageUrl ? "Change Chart/Image" : "Attach Chart/Image"}
                         <input type="file" accept="image/*" className="hidden" onChange={(e) => attachImageToQuestion(idx, e.target.files[0])} />
                       </label>
+                    </div>
+
+                    {/* Solution Image Attachment */}
+                    {approvedQuestions[idx]?.solutionImageUrl && (
+                      <div className="mt-4 relative max-w-md rounded-xl overflow-hidden border border-black/10 bg-white p-2">
+                        <p className="text-xs font-bold text-ink-muted mb-1 block">Solution Image Preview:</p>
+                        <img src={approvedQuestions[idx].solutionImageUrl} alt="Solution" className="w-full h-auto object-contain max-h-60" />
+                        <button 
+                          type="button"
+                          className="absolute top-2 right-2 bg-rose-600 text-white rounded-lg p-1.5 shadow-md"
+                          onClick={() => attachSolutionImageToQuestion(idx, null)}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-1 mt-2">
+                      <label className="btn-soft px-3.5 py-2 text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 cursor-pointer flex items-center gap-1.5 font-bold rounded-xl border border-emerald-200">
+                        <Upload size={14} /> {approvedQuestions[idx]?.solutionImageUrl ? "Change Solution Image" : "Attach Solution Image"}
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => attachSolutionImageToQuestion(idx, e.target.files[0])} />
+                      </label>
+                    </div>
+
+                    {/* Solution Text */}
+                    <div className="mt-4">
+                      <label className="text-xs font-bold text-ink-muted mb-1 block">
+                        Answer / Solution Explanation (Optional):
+                      </label>
+                      <textarea
+                        className="input text-xs min-h-[70px] bg-white border border-black/10 p-2.5"
+                        placeholder="Enter detailed solution explanation..."
+                        value={approvedQuestions[idx]?.solutionText ?? (q.solutionText || "")}
+                        onChange={(e) => editSolutionText(idx, e.target.value)}
+                      />
                     </div>
 
                   </div>
