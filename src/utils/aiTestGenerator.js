@@ -424,7 +424,7 @@ export async function generateAIMockTest({ category, subject, topic, questionsCo
     questions = await callLLMChain(prompt);
   } catch (err) {
     errors.push(`Backend AI: ${err.message}`);
-    throw new Error("AI question generation failed.");
+    console.warn("AI generation failed, proceeding to fallback generator.");
   }
 
   if (!questions || questions.length === 0) {
