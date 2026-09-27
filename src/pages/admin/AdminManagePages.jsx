@@ -14,6 +14,18 @@ import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
 
 /* ---------------------------- Create Mock Test ---------------------------- */
+import CategoryGrid from "../../components/CategoryGrid.jsx";
+
+const getAnswerIndex = (val) => {
+  if (val == null) return 0;
+  if (typeof val === 'number') return val;
+  const strVal = String(val).trim();
+  if (!isNaN(strVal) && strVal !== '') return parseInt(strVal, 10);
+  const code = strVal.toUpperCase().charCodeAt(0);
+  if (code >= 65 && code <= 90) return code - 65;
+  return 0;
+};
+
 export function CreateMockTestPage({ isFreeByDefault = false }) {
   const { mockTests = [], addMockTest, updateMockTest, deleteMockTest, pushToast } = useApp();
   const [mode, setMode] = useState("ai"); // "ai" | "manual" | "pdf"
@@ -405,8 +417,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         return;
       }
 
-      const finalLetter = approvalStatus?.editedAnswer || q.ai_verified_answer || q.source_answer || "A";
-      const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
+      const finalLetter = approvalStatus?.editedAnswer ?? q.ai_verified_answer ?? q.source_answer ?? "A";
+      const ansIndex = getAnswerIndex(finalLetter);
 
       // Merge options (whether array or object)
       let optsArray = [];
@@ -837,8 +849,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       // PHASE 2: Save Immediately
       const finalQuestions = [];
       result.rawExtractedQuestions.forEach((q, idx) => {
-          const finalLetter = q.source_answer || "A";
-          const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
+          const finalLetter = q.source_answer ?? "A";
+          const ansIndex = getAnswerIndex(finalLetter);
           const optKeys = Object.keys(q.options || {}).sort();
           const optionsArray = optKeys.length > 0 
             ? optKeys.map(k => q.options[k]) 
@@ -1573,7 +1585,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
               <div className="max-h-[75vh] md:max-h-[850px] overflow-y-auto space-y-4 pr-1">
                 {generatedTest.rawExtractedQuestions?.map((q, idx) => {
-                  const finalAnswer = approvedQuestions[idx]?.editedAnswer || q.ai_verified_answer || q.source_answer || "A";
+                  const finalAnswerRaw = approvedQuestions[idx]?.editedAnswer ?? q.ai_verified_answer ?? q.source_answer ?? "A";
+                  const finalAnswerIndex = getAnswerIndex(finalAnswerRaw);
 
                   return (
                     <div key={idx} className="p-4 rounded-xl border-2 border-black/10 bg-slate-50/50 space-y-3 relative">
@@ -1663,13 +1676,14 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                         <div className="grid sm:grid-cols-2 gap-2">
                           {Object.entries(q.options || {}).map(([key, opt]) => {
-                            const isRight = key === finalAnswer;
+                            const optIndex = getAnswerIndex(key);
+                            const isRight = optIndex === finalAnswerIndex;
                             const label = !isNaN(key) && key.trim() !== '' ? String.fromCharCode(65 + parseInt(key)) : key;
                             return (
                               <div
                                 key={key}
                                 onClick={() => {
-                                  editCorrectAnswer(idx, key);
+                                  editCorrectAnswer(idx, String(optIndex));
                                   toggleApproveQuestion(idx, true);
                                 }}
                                 className={`flex items-center gap-2 p-2 rounded-xl border transition-all cursor-pointer ${
@@ -1894,7 +1908,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             {/* Scrollable Questions Container */}
             <div className="p-6 overflow-y-auto space-y-5 flex-1 bg-slate-50">
               {generatedTest.rawExtractedQuestions?.map((q, idx) => {
-                const finalAnswer = approvedQuestions[idx]?.editedAnswer || q.ai_verified_answer || q.source_answer || "A";
+                const finalAnswerRaw = approvedQuestions[idx]?.editedAnswer ?? q.ai_verified_answer ?? q.source_answer ?? "A";
+                const finalAnswerIndex = getAnswerIndex(finalAnswerRaw);
 
                 return (
                   <div key={idx} className="p-5 rounded-2xl border-2 border-black/10 bg-white space-y-4 shadow-sm relative hover:border-brand-200 transition-colors">
@@ -1984,13 +1999,14 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                       <div className="flex flex-col gap-3">
                         {Object.entries(q.options || {}).map(([key, opt]) => {
-                          const isRight = key === finalAnswer;
+                          const optIndex = getAnswerIndex(key);
+                          const isRight = optIndex === finalAnswerIndex;
                           const label = !isNaN(key) && key.trim() !== '' ? String.fromCharCode(65 + parseInt(key)) : key;
                           return (
                             <div
                               key={key}
                               onClick={() => {
-                                editCorrectAnswer(idx, key);
+                                editCorrectAnswer(idx, String(optIndex));
                                 toggleApproveQuestion(idx, true);
                               }}
                               className={`flex items-center gap-2.5 p-3 rounded-2xl border-2 transition-all cursor-pointer ${
