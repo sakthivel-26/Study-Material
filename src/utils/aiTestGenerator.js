@@ -844,7 +844,11 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
           console.log(`[AI] Chunk ${index + 1}: No valid questions parsed. Retrying...`);
         }
       } catch (err) {
-        if (err.message.includes("max_tokens reached") || err.message.includes("json_validate_failed") || err.message.includes("Failed to validate JSON")) {
+        if (err.message.includes("429") || err.message.includes("rate_limit")) {
+          console.warn(`[AI] Rate limit hit on Chunk ${index + 1}. Waiting 15 seconds before retrying...`);
+          await new Promise(r => setTimeout(r, 15000));
+          continue; // Retry same limit
+        } else if (err.message.includes("max_tokens reached") || err.message.includes("json_validate_failed") || err.message.includes("Failed to validate JSON")) {
           console.log(`[AI] Groq response truncated or JSON invalid on Chunk ${index + 1} with limit ${limit}`);
         } else {
           console.warn(`[AI] Chunk ${index + 1} extraction failed:`, err);
