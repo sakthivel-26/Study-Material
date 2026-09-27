@@ -686,10 +686,10 @@ async function callGroq(apiKey, prompt) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "openai/gpt-oss-20b",
+      model: "llama-3.1-8b-instant",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.1,
-      max_tokens: 4000,
+      max_tokens: 8000,
     }),
   });
 
@@ -814,7 +814,8 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   async function processChunk(chunk, index) {
     if (signal?.aborted) throw new Error("Extraction cancelled by user.");
     let chunkQuestions = [];
-    const limits = [10, 5, 3];
+    // Lower limits to prevent max_tokens truncation (since we added step-by-step explanations)
+    const limits = [6, 3, 2];
     let currentLimitIndex = 0;
 
     while (currentLimitIndex < limits.length) {
