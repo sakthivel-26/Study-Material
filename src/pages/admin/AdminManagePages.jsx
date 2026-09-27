@@ -1207,7 +1207,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         Time elapsed: {extractionElapsed}s {extractionElapsed > 15 && "(Processing text with LLM model)"}
                       </p>
                     )}
-                    {pdfStatus === "extracting" && (
+                    {(pdfStatus === "extracting" || pdfStatus === "analyzing") && (
                       <button
                         type="button"
                         onClick={(e) => {
