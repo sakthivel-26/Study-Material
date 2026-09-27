@@ -36,6 +36,17 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [keyType, setKeyType] = useState(() => localStorage.getItem("LLM_PROVIDER_TYPE") || "gemini");
   const [pdfExtractionMethod, setPdfExtractionMethod] = useState("ai"); // "ai" | "regex"
   const [bulkAddCount, setBulkAddCount] = useState(1);
+  const abortControllerRef = useRef(null);
+
+  const cancelExtraction = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      setPdfStatus("error");
+      setPdfPageInfo("Extraction cancelled by user.");
+      setExtractionProgress("");
+      pushToast("Extraction cancelled.");
+    }
+  };
 
   const saveLLMKey = () => {
     if (!apiKey.trim()) {
@@ -766,12 +777,14 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       try {
         if (pdfExtractionMethod === "ai") {
           try {
+            abortControllerRef.current = new AbortController();
             const aiResult = await generateMockTestFromPDF({
               pdfText: fullText,
               category: f.category,
               timeLimit: f.time,
               title: f.title,
-              onProgress: (done, total) => setPdfPageInfo(`AI LLM extracting questions (Chunk ${done}/${total})...`)
+              onProgress: (done, total) => setPdfPageInfo(`AI LLM extracting questions (Chunk ${done}/${total})...`),
+              signal: abortControllerRef.current.signal
             });
             if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
               const maxQ = parseInt(f.questions) || 100;
@@ -779,6 +792,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               llmSuccess = true;
             }
           } catch (aiErr) {
+            if (aiErr.message.includes("cancelled")) {
+              throw aiErr;
+            }
             console.warn("AI LLM Extraction warning, using local regex parser fallback...", aiErr);
             pushToast(`⚠️ AI LLM Notice: ${aiErr.message || "Model response fallback"}`);
             extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", f.questions || 100);
@@ -788,6 +804,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", f.questions || 100);
         }
       } catch (err) {
+        if (err.message.includes("cancelled")) throw err;
         console.error("Local parser error:", err);
       }
 
@@ -1177,6 +1194,18 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       <p className="text-[10px] font-semibold text-emerald-600 mt-1">
                         Time elapsed: {extractionElapsed}s {extractionElapsed > 15 && "(Processing text with LLM model)"}
                       </p>
+                    )}
+                    {pdfStatus === "extracting" && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          cancelExtraction();
+                        }}
+                        className="mt-4 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-xl border border-rose-200 transition-colors"
+                      >
+                        Cancel Extraction
+                      </button>
                     )}
                   </div>
                 ) : pdfStatus === "done" ? (

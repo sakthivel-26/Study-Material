@@ -798,7 +798,7 @@ function regexExtractQuestions(pdfText, category) {
   return uniqueQuestions;
 }
 
-export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "60 min", title, onProgress }) {
+export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "60 min", title, onProgress, signal }) {
   if (!pdfText || pdfText.trim().length < 50) {
     throw new Error("PDF text content is too short or empty. Please upload a valid question paper PDF.");
   }
@@ -812,6 +812,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   const CONCURRENCY = 1;
 
   async function processChunk(chunk, index) {
+    if (signal?.aborted) throw new Error("Extraction cancelled by user.");
     let chunkQuestions = [];
     const limits = [10, 5, 3];
     let currentLimitIndex = 0;
@@ -879,6 +880,10 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   async function worker() {
     while (currentIndex < chunks.length) {
       if (extractionError) break; // Abort if critical error occurred
+      if (signal?.aborted) {
+        extractionError = new Error("Extraction cancelled by user.");
+        break;
+      }
       const idx = currentIndex++;
       try {
         await processChunk(chunks[idx], idx);
@@ -888,7 +893,15 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
       }
       if (currentIndex < chunks.length && !extractionError) {
         // Wait 22 seconds between chunks to respect Groq's 8000 TPM limit
-        await new Promise(r => setTimeout(r, 22000));
+        let waitTime = 0;
+        while (waitTime < 22000) {
+          if (signal?.aborted) {
+            extractionError = new Error("Extraction cancelled by user.");
+            break;
+          }
+          await new Promise(r => setTimeout(r, 1000));
+          waitTime += 1000;
+        }
       }
     }
   }
