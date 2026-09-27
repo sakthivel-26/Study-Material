@@ -9,14 +9,19 @@
 // 5. Fallback Procedural Generators (Strictly Isolated Categories)
 // ------------------------------------------------------------------
 
-const getEnvKey = (key) => import.meta.env[key] || localStorage.getItem(key) || "";
+const getEnvKey = (key) => {
+  if (typeof process !== "undefined" && process.env && process.env[key]) return process.env[key];
+  try { if (import.meta && import.meta.env && import.meta.env[key]) return import.meta.env[key]; } catch (e) {}
+  if (typeof localStorage !== "undefined") return localStorage.getItem(key) || "";
+  return "";
+};
 
 const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
 
 // Strict JSON prompt generator for Indian Competitive Exams
-const buildPrompt = (category, questionsCount) => {
+const buildPrompt = (category, subject, topic, questionsCount) => {
   if (category === "Speed Math (Simplification)") {
     return `You are a strict math problem generator. Generate EXACTLY ${questionsCount} Speed Math Simplification questions.
 Questions MUST be raw mathematical equations (e.g. "45% of 600 + 15 = ?", "12² - 8² = ?", "15 × 8 + 40 ÷ 8 = ?").
@@ -32,7 +37,7 @@ Return ONLY raw valid JSON array of objects without markdown formatting or backt
   }
 ]`;
   }
-  
+
   if (category === "Speed Math (Approximation)") {
     return `You are a strict math problem generator. Generate EXACTLY ${questionsCount} Speed Math Approximation questions.
 Questions MUST involve decimals where the user must approximate to the nearest integer (e.g. "14.98 + 25.02 - 9.99 = ?", "45.01% of 599.98 = ?").
@@ -50,12 +55,16 @@ Return ONLY raw valid JSON array of objects without markdown formatting or backt
   }
 
   return `You are a senior Indian Competitive Exam Paper Setter. Generate an authentic past 5-year PYQ style mock test for '${category}'.
+${subject ? `\nREQUIRED SUBJECT: ${subject}` : ""}
+${topic ? `\nREQUIRED TOPIC: ${topic}` : ""}
 
 STRICT CATEGORY CONSTRAINTS:
 - If Category is 'Banking' or 'SBI PO / Clerk' or 'IBPS PO': Generate ONLY Quantitative Aptitude (Speed/DI/Work/Interest), Logical Reasoning (Puzzles/Coding/Directions), English Language, and Banking Awareness. DO NOT include state GK or general history.
 - If Category is 'TNPSC', generate ONLY TNPSC questions.
 - If Category is 'TNPSC', generate ONLY Tamil Nadu History, TN Freedom Struggle, TN Administration, and TNPSC Aptitude.
 - If Category is 'SSC', generate ONLY SSC Algebra, Reasoning analogies, and Science/General Awareness.
+
+${subject || topic ? `CRITICAL INSTRUCTION: You MUST generate questions ONLY for the REQUIRED SUBJECT and REQUIRED TOPIC provided above. Do NOT generate mixed subjects or topics. For example, if Topic is 'Simplification', generate ONLY simplification questions.` : ""}
 
 Generate EXACTLY ${questionsCount} questions.
 Return ONLY raw valid JSON array of objects without markdown formatting or backticks:
@@ -232,7 +241,7 @@ async function callNvidia(apiKey, prompt, model = "nvidia/nemotron-3-nano-30b-a3
     }
     const data = await response.json();
     const text = data.choices?.[0]?.message?.content || "{}";
-    
+
     // Clean markdown fences if present
     const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
     const jsonStart = cleaned.indexOf("[");
@@ -403,92 +412,19 @@ const SSC_POOL = [
 // ------------------------------------------------------------------
 // Main Entrypoint supporting Gemma-7B, Gemini, OpenAI, DeepSeek & Fallbacks
 // ------------------------------------------------------------------
-export async function generateAIMockTest({ category, questionsCount = 10, timeLimit = "30 min" }) {
+export async function generateAIMockTest({ category, subject, topic, questionsCount = 10, timeLimit = "30 min" }) {
   let questions = [];
-  const prompt = buildPrompt(category, questionsCount);
-
-  const openRouterKey = getEnvKey("VITE_OPENROUTER_API_KEY") || getEnvKey("OPENROUTER_API_KEY");
-  const openRouterModel = "openrouter/free"; // Hardcoded to bypass deprecated env variables
-  const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
-  const nvidiaModel = getEnvKey("VITE_NVIDIA_MODEL") || "nvidia/nemotron-ocr-v2";
-  const gemmaKey = getEnvKey("VITE_GEMMA_API_KEY") || getEnvKey("GEMMA_API_KEY");
-  const gemmaEndpoint = getEnvKey("VITE_GEMMA_ENDPOINT") || getEnvKey("GEMMA_ENDPOINT");
-  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
-  const openAIKey = getEnvKey("VITE_OPENAI_API_KEY") || getEnvKey("OPENAI_API_KEY");
-  const deepSeekKey = getEnvKey("VITE_DEEPSEEK_API_KEY") || getEnvKey("DEEPSEEK_API_KEY");
+  const prompt = buildPrompt(category, subject, topic, questionsCount);
 
   const errors = [];
 
-  // 0. Try NVIDIA LLM
-  if (nvidiaKey) {
-    try {
-      console.log(`🤖 Generating mock test via NVIDIA (${nvidiaModel})...`);
-      questions = await callNvidia(nvidiaKey, prompt, nvidiaModel);
-    } catch (err) {
-      errors.push(`NVIDIA: ${err.message}`);
-    }
-  } else {
-    errors.push("NVIDIA: no API key configured");
-  }
-
-  // 1. Try OpenRouter (openrouter/free)
-  if ((!questions || questions.length === 0) && openRouterKey) {
-    try {
-      console.log(`🤖 Generating mock test via OpenRouter (${openRouterModel})...`);
-      questions = await callOpenRouter(openRouterKey, prompt, openRouterModel);
-    } catch (err) {
-      errors.push(`OpenRouter: ${err.message}`);
-    }
-  } else if (!openRouterKey) {
-    errors.push("OpenRouter: no API key configured");
-  }
-
-  // 2. Try Google Gemma (HuggingFace / Groq / Ollama)
-  if ((!questions || questions.length === 0) && (gemmaKey || gemmaEndpoint)) {
-    try {
-      console.log("🤖 Generating mock test via Google Gemma...");
-      questions = await callGemma7B(gemmaKey, prompt, gemmaEndpoint);
-    } catch (err) {
-      errors.push(`Gemma: ${err.message}`);
-    }
-  } else if (!gemmaKey && !gemmaEndpoint) {
-    errors.push("Gemma: no API key configured");
-  }
-
-  // 2. Try Google Gemini LLM
-  if ((!questions || questions.length === 0) && geminiKey) {
-    try {
-      console.log("🤖 Generating mock test via Google Gemini API...");
-      questions = await callGemini(geminiKey, prompt);
-    } catch (err) {
-      errors.push(`Gemini: ${err.message}`);
-    }
-  } else if (!geminiKey) {
-    errors.push("Gemini: no API key configured");
-  }
-
-  // 3. Try OpenAI LLM
-  if ((!questions || questions.length === 0) && openAIKey) {
-    try {
-      console.log("🤖 Generating mock test via OpenAI ChatGPT API...");
-      questions = await callOpenAI(openAIKey, prompt);
-    } catch (err) {
-      errors.push(`OpenAI: ${err.message}`);
-    }
-  } else if (!openAIKey) {
-    errors.push("OpenAI: no API key configured");
-  }
-
-  // 4. Try DeepSeek LLM
-  if ((!questions || questions.length === 0) && deepSeekKey) {
-    try {
-      console.log("🤖 Generating mock test via DeepSeek API...");
-      questions = await callDeepSeek(deepSeekKey, prompt);
-    } catch (err) {
-      errors.push(`DeepSeek: ${err.message}`);
-    }
-  } else if (!deepSeekKey) {
-    errors.push("DeepSeek: no API key configured");
+  // 1. Try AI LLM
+  try {
+    console.log("🤖 Generating mock test via AI...");
+    questions = await callLLMChain(prompt);
+  } catch (err) {
+    errors.push(`Backend AI: ${err.message}`);
+    throw new Error("AI question generation failed.");
   }
 
   if (!questions || questions.length === 0) {
@@ -496,144 +432,144 @@ export async function generateAIMockTest({ category, questionsCount = 10, timeLi
     // Proceeding to fallback generator automatically...
   }
 
-function genSpeedMathSimplification(idx) {
-  const type = idx % 5;
-  let qText = "", ansVal = 0, explanationText = "";
+  function genSpeedMathSimplification(idx) {
+    const type = idx % 5;
+    let qText = "", ansVal = 0, explanationText = "";
 
-  if (type === 0) {
-    const pct = pickRandom([15, 20, 25, 30, 40, 50, 60, 75]);
-    const base = pickRandom([200, 300, 400, 500, 600, 800, 1200]);
-    const add = pickRandom([25, 45, 50, 75, 100, 150]);
-    ansVal = (pct / 100) * base + add;
-    qText = `${pct}% of ${base} + ${add} = ?`;
-    explanationText = `${pct}% of ${base} = ${(pct / 100) * base}. Adding ${add}: ${(pct / 100) * base} + ${add} = ${ansVal}.`;
-  } else if (type === 1) {
-    const a = randInt(12, 25);
-    const b = randInt(5, 11);
-    const c = randInt(10, 50);
-    ansVal = (a * a) - (b * b) + c;
-    qText = `${a}² - ${b}² + ${c} = ?`;
-    explanationText = `${a}² = ${a*a}, ${b}² = ${b*b}. So ${a*a} - ${b*b} + ${c} = ${ansVal}.`;
-  } else if (type === 2) {
-    const a = randInt(12, 25);
-    const b = randInt(4, 15);
-    const d = pickRandom([4, 5, 8, 10]);
-    const multD = randInt(4, 20);
-    const c = d * multD;
-    ansVal = (a * b) + (c / d);
-    qText = `${a} × ${b} + ${c} ÷ ${d} = ?`;
-    explanationText = `${a} × ${b} = ${a*b}. ${c} ÷ ${d} = ${c/d}. Total = ${a*b} + ${c/d} = ${ansVal}.`;
-  } else if (type === 3) {
-    const roots = [
-      { sq: 400, r: 20 }, { sq: 576, r: 24 }, { sq: 625, r: 25 }, 
-      { sq: 784, r: 28 }, { sq: 900, r: 30 }, { sq: 1024, r: 32 }, 
-      { sq: 1296, r: 36 }, { sq: 1600, r: 40 }, { sq: 2025, r: 45 }
-    ];
-    const r1 = pickRandom(roots);
-    const r2 = pickRandom(roots);
-    const r3 = pickRandom([{ sq: 144, r: 12 }, { sq: 196, r: 14 }, { sq: 256, r: 16 }, { sq: 324, r: 18 }]);
-    ansVal = r1.r + r2.r - r3.r;
-    qText = `√${r1.sq} + √${r2.sq} - √${r3.sq} = ?`;
-    explanationText = `√${r1.sq} = ${r1.r}, √${r2.sq} = ${r2.r}, √${r3.sq} = ${r3.r}. ${r1.r} + ${r2.r} - ${r3.r} = ${ansVal}.`;
-  } else {
-    const b = pickRandom([3, 4, 5, 8]);
-    const multB = randInt(4, 15);
-    const a = b * multB;
-    const c = randInt(5, 12);
-    const d = randInt(15, 60);
-    ansVal = (a / b) * c + d;
-    qText = `(${a} ÷ ${b}) × ${c} + ${d} = ?`;
-    explanationText = `${a} ÷ ${b} = ${a/b}. ${(a/b)} × ${c} = ${(a/b)*c}. Adding ${d}: ${ansVal}.`;
+    if (type === 0) {
+      const pct = pickRandom([15, 20, 25, 30, 40, 50, 60, 75]);
+      const base = pickRandom([200, 300, 400, 500, 600, 800, 1200]);
+      const add = pickRandom([25, 45, 50, 75, 100, 150]);
+      ansVal = (pct / 100) * base + add;
+      qText = `${pct}% of ${base} + ${add} = ?`;
+      explanationText = `${pct}% of ${base} = ${(pct / 100) * base}. Adding ${add}: ${(pct / 100) * base} + ${add} = ${ansVal}.`;
+    } else if (type === 1) {
+      const a = randInt(12, 25);
+      const b = randInt(5, 11);
+      const c = randInt(10, 50);
+      ansVal = (a * a) - (b * b) + c;
+      qText = `${a}² - ${b}² + ${c} = ?`;
+      explanationText = `${a}² = ${a * a}, ${b}² = ${b * b}. So ${a * a} - ${b * b} + ${c} = ${ansVal}.`;
+    } else if (type === 2) {
+      const a = randInt(12, 25);
+      const b = randInt(4, 15);
+      const d = pickRandom([4, 5, 8, 10]);
+      const multD = randInt(4, 20);
+      const c = d * multD;
+      ansVal = (a * b) + (c / d);
+      qText = `${a} × ${b} + ${c} ÷ ${d} = ?`;
+      explanationText = `${a} × ${b} = ${a * b}. ${c} ÷ ${d} = ${c / d}. Total = ${a * b} + ${c / d} = ${ansVal}.`;
+    } else if (type === 3) {
+      const roots = [
+        { sq: 400, r: 20 }, { sq: 576, r: 24 }, { sq: 625, r: 25 },
+        { sq: 784, r: 28 }, { sq: 900, r: 30 }, { sq: 1024, r: 32 },
+        { sq: 1296, r: 36 }, { sq: 1600, r: 40 }, { sq: 2025, r: 45 }
+      ];
+      const r1 = pickRandom(roots);
+      const r2 = pickRandom(roots);
+      const r3 = pickRandom([{ sq: 144, r: 12 }, { sq: 196, r: 14 }, { sq: 256, r: 16 }, { sq: 324, r: 18 }]);
+      ansVal = r1.r + r2.r - r3.r;
+      qText = `√${r1.sq} + √${r2.sq} - √${r3.sq} = ?`;
+      explanationText = `√${r1.sq} = ${r1.r}, √${r2.sq} = ${r2.r}, √${r3.sq} = ${r3.r}. ${r1.r} + ${r2.r} - ${r3.r} = ${ansVal}.`;
+    } else {
+      const b = pickRandom([3, 4, 5, 8]);
+      const multB = randInt(4, 15);
+      const a = b * multB;
+      const c = randInt(5, 12);
+      const d = randInt(15, 60);
+      ansVal = (a / b) * c + d;
+      qText = `(${a} ÷ ${b}) × ${c} + ${d} = ?`;
+      explanationText = `${a} ÷ ${b} = ${a / b}. ${(a / b)} × ${c} = ${(a / b) * c}. Adding ${d}: ${ansVal}.`;
+    }
+
+    const distractors = new Set([ansVal]);
+    while (distractors.size < 4) {
+      const offset = pickRandom([-20, -10, -5, -2, 2, 5, 10, 20, 15, 25]);
+      const fake = ansVal + offset;
+      if (fake > 0) distractors.add(fake);
+    }
+
+    const optionsArr = shuffle(Array.from(distractors)).map(String);
+    const correctIdx = optionsArr.indexOf(String(ansVal));
+
+    return {
+      id: `simp_${idx}_${Date.now()}`,
+      section: "Simplification",
+      question: qText,
+      options: optionsArr,
+      correctAnswerIndex: correctIdx >= 0 ? correctIdx : 0,
+      explanation: explanationText
+    };
   }
 
-  const distractors = new Set([ansVal]);
-  while (distractors.size < 4) {
-    const offset = pickRandom([-20, -10, -5, -2, 2, 5, 10, 20, 15, 25]);
-    const fake = ansVal + offset;
-    if (fake > 0) distractors.add(fake);
+  function genSpeedMathApproximation(idx) {
+    const type = idx % 4;
+    let qText = "", ansVal = 0, explanationText = "";
+
+    if (type === 0) {
+      const a = randInt(14, 40) + 0.98;
+      const b = randInt(20, 50) + 0.02;
+      const c = randInt(5, 15) + 0.99;
+      const approxA = Math.round(a);
+      const approxB = Math.round(b);
+      const approxC = Math.round(c);
+      ansVal = approxA + approxB - approxC;
+      qText = `${a.toFixed(2)} + ${b.toFixed(2)} - ${c.toFixed(2)} ≈ ?`;
+      explanationText = `Approximating terms to integers: ${approxA} + ${approxB} - ${approxC} = ${ansVal}.`;
+    } else if (type === 1) {
+      const pctApprox = pickRandom([15, 20, 25, 30, 40, 50]);
+      const pct = pctApprox - 0.02;
+      const baseApprox = pickRandom([200, 300, 400, 500, 600, 800]);
+      const base = baseApprox - 0.02;
+      const addApprox = pickRandom([10, 15, 20, 30]);
+      const add = addApprox + 0.01;
+
+      ansVal = (pctApprox / 100) * baseApprox + addApprox;
+      qText = `${pct.toFixed(2)}% of ${base.toFixed(2)} + ${add.toFixed(2)} ≈ ?`;
+      explanationText = `Approximating: ${pctApprox}% of ${baseApprox} + ${addApprox} = ${(pctApprox / 100) * baseApprox} + ${addApprox} = ${ansVal}.`;
+    } else if (type === 2) {
+      const aApprox = randInt(12, 20);
+      const bApprox = randInt(4, 9);
+      const a = aApprox + 0.01;
+      const b = bApprox - 0.01;
+      ansVal = (aApprox * aApprox) - (bApprox * bApprox);
+      qText = `(${a.toFixed(2)})² - (${b.toFixed(2)})² ≈ ?`;
+      explanationText = `Approximating: ${aApprox}² - ${bApprox}² = ${aApprox * aApprox} - ${bApprox * bApprox} = ${ansVal}.`;
+    } else {
+      const roots = [
+        { sq: 399.98, approxSq: 400, r: 20 },
+        { sq: 575.95, approxSq: 576, r: 24 },
+        { sq: 624.99, approxSq: 625, r: 25 },
+        { sq: 783.97, approxSq: 784, r: 28 },
+        { sq: 899.96, approxSq: 900, r: 30 },
+        { sq: 1023.98, approxSq: 1024, r: 32 }
+      ];
+      const r1 = pickRandom(roots);
+      const r2 = pickRandom(roots);
+      ansVal = r1.r + r2.r;
+      qText = `√${r1.sq} + √${r2.sq} ≈ ?`;
+      explanationText = `Approximating: √${r1.approxSq} + √${r2.approxSq} = ${r1.r} + ${r2.r} = ${ansVal}.`;
+    }
+
+    const distractors = new Set([ansVal]);
+    while (distractors.size < 4) {
+      const offset = pickRandom([-10, -5, -2, -1, 1, 2, 5, 10]);
+      const fake = ansVal + offset;
+      if (fake > 0) distractors.add(fake);
+    }
+
+    const optionsArr = shuffle(Array.from(distractors)).map(String);
+    const correctIdx = optionsArr.indexOf(String(ansVal));
+
+    return {
+      id: `approx_${idx}_${Date.now()}`,
+      section: "Approximation",
+      question: qText,
+      options: optionsArr,
+      correctAnswerIndex: correctIdx >= 0 ? correctIdx : 0,
+      explanation: explanationText
+    };
   }
-
-  const optionsArr = shuffle(Array.from(distractors)).map(String);
-  const correctIdx = optionsArr.indexOf(String(ansVal));
-
-  return {
-    id: `simp_${idx}_${Date.now()}`,
-    section: "Simplification",
-    question: qText,
-    options: optionsArr,
-    correctAnswerIndex: correctIdx >= 0 ? correctIdx : 0,
-    explanation: explanationText
-  };
-}
-
-function genSpeedMathApproximation(idx) {
-  const type = idx % 4;
-  let qText = "", ansVal = 0, explanationText = "";
-
-  if (type === 0) {
-    const a = randInt(14, 40) + 0.98;
-    const b = randInt(20, 50) + 0.02;
-    const c = randInt(5, 15) + 0.99;
-    const approxA = Math.round(a);
-    const approxB = Math.round(b);
-    const approxC = Math.round(c);
-    ansVal = approxA + approxB - approxC;
-    qText = `${a.toFixed(2)} + ${b.toFixed(2)} - ${c.toFixed(2)} ≈ ?`;
-    explanationText = `Approximating terms to integers: ${approxA} + ${approxB} - ${approxC} = ${ansVal}.`;
-  } else if (type === 1) {
-    const pctApprox = pickRandom([15, 20, 25, 30, 40, 50]);
-    const pct = pctApprox - 0.02;
-    const baseApprox = pickRandom([200, 300, 400, 500, 600, 800]);
-    const base = baseApprox - 0.02;
-    const addApprox = pickRandom([10, 15, 20, 30]);
-    const add = addApprox + 0.01;
-    
-    ansVal = (pctApprox / 100) * baseApprox + addApprox;
-    qText = `${pct.toFixed(2)}% of ${base.toFixed(2)} + ${add.toFixed(2)} ≈ ?`;
-    explanationText = `Approximating: ${pctApprox}% of ${baseApprox} + ${addApprox} = ${(pctApprox/100)*baseApprox} + ${addApprox} = ${ansVal}.`;
-  } else if (type === 2) {
-    const aApprox = randInt(12, 20);
-    const bApprox = randInt(4, 9);
-    const a = aApprox + 0.01;
-    const b = bApprox - 0.01;
-    ansVal = (aApprox * aApprox) - (bApprox * bApprox);
-    qText = `(${a.toFixed(2)})² - (${b.toFixed(2)})² ≈ ?`;
-    explanationText = `Approximating: ${aApprox}² - ${bApprox}² = ${aApprox*aApprox} - ${bApprox*bApprox} = ${ansVal}.`;
-  } else {
-    const roots = [
-      { sq: 399.98, approxSq: 400, r: 20 },
-      { sq: 575.95, approxSq: 576, r: 24 },
-      { sq: 624.99, approxSq: 625, r: 25 },
-      { sq: 783.97, approxSq: 784, r: 28 },
-      { sq: 899.96, approxSq: 900, r: 30 },
-      { sq: 1023.98, approxSq: 1024, r: 32 }
-    ];
-    const r1 = pickRandom(roots);
-    const r2 = pickRandom(roots);
-    ansVal = r1.r + r2.r;
-    qText = `√${r1.sq} + √${r2.sq} ≈ ?`;
-    explanationText = `Approximating: √${r1.approxSq} + √${r2.approxSq} = ${r1.r} + ${r2.r} = ${ansVal}.`;
-  }
-
-  const distractors = new Set([ansVal]);
-  while (distractors.size < 4) {
-    const offset = pickRandom([-10, -5, -2, -1, 1, 2, 5, 10]);
-    const fake = ansVal + offset;
-    if (fake > 0) distractors.add(fake);
-  }
-
-  const optionsArr = shuffle(Array.from(distractors)).map(String);
-  const correctIdx = optionsArr.indexOf(String(ansVal));
-
-  return {
-    id: `approx_${idx}_${Date.now()}`,
-    section: "Approximation",
-    question: qText,
-    options: optionsArr,
-    correctAnswerIndex: correctIdx >= 0 ? correctIdx : 0,
-    explanation: explanationText
-  };
-}
 
   // 5. Fallback Category Generator
   if (!questions || questions.length === 0) {
@@ -690,56 +626,29 @@ function genSpeedMathApproximation(idx) {
 // Upload a PYQ paper PDF → AI extracts exact questions → Mock Test
 // ------------------------------------------------------------------
 
-const buildExtractionPrompt = (pdfChunk, category) => `You are a high-accuracy Indian Competitive Exam Question Extractor.
-Extract ALL questions from the supplied PDF text with 100% precision.
+const buildExtractionPrompt = (pdfChunk, limit) => `You are a strict data extractor. Extract exactly ${limit} questions from this text.
+Output a JSON object containing the extracted questions. No markdown, no explanations, no original text.
 
-CRITICAL OCR & FORMATTING RULES:
-- The input text may be messy due to PDF OCR. Sentences might be broken across lines.
-- YOU MUST reconstruct broken sentences into a single continuous "question_text".
-- Fix common OCR typos intelligently (e.g., mistaking '0' for 'O', '1' for 'I' or 'l', or garbled symbols in mathematical equations).
-- DO NOT mistake words starting with "A", "B", "C" as option letters unless they are clearly formatted as options (e.g. "A)", "(A)", "a.", "1.").
-- IGNORE document titles (e.g. "Chapter 3"), headers, footers, page numbers, and watermarks (e.g. "Ken Academy", "Tg : NextGenBankers").
-- ONLY extract actual valid questions that have options. If a block of text is just a title or introduction without options, DO NOT extract it as a question.
-- Example of bad parsing: Extracting "Chapter 3: Simple Interest" as a question. This is WRONG!
-- Example of bad parsing: Question="Simple interest on", Option A="A certain sum at...". This is WRONG! Reconstruct the full sentence.
-
-- DO NOT SKIP ANY QUESTIONS! Extract EVERY SINGLE QUESTION present in the chunk. Even if the option formatting is inconsistent, missing, or the OCR text is garbled, YOU MUST extract the question. Never silently drop a question just because parsing is difficult.
-- CRITICAL: DO NOT GROUP MULTIPLE QUESTIONS INTO ONE! If there are 10 questions in a section, you MUST output 10 separate JSON objects. Separate every distinct question (e.g. 1., 2., 3.) into its own JSON object in the "questions" array.
-- Process the ENTIRE chunk from start to finish. Ensure no questions are left behind.
-
-INSTRUCTIONS:
-1. "section": Subject section e.g. "Quantitative Aptitude", "Reasoning Ability", "English Language", "General Awareness", or "General".
-2. "passage": If there is a Reading Comprehension passage, Data Interpretation (DI) table context, or Directions (e.g. "Directions (Q. 1-5)..."), put it in the "passage" field.
-3. "question_text": The clean, reconstructed question statement (combine broken lines).
-4. "options": Key-value object for options A, B, C, D, E (e.g. {"A": "10", "B": "20", "C": "30", "D": "40"}). Extract exactly what the option says.
-5. "source_answer": Correct option letter e.g. "A", "B", "C", "D", "E". Solve the question if no answer key is present.
-6. "explanation": Brief step-by-step math solution or reasoning logic.
-
-Return ONLY a raw valid JSON object (no markdown fences):
+FORMAT:
 {
   "questions": [
     {
-      "section": "Quantitative Aptitude",
-      "passage": "Directions (Q. 1-5): Read the following table...",
-      "question_text": "What is the total number of items sold?",
-      "options": {
-        "A": "150",
-        "B": "200",
-        "C": "250",
-        "D": "300"
-      },
-      "source_answer": "C",
-      "explanation": "Sum = 100 + 150 = 250."
+      "question": "The question text here",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswerIndex": 0
     }
   ]
 }
 
-EXAM CATEGORY: ${category}
+RULES:
+- options must be exactly 4 strings.
+- correctAnswerIndex must be 0, 1, 2, or 3.
+- DO NOT generate explanations.
+- DO NOT include passage text.
 
-PDF CHUNK TEXT:
-"""
+TEXT:
 ${pdfChunk}
-"""`;
+`;
 
 const buildVerificationPrompt = (questionJson) => `You are an expert Indian Competitive Exam analyzer.
 Your job is to independently verify this extracted question and compare your answer with the source answer.
@@ -768,109 +677,54 @@ QUESTION DATA:
 ${JSON.stringify(questionJson, null, 2)}
 """`;
 
+async function callGroq(apiKey, prompt) {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "openai/gpt-oss-20b",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.1,
+      max_tokens: 1500,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw new Error(`Groq API Error (${response.status}): ${errText || response.statusText}`);
+  }
+
+  const data = await response.json();
+  const choice = data.choices?.[0];
+
+  if (choice?.finish_reason === "length") {
+    throw new Error("Groq API Error: Output truncated due to length (max_tokens reached).");
+  }
+
+  const text = choice?.message?.content || "{}";
+  const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+  const jsonStart = cleaned.indexOf("[");
+  const jsonEnd = cleaned.lastIndexOf("]");
+  
+  let parsed;
+  if (jsonStart !== -1 && jsonEnd !== -1) {
+    parsed = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+  } else {
+    parsed = JSON.parse(cleaned);
+  }
+  
+  return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed || [];
+}
+
 async function callLLMChain(prompt) {
-  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
-  const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY") || getEnvKey("VITE_GEMMA_API_KEY");
-  const openAIKey = getEnvKey("VITE_OPENAI_API_KEY") || getEnvKey("OPENAI_API_KEY");
-  const deepSeekKey = getEnvKey("VITE_DEEPSEEK_API_KEY") || getEnvKey("DEEPSEEK_API_KEY");
-
-  const openRouterKey = getEnvKey("VITE_OPENROUTER_API_KEY") || getEnvKey("OPENROUTER_API_KEY");
-  const openRouterModel = "openrouter/free"; // Hardcoded to bypass deprecated env variables
-
-  const errors = [];
-
-  // 1. Try OpenRouter if key exists
-  if (openRouterKey && openRouterKey !== "sk-or-v1-free") {
-    try {
-      return await callOpenRouter(openRouterKey, prompt, openRouterModel);
-    } catch (e) {
-      errors.push(`OpenRouter: ${e.message}`);
-    }
-  } else {
-    errors.push("OpenRouter: no API key configured");
+  const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY");
+  if (!groqKey) {
+    throw new Error("no API key configured");
   }
-
-  // 2. Try Gemini API if key exists
-  if (geminiKey) {
-    try {
-      return await callGemini(geminiKey, prompt);
-    } catch (e) {
-      errors.push(`Gemini: ${e.message}`);
-    }
-  } else {
-    errors.push("Gemini: no API key configured");
-  }
-
-  // 3. Try Groq / Gemma API if key exists
-  if (groqKey) {
-    try {
-      return await callNvidia(groqKey, prompt, "llama-3.3-70b-versatile");
-    } catch (e) {
-      errors.push(`Groq: ${e.message}`);
-    }
-  } else {
-    errors.push("Groq: no API key configured");
-  }
-
-  // 4. Try OpenAI if key exists
-  if (openAIKey) {
-    try {
-      return await callOpenAI(openAIKey, prompt);
-    } catch (e) {
-      errors.push(`OpenAI: ${e.message}`);
-    }
-  } else {
-    errors.push("OpenAI: no API key configured");
-  }
-
-  // 5. Try DeepSeek if key exists
-  if (deepSeekKey) {
-    try {
-      return await callDeepSeek(deepSeekKey, prompt);
-    } catch (e) {
-      errors.push(`DeepSeek: ${e.message}`);
-    }
-  } else {
-    errors.push("DeepSeek: no API key configured");
-  }
-
-  // 5. Try backend /api/chat
-  try {
-    const response = await fetch(`/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.success && data.text) {
-        const text = data.text;
-        const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-        const jsonStart = cleaned.indexOf("[");
-        const jsonEnd = cleaned.lastIndexOf("]");
-        if (jsonStart !== -1 && jsonEnd !== -1) {
-          return JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
-        }
-        const parsed = JSON.parse(cleaned);
-        return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed;
-      }
-    }
-    errors.push("Backend: response not successful or missing text");
-  } catch (err) {
-    errors.push(`Backend: ${err.message}`);
-  }
-
-  // 6. Try OpenRouter free tier fallback
-  try {
-    const openRouterKeyFallback = getEnvKey("VITE_OPENROUTER_API_KEY") || "sk-or-v1-free";
-    return await callOpenRouter(openRouterKeyFallback, prompt, "openrouter/free");
-  } catch (e) {
-    errors.push(`OpenRouter Free Fallback: ${e.message}`);
-  }
-
-  console.error("All AI providers failed during chunk extraction. Reasons:\n- " + errors.join("\n- "));
-  return [];
+  return await callGroq(groqKey, prompt);
 }
 
 /**
@@ -899,28 +753,28 @@ function regexExtractQuestions(pdfText, category) {
   const qRegex = /(?:^|\s)(?:Ques|Question|Q)[\s\.]*\d+\s*[\.\)]\s+|(?:^|\s)\d+\s*[\.\)]\s+(?=[A-Z])/i;
   const rawBlocks = cleanText.split(qRegex).filter(b => b.trim().length > 10);
   const uniqueQuestions = [];
-  
+
   for (let i = 0; i < rawBlocks.length; i++) {
     const block = rawBlocks[i];
     let qText = block;
     let options = ["Option A", "Option B", "Option C", "Option D"];
     const optRegex = /(?:\s|^)\(([a-eA-E])\)\s+|(?:\s|^)([a-eA-E])\)\s+|(?:\s|^)([a-eA-E])\.\s+/g;
     const matches = [...block.matchAll(optRegex)];
-    
+
     if (matches.length >= 2) {
       const firstOptIndex = matches[0].index;
       qText = block.substring(0, firstOptIndex).trim();
       const optValues = [];
       for (let j = 0; j < matches.length; j++) {
         const start = matches[j].index + matches[j][0].length;
-        const end = j + 1 < matches.length ? matches[j+1].index : block.length;
+        const end = j + 1 < matches.length ? matches[j + 1].index : block.length;
         optValues.push(block.substring(start, end).replace(/\n/g, ' ').trim());
       }
       options = [];
-      for(let k = 0; k < Math.min(optValues.length, 5); k++) {
+      for (let k = 0; k < Math.min(optValues.length, 5); k++) {
         options.push(optValues[k] || `Option ${String.fromCharCode(65 + k)}`);
       }
-      while(options.length < 4) {
+      while (options.length < 4) {
         options.push(`Option ${String.fromCharCode(65 + options.length)}`);
       }
     }
@@ -931,8 +785,8 @@ function regexExtractQuestions(pdfText, category) {
         question: qText,
         question_text: qText,
         options: options,
-        correctAnswerIndex: 0, 
-        source_answer: "A", 
+        correctAnswerIndex: 0,
+        source_answer: "A",
         passage: "",
         section: category || "General",
         explanation: "",
@@ -948,35 +802,64 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     throw new Error("PDF text content is too short or empty. Please upload a valid question paper PDF.");
   }
 
-  const chunks = chunkText(pdfText, 3500);
+  const chunks = chunkText(pdfText, 1500);
   let allQuestions = [];
   let completedChunks = 0;
-  
+
   if (onProgress) onProgress(0, chunks.length);
 
-  const CONCURRENCY = 4;
-  
+  const CONCURRENCY = 1;
+
   async function processChunk(chunk, index) {
     let chunkQuestions = [];
-    let retries = 0;
-    while (retries < 1 && (!chunkQuestions || chunkQuestions.length === 0)) {
+    const limits = [10, 5, 3];
+    let currentLimitIndex = 0;
+
+    while (currentLimitIndex < limits.length) {
+      const limit = limits[currentLimitIndex];
       try {
-        const prompt = buildExtractionPrompt(chunk, category);
-        chunkQuestions = await callLLMChain(prompt);
-        if (!Array.isArray(chunkQuestions)) {
-          if (chunkQuestions.questions) chunkQuestions = chunkQuestions.questions;
-          else chunkQuestions = [];
+        console.log(`[AI] Chunk ${index + 1}: Requesting ${limit} questions...`);
+        const prompt = buildExtractionPrompt(chunk, limit);
+        let response = await callLLMChain(prompt);
+        
+        let parsedQuestions = Array.isArray(response) ? response : (response.questions || []);
+        
+        // Strict Validation
+        parsedQuestions = parsedQuestions.filter(q => {
+          return q && 
+                 typeof q.question === "string" && 
+                 q.question.trim() !== "" &&
+                 Array.isArray(q.options) && 
+                 q.options.length === 4 &&
+                 typeof q.correctAnswerIndex === "number" && 
+                 q.correctAnswerIndex >= 0 && 
+                 q.correctAnswerIndex <= 3;
+        });
+
+        if (parsedQuestions.length > 0) {
+          console.log(`[AI] Success: ${parsedQuestions.length} questions from Chunk ${index + 1}`);
+          chunkQuestions = parsedQuestions;
+          break; // success
+        } else {
+          console.log(`[AI] Chunk ${index + 1}: No valid questions parsed. Retrying...`);
         }
       } catch (err) {
-        console.warn(`Chunk ${index+1} extraction failed on try ${retries+1}`, err);
+        if (err.message.includes("max_tokens reached") || err.message.includes("json_validate_failed") || err.message.includes("Failed to validate JSON")) {
+          console.log(`[AI] Groq response truncated or JSON invalid on Chunk ${index + 1} with limit ${limit}`);
+        } else {
+          console.warn(`[AI] Chunk ${index + 1} extraction failed:`, err);
+          break; // only retry on known recoverable errors
+        }
       }
-      retries++;
+      currentLimitIndex++;
     }
-    
-    if (chunkQuestions && chunkQuestions.length > 0) {
+
+    if (chunkQuestions.length > 0) {
       allQuestions.push(...chunkQuestions);
+    } else {
+       console.error(`[AI] Chunk ${index + 1} permanently failed.`);
     }
-    
+
     completedChunks++;
     if (onProgress) onProgress(completedChunks, chunks.length);
   }
@@ -987,51 +870,36 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     while (currentIndex < chunks.length) {
       const idx = currentIndex++;
       await processChunk(chunks[idx], idx);
+      if (currentIndex < chunks.length) {
+        // Wait 22 seconds between chunks to respect Groq's 8000 TPM limit
+        await new Promise(r => setTimeout(r, 22000));
+      }
     }
   }
 
   const workers = Array.from({ length: CONCURRENCY }, () => worker());
-  await Promise.all(workers);
+  await Promise.allSettled(workers);
 
   let uniqueQuestions = [];
   const seen = new Set();
-  
+
   for (const q of allQuestions) {
     const qText = q.question || q.question_text || "";
     const cleanQ = qText.trim().toLowerCase();
     if (cleanQ && !seen.has(cleanQ)) {
       seen.add(cleanQ);
-      let opts = [];
-      if (Array.isArray(q.options)) {
-        opts = q.options;
-      } else if (q.options && typeof q.options === "object") {
-        opts = Object.keys(q.options).sort().map(k => q.options[k]);
-      }
-      if (!opts || opts.length === 0) {
-        opts = ["Option A", "Option B", "Option C", "Option D"];
-      }
       
-      let correctIndex = 0;
-      if (typeof q.correctAnswerIndex === "number") {
-        correctIndex = q.correctAnswerIndex;
-      } else if (q.source_answer && typeof q.source_answer === "string") {
-        const code = q.source_answer.trim().toUpperCase().charCodeAt(0);
-        if (code >= 65 && code <= 71) {
-          correctIndex = code - 65;
-        }
-      }
-
       uniqueQuestions.push({
         id: q.id || `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
         question: qText,
         question_text: qText,
-        options: opts,
-        correctAnswerIndex: correctIndex,
-        source_answer: q.source_answer || String.fromCharCode(65 + correctIndex),
-        passage: q.passage || "",
-        section: q.section || category || "General",
-        explanation: q.explanation || "",
-        imageUrl: q.imageUrl || ""
+        options: q.options,
+        correctAnswerIndex: q.correctAnswerIndex,
+        source_answer: String.fromCharCode(65 + q.correctAnswerIndex),
+        passage: "",
+        section: category || "General",
+        explanation: "",
+        imageUrl: ""
       });
     }
   }
@@ -1076,7 +944,7 @@ export async function verifyQuestionsBackground(questions, onProgress) {
         try {
           const prompt = buildVerificationPrompt(q);
           const result = await callLLMChain(prompt);
-          
+
           // Result might be array of 1 or object
           const v = Array.isArray(result) ? result[0] : result;
           if (v && v.answer_status) {
@@ -1085,10 +953,10 @@ export async function verifyQuestionsBackground(questions, onProgress) {
             q.verification_explanation = v.verification_explanation;
             q.needs_review = v.needs_review;
           } else {
-             q.answer_status = q.source_answer ? "NEEDS_REVIEW" : "NO_SOURCE_ANSWER";
-             q.review_reason = q.source_answer
-               ? "Source answer retained. Automated verification did not return a result; review when convenient."
-               : "No answer key was found in the uploaded PDF.";
+            q.answer_status = q.source_answer ? "NEEDS_REVIEW" : "NO_SOURCE_ANSWER";
+            q.review_reason = q.source_answer
+              ? "Source answer retained. Automated verification did not return a result; review when convenient."
+              : "No answer key was found in the uploaded PDF.";
           }
         } catch (err) {
           // Do not block publishing a usable mock when the optional background
@@ -1103,7 +971,7 @@ export async function verifyQuestionsBackground(questions, onProgress) {
       completed++;
       if (onProgress) onProgress(completed, questions.length, verifiedQuestions);
     })();
-    
+
     activePromises.push(p);
     if (activePromises.length >= CONCURRENCY) {
       await Promise.all(activePromises);

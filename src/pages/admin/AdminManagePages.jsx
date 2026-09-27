@@ -195,12 +195,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   };
   const [extractionElapsed, setExtractionElapsed] = useState(0);
 
-  // 3-Section Full Mock State
-  const [multiPdfFiles, setMultiPdfFiles] = useState({
-    quants: { file: null, name: "Quantitative Aptitude", time: "20 min", count: 35 },
-    reasoning: { file: null, name: "Reasoning Ability", time: "20 min", count: 35 },
-    english: { file: null, name: "English Language", time: "20 min", count: 30 },
-  });
+
 
   useEffect(() => {
     let interval;
@@ -274,6 +269,37 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     );
   };
 
+  const handleOptionPaste = (e, qIdx, optIdx) => {
+    const pasteText = e.clipboardData.getData("text");
+    
+    // Check if it matches typical list formats like "(a) xyz (b) abc" or "A. xyz B. abc" or "1) xyz 2) abc"
+    const splitRegex = /(?:\([a-eA-E1-5]\)|[a-eA-E1-5][\.\)]|\b[A-E]\b[\.\)]?)\s+/;
+    const parts = pasteText.split(splitRegex).map(p => p.trim()).filter(p => p !== "");
+    
+    if (parts.length > 1) {
+      e.preventDefault();
+      setManualQuestions((prev) =>
+        prev.map((q, i) => {
+          if (i !== qIdx) return q;
+          const newOptions = [...q.options];
+          
+          let pIdx = 0;
+          for (let j = optIdx; j < optIdx + parts.length; j++) {
+            if (j < 5) { // Assuming max 5 options
+              if (j < newOptions.length) {
+                newOptions[j] = parts[pIdx];
+              } else {
+                newOptions.push(parts[pIdx]);
+              }
+            }
+            pIdx++;
+          }
+          return { ...q, options: newOptions };
+        })
+      );
+    }
+  };
+
   const addOptionToManual = (qIdx) => {
     setManualQuestions(prev => prev.map((q, i) => {
       if (i !== qIdx) return q;
@@ -332,6 +358,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     try {
       const result = await generateAIMockTest({
         category: f.category,
+        subject: f.subject,
+        topic: f.topic,
         questionsCount: +f.questions || 10,
         timeLimit: f.time,
       });
@@ -671,163 +699,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     return questions.slice(0, 200);
   };
 
-  const handleMultiPDFUpload = async () => {
-    const activeSlots = Object.values(multiPdfFiles).filter((s) => s.file);
-    if (activeSlots.length === 0) {
-      return pushToast("Please upload at least 1 section PDF (Quants, Reasoning, or English).");
-    }
 
-    setPdfStatus("extracting");
-    setPdfPageInfo("Processing multi-section PDFs...");
-    setGeneratedTest(null);
-    setApprovedQuestions({});
-
-    try {
-      setPdfStatus("analyzing");
-      setExtractionStartTime(Date.now());
-
-      if (!window.pdfjsLib) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
-          script.onload = resolve;
-          script.onerror = reject;
-          document.body.appendChild(script);
-        });
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
-      }
-
-      let combinedRawQuestions = [];
-      let totalTimeMinutes = 0;
-
-      for (const slot of activeSlots) {
-        setPdfPageInfo(`Extracting section: ${slot.name}...`);
-        const arrayBuffer = await slot.file.arrayBuffer();
-        
-        let fullText = "";
-        const isDocx = slot.file.name.toLowerCase().endsWith(".docx");
-
-        if (isDocx) {
-          if (!window.mammoth) {
-            await new Promise((resolve, reject) => {
-              const script = document.createElement("script");
-              script.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
-              script.onload = resolve;
-              script.onerror = reject;
-              document.body.appendChild(script);
-            });
-          }
-          const result = await window.mammoth.extractRawText({ arrayBuffer });
-          fullText = result.value;
-        } else {
-          try {
-            const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-            for (let i = 1; i <= pdf.numPages; i++) {
-              const page = await pdf.getPage(i);
-              const textContent = await page.getTextContent();
-              let pageText = textContent.items.map(item => item.str).join(" ");
-              
-              if (pageText.trim().length < 50) {
-                 setPdfPageInfo(`Running OCR on ${slot.name} (Page ${i}/${pdf.numPages})... This may take a moment.`);
-                 const Tesseract = await import('tesseract.js');
-                 const viewport = page.getViewport({ scale: 2.0 });
-                 const canvas = document.createElement("canvas");
-                 const context = canvas.getContext("2d");
-                 canvas.height = viewport.height;
-                 canvas.width = viewport.width;
-                 await page.render({ canvasContext: context, viewport }).promise;
-                 
-                 const dataUrl = canvas.toDataURL("image/png");
-                 const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
-                 pageText = text;
-              }
-              fullText += pageText + "\n";
-            }
-          } catch (pdfErr) {
-            console.error("PDF parsing error:", pdfErr);
-            throw new Error(`Failed to parse ${slot.file.name}. Ensure it's a valid PDF or Word document.`);
-          }
-        }
-
-        let sectionQuestions = [];
-        
-        if (pdfExtractionMethod === "ai") {
-          try {
-            const aiResult = await generateMockTestFromPDF({
-              pdfText: fullText,
-              category: f.category,
-              timeLimit: `${slot.time} min`,
-              title: slot.name,
-              onProgress: (done, total) => setPdfPageInfo(`AI LLM extracting ${slot.name} (Chunk ${done}/${total})...`)
-            });
-            if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
-              sectionQuestions = aiResult.rawExtractedQuestions;
-            } else {
-              sectionQuestions = parseQuestionsFromPDFText(fullText, slot.name, slot.count);
-            }
-          } catch (aiErr) {
-            console.warn(`AI LLM Extraction warning for ${slot.name}, using fallback...`, aiErr);
-            sectionQuestions = parseQuestionsFromPDFText(fullText, slot.name, slot.count);
-          }
-        } else {
-          sectionQuestions = parseQuestionsFromPDFText(fullText, slot.name, slot.count);
-        }
-
-        // Limit to target questions count
-        if (sectionQuestions.length > slot.count) {
-          sectionQuestions = sectionQuestions.slice(0, slot.count);
-        }
-
-        combinedRawQuestions.push(...sectionQuestions);
-        totalTimeMinutes += parseInt(slot.time) || 20;
-      }
-
-      if (combinedRawQuestions.length === 0) {
-        throw new Error("No questions could be extracted from the uploaded section PDFs.");
-      }
-
-      const result = {
-        title: f.title.trim() || `${f.category} Full Mock (3-Section)`,
-        category: f.category,
-        subject: "Full Mock",
-        topic: "All 3 Sections",
-        time: `${totalTimeMinutes} min`,
-        durationMinutes: totalTimeMinutes,
-        isSectionalTimed: true,
-        questions: combinedRawQuestions.length,
-        rawExtractedQuestions: combinedRawQuestions,
-        color,
-        isFree: f.isFree,
-      };
-
-      const finalQuestions = combinedRawQuestions.map((q, idx) => {
-        const finalLetter = q.source_answer || "A";
-        const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
-        const optKeys = Object.keys(q.options || {}).sort();
-        const optionsArray = optKeys.length > 0 ? optKeys.map(k => q.options[k]) : ["Option A", "Option B", "Option C", "Option D"];
-
-        return {
-          id: `pdf_q_${Date.now()}_${idx}`,
-          section: q.section || "General",
-          passage: q.passage || "",
-          question: q.question_text || `Question ${idx + 1}`,
-          options: optionsArray,
-          correctAnswerIndex: ansIndex < optionsArray.length ? ansIndex : 0,
-          explanation: q.explanation || "Verification pending."
-        };
-      });
-
-      const draftTest = { ...result, questionsList: finalQuestions, id: "draft_" + Date.now() };
-      setGeneratedTest(draftTest);
-      setPdfStatus("done");
-      pushToast(`✅ Multi-Section Mock extracted! ${combinedRawQuestions.length} questions ready to review.`);
-    } catch (err) {
-      console.error(err);
-      setPdfStatus("error");
-      setPdfPageInfo(err.message || "Error processing multi-section PDFs.");
-      pushToast(err.message || "Error processing multi-section PDFs.");
-    }
-  };
 
   const handlePDFUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -902,7 +774,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               onProgress: (done, total) => setPdfPageInfo(`AI LLM extracting questions (Chunk ${done}/${total})...`)
             });
             if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
-              extractedQuestions = aiResult.rawExtractedQuestions;
+              const maxQ = parseInt(f.questions) || 100;
+              extractedQuestions = aiResult.rawExtractedQuestions.slice(0, maxQ);
               llmSuccess = true;
             }
           } catch (aiErr) {
@@ -1152,12 +1025,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           >
             <FileUp size={16} className="text-emerald-600" /> 📄 Single PDF PYQ
           </button>
-          <button
-            onClick={() => setMode("multipdf")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === "multipdf" ? "bg-white shadow-card text-amber-700 font-bold" : "text-ink-muted hover:text-ink-soft"}`}
-          >
-            <FileUp size={16} className="text-amber-500" /> 🏆 Full 3-Section Mock (3 PDFs)
-          </button>
+
           <button
             onClick={() => setMode("manual")}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === "manual" ? "bg-white shadow-card text-brand-700" : "text-ink-muted hover:text-ink-soft"}`}
@@ -1167,7 +1035,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         </div>
       </div>
 
-      <div className={`grid gap-6 ${((mode === "pdf" || mode === "multipdf") && generatedTest) ? "grid-cols-1" : "lg:grid-cols-[1.2fr_1fr]"}`}>
+      <div className={`grid gap-6 ${(mode === "pdf" && generatedTest) ? "grid-cols-1" : "lg:grid-cols-[1.2fr_1fr]"}`}>
         {/* Left Form */}
         <div className="card p-6 space-y-5">
           <div className="flex items-center justify-between">
@@ -1339,109 +1207,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             </div>
           )}
 
-          {mode === "multipdf" && (
-            <div className="pt-4 border-t border-black/5 space-y-4">
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 leading-relaxed">
-                <p className="font-bold text-amber-950 text-sm mb-1">🏆 3-Section Full Mock Builder</p>
-                Upload individual section PDF papers below (e.g. Quants, Reasoning, English). The system will extract and combine them into a single Full Mock test with sectional timers.
-              </div>
 
-              <div className="space-y-3">
-                {[
-                  { key: "quants", title: "1. Quantitative Aptitude PDF", color: "border-blue-200 bg-blue-50/30" },
-                  { key: "reasoning", title: "2. Reasoning Ability PDF", color: "border-purple-200 bg-purple-50/30" },
-                  { key: "english", title: "3. English Language PDF", color: "border-emerald-200 bg-emerald-50/30" },
-                ].map((sec) => (
-                  <div key={sec.key} className={`border rounded-2xl p-4 ${sec.color} space-y-3`}>
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-ink text-xs">{sec.title}</span>
-                      {multiPdfFiles[sec.key].file && (
-                        <span className="text-[10px] bg-emerald-600 text-white font-bold px-2 py-0.5 rounded-full">✓ Loaded</span>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] font-semibold text-ink-muted block mb-1">Section Time</label>
-                        <input
-                          type="text"
-                          className="input text-xs py-1"
-                          value={multiPdfFiles[sec.key].time}
-                          onChange={(e) => setMultiPdfFiles(prev => ({
-                            ...prev,
-                            [sec.key]: { ...prev[sec.key], time: e.target.value }
-                          }))}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-ink-muted block mb-1">Target Questions</label>
-                        <input
-                          type="number"
-                          className="input text-xs py-1"
-                          value={multiPdfFiles[sec.key].count}
-                          onChange={(e) => setMultiPdfFiles(prev => ({
-                            ...prev,
-                            [sec.key]: { ...prev[sec.key], count: +e.target.value }
-                          }))}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <input
-                        type="file"
-                        accept=".pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        id={`multi_pdf_${sec.key}`}
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            setMultiPdfFiles(prev => ({
-                              ...prev,
-                              [sec.key]: { ...prev[sec.key], file }
-                            }));
-                          }
-                        }}
-                      />
-                      <label
-                        htmlFor={`multi_pdf_${sec.key}`}
-                        className="btn-soft w-full text-xs py-2 cursor-pointer flex items-center justify-center gap-1.5 bg-white border border-black/10 hover:bg-black/5 text-ink-soft font-semibold"
-                      >
-                        <FileUp size={14} className="text-brand-600" />
-                        {multiPdfFiles[sec.key].file ? multiPdfFiles[sec.key].file.name : `Select ${sec.title.split(" ")[1]} PDF`}
-                      </label>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex items-center justify-center gap-4 bg-white p-3 rounded-xl border border-black/5 mt-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="multiExtractionMethod" value="ai" checked={pdfExtractionMethod === "ai"} onChange={() => setPdfExtractionMethod("ai")} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
-                  <span className="text-xs font-bold text-ink">High Accuracy AI (Slower)</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="multiExtractionMethod" value="regex" checked={pdfExtractionMethod === "regex"} onChange={() => setPdfExtractionMethod("regex")} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
-                  <span className="text-xs font-bold text-ink">Fast Offline (Instant)</span>
-                </label>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleMultiPDFUpload}
-                disabled={pdfStatus === "extracting" || pdfStatus === "analyzing"}
-                className="btn-primary w-full py-3.5 bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-sm shadow-amber-500/20 flex items-center justify-center gap-2"
-              >
-                {pdfStatus === "extracting" || pdfStatus === "analyzing" ? (
-                  <>
-                    <Loader2 size={18} className="animate-spin" /> Extracting 3-Section Mock...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={18} /> Process & Build Full 3-Section Mock Test
-                  </>
-                )}
-              </button>
-            </div>
-          )}
 
           {mode === "manual" && (
             <div className="pt-4 border-t border-black/5 space-y-6">
@@ -1499,7 +1265,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         className="input text-xs min-h-[60px] bg-white border-black/10 focus:border-brand-500"
                         placeholder="e.g. Read the following passage and answer the questions..."
                         value={q.passage || ""}
-                        onChange={(e) => updateManualQuestion(qIdx, "passage", e.target.value)}
+                        onChange={(e) => updateManualQuestion(qIdx, "passage", formatMathText(e.target.value))}
                       />
                     </div>
 
@@ -1538,7 +1304,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         className="input text-sm font-semibold bg-white min-h-[85px] p-3 border-black/10 focus:border-brand-500"
                         placeholder="Enter question statement..."
                         value={q.question}
-                        onChange={(e) => updateManualQuestion(qIdx, "question", e.target.value)}
+                        onChange={(e) => updateManualQuestion(qIdx, "question", formatMathText(e.target.value))}
                       />
                     </div>
 
@@ -1605,7 +1371,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                 className="input text-xs py-1.5 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text resize-y min-h-[40px]"
                                 value={opt}
                                 onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => updateManualOption(qIdx, optIdx, e.target.value)}
+                                onChange={(e) => updateManualOption(qIdx, optIdx, formatMathText(e.target.value))}
+                                onPaste={(e) => handleOptionPaste(e, qIdx, optIdx)}
                                 placeholder={`Option ${letter}`}
                               />
 
@@ -1630,7 +1397,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           className="input text-xs min-h-[60px] bg-white border-black/10"
                           placeholder="Step-by-step math shortcut or reason..."
                           value={q.explanation || ""}
-                          onChange={(e) => updateManualQuestion(qIdx, "explanation", e.target.value)}
+                          onChange={(e) => updateManualQuestion(qIdx, "explanation", formatMathText(e.target.value))}
                         />
                       </div>
                     </div>
@@ -1735,7 +1502,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               <Eye size={20} className="text-brand-600" /> {mode === "manual" ? "Manual Test Preview" : mode === "pdf" ? "📄 Extracted Questions Preview" : "AI Question Bank Preview"}
             </h3>
 
-            {((mode === "pdf" || mode === "multipdf") && generatedTest) && (
+            {(mode === "pdf" && generatedTest) && (
               <button
                 type="button"
                 onClick={() => setIsFullPreview(true)}
@@ -1746,7 +1513,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             )}
           </div>
 
-          {((mode === "pdf" || mode === "multipdf") && generatedTest) ? (
+          {(mode === "pdf" && generatedTest) ? (
             <div className="space-y-4">
               <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between flex-wrap gap-2">
                 <div>
@@ -2659,6 +2426,47 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           value={q.explanation || ""}
                           onChange={(e) => updateEditingQuestion(qIdx, "explanation", e.target.value)}
                         />
+                        
+                        {/* Solution Image Upload */}
+                        <div className="mt-4 flex items-center gap-2">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            id={`edit-sol-img-upload-${qIdx}`}
+                            onChange={(e) => {
+                              const file = e.target.files[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  updateEditingQuestion(qIdx, "solutionImageUrl", reader.result);
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`edit-sol-img-upload-${qIdx}`}
+                            className="btn-soft text-xs px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 cursor-pointer flex items-center gap-1.5 flex-1 justify-center whitespace-nowrap rounded-lg text-ink-soft font-semibold"
+                          >
+                            <ImageIcon size={14} /> {q.solutionImageUrl ? "Change Solution Image" : "Attach Solution Image"}
+                          </label>
+                          {q.solutionImageUrl && (
+                            <button
+                              type="button"
+                              onClick={() => updateEditingQuestion(qIdx, "solutionImageUrl", "")}
+                              className="btn-ghost text-rose-500 hover:bg-rose-50 p-1.5 rounded-lg border border-rose-100"
+                              title="Remove Solution Image"
+                            >
+                              <X size={14} />
+                            </button>
+                          )}
+                        </div>
+                        {q.solutionImageUrl && (
+                          <div className="mt-2 h-28 w-full max-w-sm rounded-xl border border-black/10 overflow-hidden relative group bg-black/5 p-1">
+                             <img src={q.solutionImageUrl} className="w-full h-full object-contain" alt="Solution preview" />
+                          </div>
+                        )}
                       </div>
 
                     </div>

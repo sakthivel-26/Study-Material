@@ -5,6 +5,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 load_dotenv()
 
@@ -22,6 +23,11 @@ app.add_middleware(
 )
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
 # Keep the API server online even before an AI key is configured. The extraction
 # endpoints return a clear configuration error instead of crashing at startup.
 client = (
@@ -208,23 +214,119 @@ from pydantic import BaseModel
 class ChatRequest(BaseModel):
     prompt: str
 
+class GenerateQuestionsRequest(BaseModel):
+    text: str
+    subject: str
+    questionCount: int
+
+@app.post("/api/ai/generate-questions")
+async def generate_questions_endpoint(req: GenerateQuestionsRequest):
+    key_configured = bool(GEMINI_API_KEY)
+    key_prefix = GEMINI_API_KEY[:6] if GEMINI_API_KEY else "None"
+    key_length = len(GEMINI_API_KEY) if GEMINI_API_KEY else 0
+
+    print("--- DIAGNOSTICS ---")
+    print(f"GEMINI CONFIGURED: {key_configured}")
+    print(f"KEY PREFIX: {key_prefix}")
+    print(f"KEY LENGTH: {key_length}")
+    print(f"KEY SOURCE: backend (from os.getenv('GEMINI_API_KEY'))")
+    print("-------------------")
+
+    if not GEMINI_API_KEY:
+        return {"error": "GEMINI_API_KEY is not configured on the backend"}
+
+    prompt = f"""You are a highly accurate Indian Banking/Competitive Exam Question Extractor.
+Extract exactly {req.questionCount} questions for the subject/category: {req.subject}.
+Extract from this text chunk:
+\"\"\"
+{req.text}
+\"\"\"
+
+Return ONLY a JSON object matching this exact format, with no markdown fences, no backticks, and no extra text.
+{{
+  "questions": [
+    {{
+      "question": "Question text...",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswer": 0,
+      "explanation": "..."
+    }}
+  ]
+}}
+"""
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(prompt)
+        output = response.text
+
+        # Clean markdown fences
+        cleaned = output.replace("```json", "").replace("```", "").strip()
+        
+        start_obj = cleaned.find("{")
+        if start_obj != -1:
+            json_str = cleaned[start_obj:]
+            data = json.loads(json_str)
+            if "questions" not in data:
+                return {"error": "Gemini response did not contain 'questions' array"}
+            
+            # Validation
+            valid_questions = []
+            seen_qs = set()
+            for q in data["questions"]:
+                if "question" not in q or not q["question"].strip():
+                    continue
+                if q["question"] in seen_qs:
+                    continue
+                if "options" not in q or not isinstance(q["options"], list) or len(q["options"]) != 4:
+                    continue
+                if "correctAnswer" not in q or not isinstance(q["correctAnswer"], int) or q["correctAnswer"] < 0 or q["correctAnswer"] > 3:
+                    continue
+                seen_qs.add(q["question"])
+                valid_questions.append(q)
+            
+            if not valid_questions:
+                return {"error": "No valid questions were extracted"}
+                
+            return {"questions": valid_questions}
+        else:
+            return {"error": "Failed to parse JSON from AI response"}
+    except Exception as e:
+        return {
+            "error": f"AI generation error: {str(e)}",
+            "diagnostics": {
+                "configured": key_configured,
+                "prefix": key_prefix,
+                "length": key_length,
+                "source": "backend (from os.getenv('GEMINI_API_KEY'))"
+            }
+        }
+
+
 @app.post("/api/ai/chat")
 async def ai_chat(req: ChatRequest):
-    if not NVIDIA_API_KEY:
-        raise HTTPException(status_code=500, detail="NVIDIA_AUTH_ERROR: API key missing")
-    try:
-        response = client.chat.completions.create(
-            model="nvidia/nemotron-3.5-lightning-30b-a3b",
-            messages=[{"role": "user", "content": req.prompt}],
-            temperature=0.1,
-            max_tokens=2000,
-            response_format={"type": "json_object"},
-        )
-        
-        output = response.choices[0].message.content
-        return {"success": True, "text": output}
-    except Exception as e:
-        err_str = str(e).lower()
-        if "429" in err_str or "rate limit" in err_str:
-            raise HTTPException(status_code=429, detail="NVIDIA_RATE_LIMIT")
-        raise HTTPException(status_code=500, detail=f"NVIDIA_API_ERROR: {str(e)}")
+    if GEMINI_API_KEY:
+        try:
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = model.generate_content(req.prompt)
+            return {"success": True, "text": response.text}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"GEMINI_API_ERROR: {str(e)}")
+    elif NVIDIA_API_KEY:
+        try:
+            response = client.chat.completions.create(
+                model="nvidia/nemotron-3.5-lightning-30b-a3b",
+                messages=[{"role": "user", "content": req.prompt}],
+                temperature=0.1,
+                max_tokens=2000,
+                response_format={"type": "json_object"},
+            )
+            
+            output = response.choices[0].message.content
+            return {"success": True, "text": output}
+        except Exception as e:
+            err_str = str(e).lower()
+            if "429" in err_str or "rate limit" in err_str:
+                raise HTTPException(status_code=429, detail="NVIDIA_RATE_LIMIT")
+            raise HTTPException(status_code=500, detail=f"NVIDIA_API_ERROR: {str(e)}")
+    else:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY or NVIDIA_API_KEY is missing on backend")
