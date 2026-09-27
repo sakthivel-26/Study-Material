@@ -720,12 +720,73 @@ async function callGroq(apiKey, prompt) {
   return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed || [];
 }
 
+async function callGemini(apiKey, prompt) {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contents: [{
+        parts: [{ text: prompt }]
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json",
+      }
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw new Error(`Gemini API Error (${response.status}): ${errText || response.statusText}`);
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+  
+  const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+  const jsonStart = cleaned.indexOf("[");
+  const jsonEnd = cleaned.lastIndexOf("]");
+  
+  let parsed;
+  if (jsonStart !== -1 && jsonEnd !== -1) {
+    parsed = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+  } else {
+    parsed = JSON.parse(cleaned);
+  }
+  
+  return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed || [];
+}
+
 async function callLLMChain(prompt) {
   const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY");
-  if (!groqKey) {
-    throw new Error("no API key configured");
+  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
+  
+  if (!groqKey && !geminiKey) {
+    throw new Error("no API key configured (need Groq or Gemini)");
   }
-  return await callGroq(groqKey, prompt);
+
+  if (groqKey) {
+    try {
+      return await callGroq(groqKey, prompt);
+    } catch (err) {
+      if (!geminiKey) throw err;
+      if (
+        err.message.includes("429") || 
+        err.message.includes("rate_limit") || 
+        err.message.includes("max_tokens") || 
+        err.message.includes("truncated") ||
+        err.message.includes("json")
+      ) {
+         console.warn("[AI] Groq failed, falling back to Gemini:", err.message);
+         return await callGemini(geminiKey, prompt);
+      }
+      throw err;
+    }
+  }
+  
+  return await callGemini(geminiKey, prompt);
 }
 
 /**
