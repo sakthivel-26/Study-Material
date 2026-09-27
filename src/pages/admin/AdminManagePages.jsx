@@ -1612,6 +1612,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         <div className="grid sm:grid-cols-2 gap-2">
                           {Object.entries(q.options || {}).map(([key, opt]) => {
                             const isRight = key === finalAnswer;
+                            const label = !isNaN(key) && key.trim() !== '' ? String.fromCharCode(65 + parseInt(key)) : key;
                             return (
                               <div
                                 key={key}
@@ -1630,7 +1631,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                     isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700'
                                   }`}
                                 >
-                                  {key}
+                                  {label}
                                 </span>
 
                                 <input
@@ -1646,10 +1647,10 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                                 <input 
                                   className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
-                                  value={approvedQuestions[idx]?.options?.[key] ?? (opt || `Option ${key}`)}
+                                  value={approvedQuestions[idx]?.options?.[key] ?? (opt || `Option ${label}`)}
                                   onClick={(e) => e.stopPropagation()}
                                   onChange={(e) => editOptionText(idx, key, e.target.value)}
-                                  placeholder={`Option ${key}`}
+                                  placeholder={`Option ${label}`}
                                 />
 
                                 <span
@@ -1917,6 +1918,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       <div className="flex flex-col gap-3">
                         {Object.entries(q.options || {}).map(([key, opt]) => {
                           const isRight = key === finalAnswer;
+                          const label = !isNaN(key) && key.trim() !== '' ? String.fromCharCode(65 + parseInt(key)) : key;
                           return (
                             <div
                               key={key}
@@ -1935,7 +1937,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                   isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-700'
                                 }`}
                               >
-                                {key}
+                                {label}
                               </span>
 
                               <input
@@ -1952,10 +1954,10 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                               <textarea 
                                 rows={2}
                                 className="input text-xs py-1.5 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-semibold cursor-text resize-y min-h-[40px]"
-                                value={approvedQuestions[idx]?.options?.[key] ?? (opt || `Option ${key}`)}
+                                value={approvedQuestions[idx]?.options?.[key] ?? (opt || `Option ${label}`)}
                                 onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => editOptionText(idx, key, e.target.value)}
-                                placeholder={`Option ${key}`}
+                                placeholder={`Option ${label}`}
                               />
 
                               <span
