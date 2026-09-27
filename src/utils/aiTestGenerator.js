@@ -626,8 +626,8 @@ export async function generateAIMockTest({ category, subject, topic, questionsCo
 // Upload a PYQ paper PDF → AI extracts exact questions → Mock Test
 // ------------------------------------------------------------------
 
-const buildExtractionPrompt = (pdfChunk, limit) => `You are a strict data extractor. Extract exactly ${limit} questions from this text.
-Output a JSON object containing the extracted questions. No markdown, no explanations, no original text.
+const buildExtractionPrompt = (pdfChunk, limit) => `You are a strict data extractor and expert solver. Extract exactly ${limit} questions from this text.
+Output a JSON object containing the extracted questions. No markdown outside of the JSON block.
 
 FORMAT:
 {
@@ -635,7 +635,8 @@ FORMAT:
     {
       "question": "The question text here",
       "options": ["A", "B", "C", "D"],
-      "correctAnswerIndex": 0
+      "correctAnswerIndex": 0,
+      "explanation": "Step-by-step explanation or solution for the correct answer."
     }
   ]
 }
@@ -643,8 +644,8 @@ FORMAT:
 RULES:
 - options must be exactly 4 strings.
 - correctAnswerIndex must be 0, 1, 2, or 3.
-- DO NOT generate explanations.
-- DO NOT include passage text.
+- Provide a detailed step-by-step explanation for the correct answer in the "explanation" field.
+- DO NOT include passage text in the question field.
 
 TEXT:
 ${pdfChunk}
@@ -917,7 +918,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         source_answer: String.fromCharCode(65 + q.correctAnswerIndex),
         passage: "",
         section: category || "General",
-        explanation: "",
+        explanation: q.explanation || "",
         imageUrl: ""
       });
     }

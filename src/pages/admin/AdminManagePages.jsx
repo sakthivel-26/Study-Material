@@ -1742,7 +1742,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         <textarea
                           className="input text-xs min-h-[60px] bg-white border border-black/10"
                           placeholder="Enter solution explanation..."
-                          value={approvedQuestions[idx]?.solutionText ?? (q.solutionText || "")}
+                          value={approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "")}
                           onChange={(e) => editSolutionText(idx, e.target.value)}
                         />
                       </div>
