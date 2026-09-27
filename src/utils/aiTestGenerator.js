@@ -852,6 +852,9 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
           console.log(`[AI] Groq response truncated or JSON invalid on Chunk ${index + 1} with limit ${limit}`);
         } else {
           console.warn(`[AI] Chunk ${index + 1} extraction failed:`, err);
+          if (err.message.includes("401") || err.message.includes("API Key")) {
+            throw err; // Bubble up authentication errors
+          }
           break; // only retry on known recoverable errors
         }
       }
@@ -868,13 +871,21 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     if (onProgress) onProgress(completedChunks, chunks.length);
   }
 
+  let extractionError = null;
+
   // True async worker pool for map-reduce
   let currentIndex = 0;
   async function worker() {
     while (currentIndex < chunks.length) {
+      if (extractionError) break; // Abort if critical error occurred
       const idx = currentIndex++;
-      await processChunk(chunks[idx], idx);
-      if (currentIndex < chunks.length) {
+      try {
+        await processChunk(chunks[idx], idx);
+      } catch (err) {
+        extractionError = err; // Capture critical error
+        break;
+      }
+      if (currentIndex < chunks.length && !extractionError) {
         // Wait 22 seconds between chunks to respect Groq's 8000 TPM limit
         await new Promise(r => setTimeout(r, 22000));
       }
@@ -882,7 +893,11 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   }
 
   const workers = Array.from({ length: CONCURRENCY }, () => worker());
-  await Promise.allSettled(workers);
+  await Promise.all(workers);
+
+  if (extractionError) {
+    throw extractionError; // Bubble up the reason to the UI popup
+  }
 
   let uniqueQuestions = [];
   const seen = new Set();
