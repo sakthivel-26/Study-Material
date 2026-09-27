@@ -323,7 +323,7 @@ export default function MockTestRunner({ test, onClose }) {
           await document.documentElement.requestFullscreen();
         }
       } catch (err) {
-        console.warn("Fullscreen request failed", err);
+        // Silently ignore: Browsers block fullscreen without direct user gesture
       }
     };
     if (viewState === "test") {

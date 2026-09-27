@@ -688,7 +688,7 @@ async function callGroq(apiKey, prompt) {
       model: "openai/gpt-oss-20b",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.1,
-      max_tokens: 1500,
+      max_tokens: 4000,
     }),
   });
 
