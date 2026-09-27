@@ -686,7 +686,7 @@ async function callGroq(apiKey, prompt) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "llama-3.1-8b-instant",
+      model: "llama3-8b-8192",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.1,
       max_tokens: 8000,
@@ -733,17 +733,11 @@ async function callLLMChain(prompt) {
       return await callGroq(groqKey, prompt);
     } catch (err) {
       if (!geminiKey) throw err;
-      if (
-        err.message.includes("429") || 
-        err.message.includes("rate_limit") || 
-        err.message.includes("max_tokens") || 
-        err.message.includes("truncated") ||
-        err.message.includes("json")
-      ) {
-         console.warn("[AI] Groq failed, falling back to Gemini:", err.message);
-         return await callGemini(geminiKey, prompt);
+      if (err.message.includes("401") || err.message.includes("Invalid API Key")) {
+        throw err; // Don't fallback on auth errors
       }
-      throw err;
+      console.warn("[AI] Groq failed, falling back to Gemini:", err.message);
+      return await callGemini(geminiKey, prompt);
     }
   }
   
