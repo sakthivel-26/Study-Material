@@ -14,6 +14,7 @@ import {
   fsDeleteAdmission,
   fsDeleteNotification,
   useRealtimeBackend,
+  fsUpdateSettings,
 } from "./backend.js";
 
 
@@ -84,10 +85,13 @@ export function AppProvider({ children }) {
     }
   });
 
-  const updatePromoBanner = (newBanner) => {
+  const updatePromoBanner = async (newBanner) => {
     setPromoBanner(newBanner);
     try {
       localStorage.setItem("ken_ias_promobanner", JSON.stringify(newBanner));
+      if (useRealtimeBackend) {
+        await fsUpdateSettings({ promoBanner: newBanner });
+      }
     } catch (e) {}
   };
 

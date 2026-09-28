@@ -23,6 +23,7 @@ const COLLECTIONS = {
   mockTests: "mockTests",
   notifications: "notifications",
   admissions: "admissions",
+  settings: "settings",
 };
 
 const NOTIF_ICONS = { pdf: "📄", video: "🎥", mock: "📝", announcement: "📢" };
@@ -32,8 +33,8 @@ const mapDoc = (doc) => ({ ...doc.data(), id: doc.id });
 
 /* --------------------------- SUBSCRIBE (realtime) ------------------------- */
 // Sets up onSnapshot listeners so all logged-in devices update live.
-export async function subscribeBackend(user, { onUploads, onTests, onNotifications, onStudents, onAdmissions }) {
-  const { onSnapshot, collection, query, orderBy, where } = await import("firebase/firestore");
+export async function subscribeBackend(user, { onUploads, onTests, onNotifications, onStudents, onAdmissions, onSettings }) {
+  const { onSnapshot, collection, doc, query, orderBy, where } = await import("firebase/firestore");
   const db = await getFirebaseDb();
   const unsubs = [];
   
@@ -68,6 +69,14 @@ export async function subscribeBackend(user, { onUploads, onTests, onNotificatio
     unsubs.push(
       onSnapshot(query(collection(db, COLLECTIONS.admissions), orderBy("createdAt", "desc")), (snap) => {
         onAdmissions(snap.docs.map(mapDoc));
+      })
+    );
+  }
+  
+  if (onSettings) {
+    unsubs.push(
+      onSnapshot(doc(db, COLLECTIONS.settings, "global"), (snap) => {
+        if (snap.exists()) onSettings(snap.data());
       })
     );
   }
@@ -237,3 +246,9 @@ export async function fsSyncUser(user) {
 }
 
 export const useRealtimeBackend = isFirebaseConfigured;
+
+export async function fsUpdateSettings(data) {
+  const { doc, setDoc } = await import("firebase/firestore");
+  const db = await getFirebaseDb();
+  await setDoc(doc(db, COLLECTIONS.settings, "global"), data, { merge: true });
+}
