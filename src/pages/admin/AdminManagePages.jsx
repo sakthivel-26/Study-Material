@@ -442,7 +442,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         id: `pdf_q_${Date.now()}_${idx}`,
         section: approvalStatus?.section || q.section || "General",
         passage: approvalStatus?.passage ?? (q.passage || ""),
-        imageUrl: approvalStatus?.imageUrl ?? (q.imageUrl || ""),
+        imageUrl: approvalStatus?.chartImageUrl ?? approvalStatus?.imageUrl ?? (q.chartImageUrl || q.imageUrl || ""),
         solutionImageUrl: approvalStatus?.solutionImageUrl ?? (q.solutionImageUrl || ""),
         question: approvalStatus?.questionText ?? (q.question_text || q.question || `Question ${idx + 1}`),
         options: optsArray,
@@ -777,12 +777,27 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
         }
         const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const pageImagesArr = [];
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
           fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+          // Render page to image for Gemini Vision AI (reads charts, tables, graphs)
+          try {
+            const viewport = page.getViewport({ scale: 1.5 });
+            const canvas = document.createElement("canvas");
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext("2d");
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            const base64 = canvas.toDataURL("image/png").split(",")[1];
+            pageImagesArr.push({ base64, mimeType: "image/png", pageNum: i });
+          } catch (renderErr) {
+            console.warn(`[Vision] Page ${i} render failed:`, renderErr.message);
+          }
         }
-        setExtractionProgress(`${pdf.numPages} pages scanned · ${fullText.length.toLocaleString()} characters extracted`);
+        window.__pdfPageImages__ = pageImagesArr;
+        setExtractionProgress(`${pdf.numPages} pages scanned · ${fullText.length.toLocaleString()} chars · ${pageImagesArr.length} pages ready for Vision AI`);
       } else if (isDocx) {
         if (!window.mammoth) {
           await new Promise((resolve, reject) => {
@@ -812,8 +827,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               category: f.category,
               timeLimit: f.time,
               title: f.title,
-              onProgress: (done, total) => setPdfPageInfo(`AI LLM extracting questions (Chunk ${done}/${total})...`),
-              signal: abortControllerRef.current.signal
+              onProgress: (done, total) => setPdfPageInfo(`🖼️ Vision+LLM extracting (Step ${done}/${total})...`),
+              signal: abortControllerRef.current.signal,
+              pageImages: isPDF ? (window.__pdfPageImages__ || []) : [],
             });
             if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
               const maxQ = parseInt(f.questions) || 100;
@@ -944,6 +960,13 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         ...prev[idx],
         passage: passageText
       }
+    }));
+  };
+
+    const editChartImage = (idx, base64DataUrl) => {
+    setApprovedQuestions(prev => ({
+      ...prev,
+      [idx]: { ...prev[idx], chartImageUrl: base64DataUrl || null }
     }));
   };
 
@@ -1664,6 +1687,40 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           value={approvedQuestions[idx]?.passage ?? (q.passage || "")}
                           onChange={(e) => editPassage(idx, e.target.value)}
                         />
+                      </div>
+
+                      {/* Chart / Table Image Attachment */}
+                      <div>
+                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">
+                          📊 Attach Chart / Table / Graph Image (Optional):
+                        </label>
+                        {approvedQuestions[idx]?.chartImageUrl ? (
+                          <div className="relative mb-2">
+                            <img src={approvedQuestions[idx].chartImageUrl} alt="Chart" className="max-h-48 rounded-lg border border-black/10 object-contain bg-white w-full" />
+                            <button
+                              type="button"
+                              onClick={() => editChartImage(idx, null)}
+                              className="absolute top-1 right-1 bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold hover:bg-rose-600 shadow"
+                            >✕ Remove</button>
+                          </div>
+                        ) : (
+                          <label className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border-2 border-dashed border-brand-300 bg-brand-50/50 hover:bg-brand-100/50 text-brand-700 text-[11px] font-semibold mb-2 transition-colors">
+                            <span>📎 Upload Chart / Graph / Table Image (PNG, JPG)</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = (ev) => editChartImage(idx, ev.target.result);
+                                reader.readAsDataURL(file);
+                              }}
+                            />
+                          </label>
+                        )}
+                        <p className="text-[10px] text-ink-muted mb-2">The image will be shown to students alongside this question during the mock test.</p>
                       </div>
 
                       {/* Question Statement */}

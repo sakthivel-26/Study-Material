@@ -171,6 +171,59 @@ async function callGemini(apiKey, prompt) {
   throw lastErr || new Error("All Gemini model endpoints failed. Please check your Google Gemini API key at https://aistudio.google.com/app/apikey");
 }
 
+// 2b. Google Gemini Vision — reads charts, tables, bar graphs from a page image
+export async function callGeminiVisionPage(apiKey, base64Image, mimeType = "image/png") {
+  if (!apiKey || typeof apiKey !== "string") return null;
+  const cleanKey = apiKey.trim();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${cleanKey}`;
+
+  const prompt = `You are an expert at reading Indian competitive exam question papers (IBPS, SBI, SSC, TNPSC etc.).
+Look at this PDF page image carefully.
+
+Your task: Extract ALL data from any charts, tables, graphs, or diagrams on this page.
+Return a structured text description of each chart/table/graph found, followed by the extracted numerical data.
+
+For PIE CHARTS: List each segment label and its percentage value.
+For BAR CHARTS: List each bar's category and its value/height.
+For LINE CHARTS: List each point's x and y values.
+For TABLES: Reproduce the table data in a readable format with column headers and rows.
+For DATA INTERPRETATION sets: Include the full directions text AND all chart/table data.
+
+Then, extract all visible text questions and answer options from the page.
+
+Output format:
+=== CHART/TABLE DATA ===
+[Describe each chart/table with its full data here]
+
+=== QUESTIONS & OPTIONS ===
+[All question text and options visible on the page]
+
+If no charts/tables/graphs are present, just output the text content of the page.`;
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: mimeType, data: base64Image } },
+            { text: prompt }
+          ]
+        }],
+        generationConfig: { temperature: 0.1 },
+      }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    return text.trim() || null;
+  } catch (err) {
+    console.warn("[AI Vision] Gemini Vision page extraction failed:", err.message);
+    return null;
+  }
+}
+
 // 3. OpenAI API Provider
 async function callOpenAI(apiKey, prompt, model = "gpt-4o-mini") {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -832,12 +885,40 @@ function regexExtractQuestions(pdfText, category) {
   return uniqueQuestions;
 }
 
-export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "60 min", title, onProgress, signal }) {
+export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "60 min", title, onProgress, signal, pageImages = [] }) {
   if (!pdfText || pdfText.trim().length < 50) {
     throw new Error("PDF text content is too short or empty. Please upload a valid question paper PDF.");
   }
 
-  const chunks = chunkText(pdfText, 1500);
+  // If we have page images and a Gemini key, enrich pdfText with vision-extracted chart/table data
+  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
+  let enrichedText = pdfText;
+
+  if (pageImages.length > 0 && geminiKey) {
+    console.log(`[AI Vision] 🖼️ Enriching ${pageImages.length} page image(s) with Gemini Vision...`);
+    if (onProgress) onProgress(0, pageImages.length + 1);
+    const visionResults = [];
+    for (let i = 0; i < pageImages.length; i++) {
+      if (signal?.aborted) throw new Error("Extraction cancelled by user.");
+      try {
+        console.log(`[AI Vision] Scanning page ${i + 1} for charts/tables/graphs...`);
+        const visionText = await callGeminiVisionPage(geminiKey, pageImages[i].base64, pageImages[i].mimeType || "image/png");
+        if (visionText && visionText.length > 50) {
+          visionResults.push(`\n\n=== [Page ${i + 1} Vision Extract] ===\n${visionText}`);
+          console.log(`[AI Vision] ✅ Page ${i + 1}: Extracted ${visionText.length} chars (charts/tables detected)`);
+        }
+      } catch (err) {
+        console.warn(`[AI Vision] Page ${i + 1} vision failed:`, err.message);
+      }
+      if (onProgress) onProgress(i + 1, pageImages.length + 1);
+    }
+    if (visionResults.length > 0) {
+      enrichedText = pdfText + "\n\n" + visionResults.join("\n");
+      console.log(`[AI Vision] 📊 Enriched text: ${enrichedText.length} chars (added ${enrichedText.length - pdfText.length} chars of chart/table data)`);
+    }
+  }
+
+  const chunks = chunkText(enrichedText, 1500);
   let allQuestions = [];
   let completedChunks = 0;
 
