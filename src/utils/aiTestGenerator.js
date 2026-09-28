@@ -637,7 +637,7 @@ FORMAT:
     {
       "passage": "If the question is part of a puzzle, reading comprehension, or data interpretation set, include the shared paragraph/context here. Otherwise, leave it empty.",
       "question": "The question text here",
-      "options": ["A", "B", "C", "D"],
+      "options": ["A", "B", "C", "D", "E (if present)"],
       "correctAnswerIndex": 0,
       "explanation": "Step-by-step explanation or solution for the correct answer."
     }
@@ -645,8 +645,8 @@ FORMAT:
 }
 
 RULES:
-- options must be exactly 4 strings.
-- correctAnswerIndex must be 0, 1, 2, or 3.
+- options must be exactly 4 or 5 strings, depending on how many options the original question has.
+- correctAnswerIndex must be 0, 1, 2, 3, or 4.
 - Provide a detailed step-by-step explanation for the correct answer in the "explanation" field.
 - If a question relies on a shared paragraph, puzzle, or reading comprehension passage, put that text ONLY in the "passage" field, not in the "question" field.
 
@@ -910,10 +910,10 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
                  typeof q.question === "string" && 
                  q.question.trim() !== "" &&
                  Array.isArray(q.options) && 
-                 q.options.length === 4 &&
+                 (q.options.length === 4 || q.options.length === 5) &&
                  typeof q.correctAnswerIndex === "number" && 
                  q.correctAnswerIndex >= 0 && 
-                 q.correctAnswerIndex <= 3;
+                 q.correctAnswerIndex <= 4;
         });
 
         if (parsedQuestions.length > 0) {

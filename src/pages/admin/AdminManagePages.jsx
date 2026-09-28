@@ -27,7 +27,7 @@ const getAnswerIndex = (val) => {
 };
 
 
-function AIChatbotMode({ isFreeByDefault }) {
+function AIChatbotMode({ isFreeByDefault, onPreview }) {
   const { addMockTest, pushToast } = useApp();
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -39,11 +39,17 @@ function AIChatbotMode({ isFreeByDefault }) {
     
     try {
       const result = await generateChatbotMockTest(prompt);
-      await addMockTest({
+      const testToPreview = {
          ...result,
          isFree: isFreeByDefault
-      });
-      pushToast(`🎉 Mock test '${result.title}' generated & published with ${result.questions} questions!`);
+      };
+      if (onPreview) {
+        onPreview(testToPreview);
+        pushToast(`✨ Mock test preview ready! Review it on the right.`);
+      } else {
+        await addMockTest(testToPreview);
+        pushToast(`🎉 Mock test '${result.title}' generated & published with ${result.questions} questions!`);
+      }
       setPrompt("");
     } catch (err) {
       console.error(err);
@@ -62,7 +68,7 @@ function AIChatbotMode({ isFreeByDefault }) {
         <div>
           <h2 className="text-3xl font-black text-ink">AI Exam Generator Bot</h2>
           <p className="text-ink-muted text-base max-w-lg mx-auto mt-3">
-            Just tell me what exam you want! I will automatically generate the questions, set the timing, and publish the mock test instantly.
+            Just tell me what exam you want! I will automatically generate the questions and show you a preview before you publish it.
           </p>
         </div>
 
@@ -87,6 +93,7 @@ function AIChatbotMode({ isFreeByDefault }) {
             onClick={handleGenerate}
             disabled={generating || !prompt.trim()}
             className="absolute bottom-5 right-5 w-14 h-14 bg-brand-600 hover:bg-brand-500 text-white rounded-xl flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg active:scale-95"
+            title="Generate Preview"
           >
             {generating ? <Loader2 size={24} className="animate-spin" /> : <Send size={24} />}
           </button>
@@ -522,7 +529,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         question: approvalStatus?.questionText ?? (q.question_text || q.question || `Question ${idx + 1}`),
         options: optsArray,
         correctAnswerIndex: ansIndex < optsArray.length ? ansIndex : 0,
-        explanation: approvalStatus?.solutionText ?? (q.solutionText || q.verification_explanation || "Verified by teacher.")
+        explanation: approvalStatus?.solutionText ?? (q.solutionText || q.explanation || q.verification_explanation || "Verified by teacher.")
       });
     });
 
@@ -570,6 +577,22 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     } catch (err) {
       console.error("Publishing error:", err);
       pushToast("Error publishing test. Please try again.");
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  const publishChatbotTest = async () => {
+    if (!generatedTest) return;
+    if (isPublishing) return;
+    setIsPublishing(true);
+    try {
+      await addMockTest(generatedTest);
+      pushToast(`🎉 Mock test '${generatedTest.title}' published successfully with ${generatedTest.questions} questions!`);
+      setGeneratedTest(null);
+    } catch (err) {
+      console.error(err);
+      pushToast(err.message || "Error publishing mock test. Please try again.");
     } finally {
       setIsPublishing(false);
     }
@@ -1024,6 +1047,33 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         questionText: text
       }
     }));
+  };
+
+  const handleOptionPasteForApproved = (e, idx, startKey) => {
+    const pasteText = e.clipboardData.getData("text");
+    const splitRegex = /(?:\([a-eA-E1-5]\)|[a-eA-E1-5][\.\)]|\b[A-E]\b[\.\)]?)\s+/;
+    const parts = pasteText.split(splitRegex).map(p => p.trim()).filter(p => p !== "");
+    
+    if (parts.length > 1) {
+      e.preventDefault();
+      setApprovedQuestions(prev => {
+        const cur = prev[idx] || {};
+        const newOptionsObj = { ...(cur.options || {}) };
+        
+        let pIdx = 0;
+        for (let j = startKey; j < startKey + parts.length; j++) {
+          if (j < 7) {
+            newOptionsObj[j] = parts[pIdx];
+          }
+          pIdx++;
+        }
+        
+        return {
+          ...prev,
+          [idx]: { ...cur, options: newOptionsObj }
+        };
+      });
+    }
   };
 
   const editOptionText = (idx, optKey, text) => {
@@ -1792,6 +1842,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                   className="input text-xs py-1 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
                                   value={approvedQuestions[idx]?.options?.[key] ?? (opt || `Option ${label}`)}
                                   onClick={(e) => e.stopPropagation()}
+                                  onPaste={(e) => handleOptionPasteForApproved(e, idx, parseInt(key))}
                                   onChange={(e) => editOptionText(idx, key, e.target.value)}
                                   placeholder={`Option ${label}`}
                                 />
@@ -1929,8 +1980,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                 ))}
               </div>
               <div className="pt-2">
-                 <button onClick={applyPDFUpdates} className="btn-primary w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-emerald-500/20">
-                   <CheckCircle2 size={18} /> Apply Fixes & Update Mock Test
+                 <button onClick={mode === "ai" ? publishChatbotTest : applyPDFUpdates} className="btn-primary w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-emerald-500/20">
+                   <CheckCircle2 size={18} /> {mode === "ai" ? "Publish Mock Test" : "Apply Fixes & Update Mock Test"}
                  </button>
               </div>
             </div>
