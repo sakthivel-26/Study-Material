@@ -925,7 +925,6 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   if (onProgress) onProgress(0, chunks.length);
 
   const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY");
-  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
   const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
 
   // Build dedicated caller functions for parallel workers
