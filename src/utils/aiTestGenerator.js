@@ -215,12 +215,13 @@ async function callDeepSeek(apiKey, prompt) {
 }
 
 // 6. NVIDIA API Provider
-async function callNvidia(apiKey, prompt, model = "nvidia/nemotron-3-nano-30b-a3b") {
+async function callNvidia(apiKey, prompt) {
+  const model = getEnvKey("VITE_NVIDIA_MODEL") || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), 35000); // 35-second timeout
+  const id = setTimeout(() => controller.abort(), 45000); // 45-second timeout
 
   try {
-    const response = await fetch("/api/nvidia/chat/completions", {
+    const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -229,7 +230,8 @@ async function callNvidia(apiKey, prompt, model = "nvidia/nemotron-3-nano-30b-a3
       body: JSON.stringify({
         model: model,
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
+        temperature: 0.1,
+        max_tokens: 8000,
       }),
       signal: controller.signal,
     });
@@ -720,28 +722,41 @@ async function callGroq(apiKey, prompt) {
   return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed || [];
 }
 
+
+
 async function callLLMChain(prompt) {
   const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY");
   const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
+  const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
   
-  if (!groqKey && !geminiKey) {
-    throw new Error("no API key configured (need Groq or Gemini)");
+  const providers = [];
+  if (groqKey)   providers.push({ name: "Groq",   fn: () => callGroq(groqKey, prompt) });
+  if (geminiKey) providers.push({ name: "Gemini", fn: () => callGemini(geminiKey, prompt) });
+  if (nvidiaKey) providers.push({ name: "NVIDIA", fn: () => callNvidia(nvidiaKey, prompt) });
+
+  if (providers.length === 0) {
+    throw new Error("No API key configured. Add at least one of: VITE_GROQ_API_KEY, VITE_GEMINI_API_KEY, or VITE_NVIDIA_API_KEY in your .env file.");
   }
 
-  if (groqKey) {
+  let lastError = null;
+  for (let i = 0; i < providers.length; i++) {
+    const { name, fn } = providers[i];
     try {
-      return await callGroq(groqKey, prompt);
+      const result = await fn();
+      if (i > 0) console.log(`[AI] ✅ ${name} succeeded as fallback.`);
+      return result;
     } catch (err) {
-      if (!geminiKey) throw err;
-      if (err.message.includes("401") || err.message.includes("Invalid API Key")) {
-        throw err; // Don't fallback on auth errors
+      lastError = err;
+      const nextProvider = providers[i + 1]?.name;
+      if (nextProvider) {
+        console.warn(`[AI] ${name} failed: ${err.message}. Falling back to ${nextProvider}...`);
+      } else {
+        console.error(`[AI] ${name} failed: ${err.message}. No more providers to try.`);
       }
-      console.warn("[AI] Groq failed, falling back to Gemini:", err.message);
-      return await callGemini(geminiKey, prompt);
     }
   }
-  
-  return await callGemini(geminiKey, prompt);
+
+  throw lastError || new Error("All AI providers failed.");
 }
 
 /**
@@ -825,21 +840,66 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
   if (onProgress) onProgress(0, chunks.length);
 
-  const CONCURRENCY = 1;
+  const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY");
+  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
+  const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
 
-  async function processChunk(chunk, index) {
+  // Build dedicated caller functions for parallel workers
+  function makeDirectCaller(name, fn) {
+    return async (prompt) => {
+      try {
+        return await fn(prompt);
+      } catch (err) {
+        console.warn(`[AI] ${name} direct call failed: ${err.message}`);
+        throw err;
+      }
+    };
+  }
+
+  // Create an array of available provider callers
+  const providerCallers = [];
+  if (groqKey)   providerCallers.push({ name: "Groq",   call: (prompt) => callGroq(groqKey, prompt) });
+  if (geminiKey) providerCallers.push({ name: "Gemini", call: (prompt) => callGemini(geminiKey, prompt) });
+  if (nvidiaKey) providerCallers.push({ name: "NVIDIA", call: (prompt) => callNvidia(nvidiaKey, prompt) });
+
+  // How many parallel workers = min(number of providers, 2)
+  const CONCURRENCY = Math.min(providerCallers.length, 2) || 1;
+  console.log(`[AI] 🚀 Parallel extraction with ${CONCURRENCY} workers (${providerCallers.map(p => p.name).join(" + ")})`);
+
+  // Each worker gets a preferred provider, with the full chain as fallback
+  async function callWithPreferredProvider(prompt, workerIndex) {
+    const preferred = providerCallers[workerIndex % providerCallers.length];
+    try {
+      return await preferred.call(prompt);
+    } catch (err) {
+      console.warn(`[AI] Worker ${workerIndex} preferred (${preferred.name}) failed: ${err.message}. Trying fallback chain...`);
+      // Try other providers as fallback
+      for (const provider of providerCallers) {
+        if (provider.name === preferred.name) continue;
+        try {
+          const result = await provider.call(prompt);
+          console.log(`[AI] ✅ ${provider.name} succeeded as fallback for Worker ${workerIndex}.`);
+          return result;
+        } catch (fallbackErr) {
+          console.warn(`[AI] ${provider.name} fallback also failed: ${fallbackErr.message}`);
+        }
+      }
+      throw err; // All providers failed
+    }
+  }
+
+  async function processChunk(chunk, index, workerIndex) {
     if (signal?.aborted) throw new Error("Extraction cancelled by user.");
     let chunkQuestions = [];
-    // Lower limits to prevent max_tokens truncation (since we added step-by-step explanations)
     const limits = [6, 3, 2];
     let currentLimitIndex = 0;
 
     while (currentLimitIndex < limits.length) {
       const limit = limits[currentLimitIndex];
       try {
-        console.log(`[AI] Chunk ${index + 1}: Requesting ${limit} questions...`);
+        console.log(`[AI] Chunk ${index + 1}: Requesting ${limit} questions (Worker ${workerIndex})...`);
         const prompt = buildExtractionPrompt(chunk, limit);
-        let response = await callLLMChain(prompt);
+        let response = await callWithPreferredProvider(prompt, workerIndex);
         
         let parsedQuestions = Array.isArray(response) ? response : (response.questions || []);
         
@@ -856,25 +916,21 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         });
 
         if (parsedQuestions.length > 0) {
-          console.log(`[AI] Success: ${parsedQuestions.length} questions from Chunk ${index + 1}`);
+          console.log(`[AI] ✅ Success: ${parsedQuestions.length} questions from Chunk ${index + 1}`);
           chunkQuestions = parsedQuestions;
-          break; // success
+          break;
         } else {
-          console.log(`[AI] Chunk ${index + 1}: No valid questions parsed. Retrying...`);
+          console.log(`[AI] Chunk ${index + 1}: No valid questions parsed. Reducing limit...`);
         }
       } catch (err) {
-        if (err.message.includes("429") || err.message.includes("rate_limit")) {
-          console.warn(`[AI] Rate limit hit on Chunk ${index + 1}. Waiting 15 seconds before retrying...`);
-          await new Promise(r => setTimeout(r, 15000));
-          continue; // Retry same limit
-        } else if (err.message.includes("max_tokens reached") || err.message.includes("json_validate_failed") || err.message.includes("Failed to validate JSON")) {
-          console.log(`[AI] Groq response truncated or JSON invalid on Chunk ${index + 1} with limit ${limit}`);
+        if (err.message.includes("max_tokens reached") || err.message.includes("json_validate_failed") || err.message.includes("Failed to validate JSON")) {
+          console.log(`[AI] Response truncated or JSON invalid on Chunk ${index + 1} with limit ${limit}. Reducing...`);
         } else {
-          console.warn(`[AI] Chunk ${index + 1} extraction failed:`, err);
+          console.warn(`[AI] Chunk ${index + 1} extraction failed:`, err.message);
           if (err.message.includes("401") || err.message.includes("API Key")) {
-            throw err; // Bubble up authentication errors
+            throw err;
           }
-          break; // only retry on known recoverable errors
+          break;
         }
       }
       currentLimitIndex++;
@@ -892,26 +948,26 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
   let extractionError = null;
 
-  // True async worker pool for map-reduce
+  // Parallel worker pool — each worker uses a different preferred LLM provider
   let currentIndex = 0;
-  async function worker() {
+  async function worker(workerIndex) {
     while (currentIndex < chunks.length) {
-      if (extractionError) break; // Abort if critical error occurred
+      if (extractionError) break;
       if (signal?.aborted) {
         extractionError = new Error("Extraction cancelled by user.");
         break;
       }
       const idx = currentIndex++;
       try {
-        await processChunk(chunks[idx], idx);
+        await processChunk(chunks[idx], idx, workerIndex);
       } catch (err) {
-        extractionError = err; // Capture critical error
+        extractionError = err;
         break;
       }
+      // Short 3-second gap between chunks (down from 22s since we have multi-provider)
       if (currentIndex < chunks.length && !extractionError) {
-        // Wait 22 seconds between chunks to respect Groq's 8000 TPM limit
         let waitTime = 0;
-        while (waitTime < 22000) {
+        while (waitTime < 3000) {
           if (signal?.aborted) {
             extractionError = new Error("Extraction cancelled by user.");
             break;
@@ -923,7 +979,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
   }
 
-  const workers = Array.from({ length: CONCURRENCY }, () => worker());
+  const workers = Array.from({ length: CONCURRENCY }, (_, i) => worker(i));
   await Promise.all(workers);
 
   if (extractionError) {
@@ -1034,4 +1090,77 @@ export async function verifyQuestionsBackground(questions, onProgress) {
   }
 
   return verifiedQuestions;
+}
+
+export async function generateChatbotMockTest(userPrompt) {
+  const prompt = `You are an expert exam setter.
+The user wants to generate a mock test based on the following request:
+"${userPrompt}"
+
+Generate the mock test. Ensure the questions are accurate and difficult enough for the requested exam.
+If the user didn't specify the number of questions, default to 10 questions.
+If the user didn't specify the time limit, default to 15 min.
+
+Return ONLY valid JSON in the following exact format, with no other text:
+{
+  "title": "Test Title",
+  "category": "Bank Exams", 
+  "subject": "Subject Name",
+  "topic": "Topic Name",
+  "timeLimit": "15 min",
+  "questionsCount": 10,
+  "questions": [
+    {
+      "question": "Question text here...",
+      "options": ["Option 1", "Option 2", "Option 3", "Option 4", "Option 5"],
+      "correctAnswerIndex": 0,
+      "explanation": "Detailed explanation..."
+    }
+  ]
+}
+`;
+  
+  const result = await callLLMChain(prompt);
+  
+  if (!result || (!result.questions && !Array.isArray(result))) {
+     throw new Error("AI could not generate questions from your prompt. Try being more specific.");
+  }
+
+  const generatedQuestions = result.questions || result;
+  
+  if (!Array.isArray(generatedQuestions) || generatedQuestions.length === 0) {
+     throw new Error("AI could not generate valid questions. Please try again.");
+  }
+  
+  return {
+    id: `mock_ai_${Date.now()}`,
+    title: result.title || "AI Generated Test",
+    category: result.category || "General",
+    subject: result.subject || "General",
+    topic: result.topic || "",
+    questions: generatedQuestions.length,
+    time: result.timeLimit || "15 min",
+    durationMinutes: parseInt(result.timeLimit) || 15,
+    taken: 0,
+    isFree: false,
+    questionsList: generatedQuestions.map((q, i) => {
+      let opts = q.options;
+      if (!Array.isArray(opts)) {
+        if (typeof opts === 'object') {
+          opts = Object.values(opts);
+        } else {
+          opts = ["A", "B", "C", "D"];
+        }
+      }
+      return {
+        ...q,
+        id: `q_ai_${Date.now()}_${i}`,
+        section: q.section || result.subject || "General",
+        options: opts,
+        correctAnswerIndex: typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0,
+        explanation: q.explanation || "No explanation provided."
+      };
+    }),
+    createdAt: new Date().toISOString(),
+  };
 }
