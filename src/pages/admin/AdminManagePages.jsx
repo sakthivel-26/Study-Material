@@ -9,7 +9,7 @@ import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
 import { CATEGORIES, COURSE_PROGRESS } from "../../data.js";
 import { Badge, ProgressBar } from "../../components/ui.jsx";
-import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, generateChatbotMockTest } from "../../utils/aiTestGenerator.js";
+import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest } from "../../utils/aiTestGenerator.js";
 import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
 
@@ -27,91 +27,9 @@ const getAnswerIndex = (val) => {
 };
 
 
-function AIChatbotMode({ isFreeByDefault, onPreview }) {
-  const { addMockTest, pushToast } = useApp();
-  const [prompt, setPrompt] = useState("");
-  const [generating, setGenerating] = useState(false);
-
-  const handleGenerate = async () => {
-    if (!prompt.trim()) return pushToast("Please enter what kind of test you want to generate.");
-    setGenerating(true);
-    pushToast("✨ AI is crafting your mock test...");
-    
-    try {
-      const result = await generateChatbotMockTest(prompt);
-      const testToPreview = {
-         ...result,
-         isFree: isFreeByDefault
-      };
-      if (onPreview) {
-        onPreview(testToPreview);
-        pushToast(`✨ Mock test preview ready! Review it on the right.`);
-      } else {
-        await addMockTest(testToPreview);
-        pushToast(`🎉 Mock test '${result.title}' generated & published with ${result.questions} questions!`);
-      }
-      setPrompt("");
-    } catch (err) {
-      console.error(err);
-      pushToast(err.message || "Error generating mock test. Please try again.");
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6 max-w-4xl mx-auto py-4">
-      <div className="card p-10 text-center space-y-6 shadow-xl border border-black/5 bg-white rounded-3xl">
-        <div className="w-20 h-20 bg-brand-100 text-brand-600 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-inner">
-           <Sparkles size={40} />
-        </div>
-        <div>
-          <h2 className="text-3xl font-black text-ink">AI Exam Generator Bot</h2>
-          <p className="text-ink-muted text-base max-w-lg mx-auto mt-3">
-            Just tell me what exam you want! I will automatically generate the questions and show you a preview before you publish it.
-          </p>
-        </div>
-
-        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 text-left space-y-2 max-w-2xl mx-auto">
-           <p className="text-sm font-bold text-slate-700">Try asking:</p>
-           <ul className="text-sm text-slate-600 space-y-2 font-medium">
-             <li className="flex gap-2 items-start"><span className="text-brand-500">👉</span> "Generate 20 simplification questions for IBPS Clerk with 15 minutes time limit"</li>
-             <li className="flex gap-2 items-start"><span className="text-brand-500">👉</span> "Create a TNPSC Group 4 General Tamil mock test with 50 questions"</li>
-             <li className="flex gap-2 items-start"><span className="text-brand-500">👉</span> "Railway RRB NTPC Reasoning test, 30 questions, 30 mins"</li>
-           </ul>
-        </div>
-
-        <div className="mt-8 relative max-w-2xl mx-auto shadow-sm group rounded-2xl">
-          <textarea 
-            className="input w-full min-h-[140px] p-5 text-lg font-medium rounded-2xl border-2 border-black/10 focus:border-brand-500 pr-20 transition-all bg-white"
-            placeholder="Type your exam request here (e.g., 'Bank PO Quantitative Aptitude...')"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            disabled={generating}
-          />
-          <button 
-            onClick={handleGenerate}
-            disabled={generating || !prompt.trim()}
-            className="absolute bottom-5 right-5 w-14 h-14 bg-brand-600 hover:bg-brand-500 text-white rounded-xl flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg active:scale-95"
-            title="Generate Preview"
-          >
-            {generating ? <Loader2 size={24} className="animate-spin" /> : <Send size={24} />}
-          </button>
-        </div>
-        
-        {generating && (
-          <div className="mt-6 p-4 bg-brand-50 border border-brand-200 rounded-xl text-brand-700 text-sm font-bold animate-pulse max-w-2xl mx-auto">
-            🤖 Thinking and generating questions... This might take a moment. Please wait.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function CreateMockTestPage({ isFreeByDefault = false }) {
   const { mockTests = [], addMockTest, updateMockTest, deleteMockTest, pushToast } = useApp();
-  const [mode, setMode] = useState("ai"); // "ai" | "manual" | "pdf"
+  const [mode, setMode] = useState("pdf"); // "manual" | "pdf"
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfStatus, setPdfStatus] = useState(""); // "extracting" | "analyzing" | "done" | ""
   const [pdfPageInfo, setPdfPageInfo] = useState("");
@@ -1179,12 +1097,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="inline-flex p-1 rounded-2xl bg-black/[0.05]">
           <button
-            onClick={() => setMode("ai")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === "ai" ? "bg-white shadow-card text-brand-700" : "text-ink-muted hover:text-ink-soft"}`}
-          >
-            <Sparkles size={16} className="text-amber-500" /> ✨ AI Mock Test Generator (Past 5-Yr PYQs)
-          </button>
-          <button
             onClick={() => setMode("pdf")}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${mode === "pdf" ? "bg-white shadow-card text-brand-700" : "text-ink-muted hover:text-ink-soft"}`}
           >
@@ -1200,17 +1112,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         </div>
       </div>
 
-      {mode === "ai" ? <AIChatbotMode isFreeByDefault={isFreeByDefault} /> : ( <> 
       <div className={`grid gap-6 ${(mode === "pdf" && generatedTest) ? "grid-cols-1" : "lg:grid-cols-[1.2fr_1fr]"}`}>
         {/* Left Form */}
         <div className="card p-6 space-y-5">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold text-ink">{mode === "ai" ? "AI Generation Settings" : mode === "pdf" ? "📄 Upload Question Paper PDF" : "Test Details"}</h3>
+            <h3 className="font-bold text-ink">{mode === "pdf" ? "📄 Upload Question Paper PDF" : "Test Details"}</h3>
             <Badge color={color}>{f.category}</Badge>
           </div>
 
           <div>
-            <label className="text-sm font-medium text-ink-soft mb-1.5 block">Test Title (Optional for AI)</label>
+            <label className="text-sm font-medium text-ink-soft mb-1.5 block">Test Title (Optional for PDF)</label>
             <input className="input" placeholder="e.g. IBPS PO Prelims 2024 Full Mock" value={f.title} onChange={(e) => set("title", e.target.value)} />
           </div>
 
@@ -1980,16 +1891,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                 ))}
               </div>
               <div className="pt-2">
-                 <button onClick={mode === "ai" ? publishChatbotTest : applyPDFUpdates} className="btn-primary w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-emerald-500/20">
-                   <CheckCircle2 size={18} /> {mode === "ai" ? "Publish Mock Test" : "Apply Fixes & Update Mock Test"}
+                 <button onClick={applyPDFUpdates} className="btn-primary w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-emerald-500/20">
+                   <CheckCircle2 size={18} /> Apply Fixes & Update Mock Test
                  </button>
               </div>
             </div>
           ) : (
             <div className="p-8 text-center text-ink-muted space-y-2">
               <Sparkles size={32} className="mx-auto text-amber-400 opacity-60" />
-              <p className="font-semibold text-sm text-ink-soft">No AI test generated yet</p>
-              <p className="text-xs">Select an exam category and click "Generate AI Mock Test" to automatically create questions based on past 5 years papers.</p>
+              <p className="font-semibold text-sm text-ink-soft">Nothing generated yet</p>
+              <p className="text-xs">Upload a PDF to extract questions, or build manually.</p>
             </div>
           )}
         </div>
@@ -2743,7 +2654,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           </div>
         </div>
       )}
-      </>)}
     </>
   );
 }
