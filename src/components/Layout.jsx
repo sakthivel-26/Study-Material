@@ -4,6 +4,7 @@ import Sidebar from "./Sidebar.jsx";
 import Header from "./Header.jsx";
 import Toast from "./Toast.jsx";
 import { useApp } from "../store.jsx";
+import { PromoModal } from "./PromoModal.jsx";
 
 import { Link } from "react-router-dom";
 
@@ -58,6 +59,7 @@ export default function Layout() {
         <Footer />
       </div>
       <Toast />
+      <PromoModal />
     </div>
   );
 }
