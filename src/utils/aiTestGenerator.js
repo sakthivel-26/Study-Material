@@ -635,6 +635,7 @@ FORMAT:
 {
   "questions": [
     {
+      "passage": "If the question is part of a puzzle, reading comprehension, or data interpretation set, include the shared paragraph/context here. Otherwise, leave it empty.",
       "question": "The question text here",
       "options": ["A", "B", "C", "D"],
       "correctAnswerIndex": 0,
@@ -647,7 +648,7 @@ RULES:
 - options must be exactly 4 strings.
 - correctAnswerIndex must be 0, 1, 2, or 3.
 - Provide a detailed step-by-step explanation for the correct answer in the "explanation" field.
-- DO NOT include passage text in the question field.
+- If a question relies on a shared paragraph, puzzle, or reading comprehension passage, put that text ONLY in the "passage" field, not in the "question" field.
 
 TEXT:
 ${pdfChunk}
@@ -862,8 +863,8 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   if (geminiKey) providerCallers.push({ name: "Gemini", call: (prompt) => callGemini(geminiKey, prompt) });
   if (nvidiaKey) providerCallers.push({ name: "NVIDIA", call: (prompt) => callNvidia(nvidiaKey, prompt) });
 
-  // How many parallel workers = min(number of providers, 2)
-  const CONCURRENCY = Math.min(providerCallers.length, 2) || 1;
+  // How many parallel workers = min(number of providers, 3)
+  const CONCURRENCY = Math.min(providerCallers.length, 3) || 1;
   console.log(`[AI] 🚀 Parallel extraction with ${CONCURRENCY} workers (${providerCallers.map(p => p.name).join(" + ")})`);
 
   // Each worker gets a preferred provider, with the full chain as fallback
@@ -1002,7 +1003,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         options: q.options,
         correctAnswerIndex: q.correctAnswerIndex,
         source_answer: String.fromCharCode(65 + q.correctAnswerIndex),
-        passage: "",
+        passage: q.passage || "",
         section: category || "General",
         explanation: q.explanation || "",
         imageUrl: ""
