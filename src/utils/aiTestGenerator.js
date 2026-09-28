@@ -132,8 +132,8 @@ async function callGemini(apiKey, prompt) {
   const cleanKey = apiKey.trim();
 
   const candidateEndpoints = [
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${cleanKey}`,
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${cleanKey}`,
   ];
 
   let lastErr = null;
@@ -221,7 +221,7 @@ async function callNvidia(apiKey, prompt) {
   const id = setTimeout(() => controller.abort(), 45000); // 45-second timeout
 
   try {
-    const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+    const response = await fetch("/api/nvidia/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

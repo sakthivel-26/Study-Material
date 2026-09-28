@@ -9,6 +9,13 @@ export default defineConfig({
     allowedHosts: true,
     hmr: {
       host: "localhost",
+    },
+    proxy: {
+      "/api/nvidia": {
+        target: "https://integrate.api.nvidia.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/nvidia/, "")
+      }
     }
   },
 });
