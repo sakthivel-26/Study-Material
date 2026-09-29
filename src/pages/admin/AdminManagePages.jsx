@@ -1694,9 +1694,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         <label className="text-[11px] font-bold text-ink-muted mb-1 block">
                           📊 Attach Chart / Table / Graph Image (Optional):
                         </label>
-                        {approvedQuestions[idx]?.chartImageUrl ? (
+                        {(approvedQuestions[idx]?.chartImageUrl ?? q.chartImageUrl) ? (
                           <div className="relative mb-2">
-                            <img src={approvedQuestions[idx].chartImageUrl} alt="Chart" className="max-h-48 rounded-lg border border-black/10 object-contain bg-white w-full" />
+                            <img src={approvedQuestions[idx]?.chartImageUrl ?? q.chartImageUrl} alt="Chart" className="max-h-48 rounded-lg border border-black/10 object-contain bg-white w-full" />
                             <button
                               type="button"
                               onClick={() => editChartImage(idx, null)}

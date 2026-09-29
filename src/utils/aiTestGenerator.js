@@ -693,7 +693,8 @@ FORMAT:
       "question": "Only the specific question being asked (e.g. 'Who sits immediate left of E?'). Do NOT put the puzzle/passage text here.",
       "options": ["option text A", "option text B", "option text C", "option text D"],
       "correctAnswerIndex": 0,
-      "explanation": "Step-by-step explanation for the correct answer."
+      "explanation": "Step-by-step explanation for the correct answer.",
+      "chart_page_number": null
     }
   ]
 }
@@ -703,6 +704,11 @@ FORMAT:
 2. Do NOT lump the paragraph into the "question" field. The "question" field is strictly for the single question being asked.
 3. Every single question in a group MUST have the exact same "passage" text included in its JSON object.
 4. If you fail to include the paragraph in the "passage" field for a puzzle, the user will be unable to solve it. This is a critical failure.
+
+!!! VISUAL CHARTS & TABLES !!!
+1. If this question is based on a visual chart, graph, or table, you will see a marker in the text like "=== [Page 3 Vision Extract] ===".
+2. If this question relies on that chart data, you MUST set "chart_page_number" to that specific integer (e.g. 3).
+3. If the question does NOT rely on a visual chart, leave "chart_page_number" as null.
 
 OTHER RULES:
 - options must be EXACTLY 4 or 5 strings (no labels like 'A)', '(a)', '1.' prefix in the option text itself).
