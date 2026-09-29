@@ -132,9 +132,9 @@ async function callGemini(apiKey, prompt) {
   const cleanKey = apiKey.trim();
 
   const candidateEndpoints = [
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${cleanKey}`,
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key=${cleanKey}`,
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-002:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${cleanKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${cleanKey}`,
   ];
 
   let lastErr = null;
@@ -175,7 +175,7 @@ async function callGemini(apiKey, prompt) {
 export async function callGeminiVisionPage(apiKey, base64Image, mimeType = "image/png") {
   if (!apiKey || typeof apiKey !== "string") return null;
   const cleanKey = apiKey.trim();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${cleanKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${cleanKey}`;
 
   const prompt = `You are an expert at reading Indian competitive exam question papers (IBPS, SBI, SSC, TNPSC etc.).
 Look at this PDF page image carefully.
@@ -754,7 +754,7 @@ async function callGroq(apiKey, prompt) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
+      model: "llama-3.3-70b-specdec",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.1,
       max_tokens: 4000,
