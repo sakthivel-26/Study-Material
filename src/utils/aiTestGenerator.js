@@ -747,45 +747,57 @@ ${JSON.stringify(questionJson, null, 2)}
 """`;
 
 async function callGroq(apiKey, prompt) {
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-specdec",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.1,
-      max_tokens: 4000,
-    }),
-  });
+  const models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"];
+  let lastErr = null;
+  for (const model of models) {
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.1,
+          max_tokens: 4000,
+        }),
+      });
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    throw new Error(`Groq API Error (${response.status}): ${errText || response.statusText}`);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        if (response.status === 429 || response.status === 401) {
+          throw new Error(`Groq Rate Limit or Auth Error (${response.status}): ${errText}`); // Fast fail to next provider
+        }
+        throw new Error(`Groq API Error (${response.status}): ${errText || response.statusText}`);
+      }
+
+      const data = await response.json();
+      const choice = data.choices?.[0];
+
+      const text = choice?.message?.content || "{}";
+      const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+      const jsonStart = cleaned.indexOf("[");
+      const jsonEnd = cleaned.lastIndexOf("]");
+      
+      let parsed;
+      if (jsonStart !== -1 && jsonEnd !== -1) {
+        parsed = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+      } else {
+        parsed = JSON.parse(cleaned);
+      }
+      
+      return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed || [];
+    } catch (err) {
+      console.warn(`[AI] Groq model ${model} failed:`, err.message);
+      lastErr = err;
+      if (err.message.includes("Rate Limit or Auth Error")) {
+        break; // Break the model loop and fallback to Gemini/NVIDIA
+      }
+    }
   }
-
-  const data = await response.json();
-  const choice = data.choices?.[0];
-
-  if (choice?.finish_reason === "length") {
-    throw new Error("Groq API Error: Output truncated due to length (max_tokens reached).");
-  }
-
-  const text = choice?.message?.content || "{}";
-  const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-  const jsonStart = cleaned.indexOf("[");
-  const jsonEnd = cleaned.lastIndexOf("]");
-  
-  let parsed;
-  if (jsonStart !== -1 && jsonEnd !== -1) {
-    parsed = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
-  } else {
-    parsed = JSON.parse(cleaned);
-  }
-  
-  return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed || [];
+  throw lastErr || new Error("All Groq models failed.");
 }
 
 
@@ -885,7 +897,7 @@ function regexExtractQuestions(pdfText, category) {
         options: options,
         correctAnswerIndex: 0,
         source_answer: "A",
-        passage: "",
+        passage: "", // Fallback passage
         section: category || "General",
         explanation: "",
         imageUrl: ""
@@ -1098,7 +1110,10 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         passage: q.passage || "",
         section: category || "General",
         explanation: q.explanation || "",
-        imageUrl: ""
+        imageUrl: "",
+        chartImageUrl: q.chart_page_number && pageImages && pageImages[q.chart_page_number - 1] 
+            ? "data:" + (pageImages[q.chart_page_number - 1].mimeType || "image/png") + ";base64," + pageImages[q.chart_page_number - 1].base64 
+            : ""
       });
     }
   }

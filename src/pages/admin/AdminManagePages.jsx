@@ -276,6 +276,31 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     setManualQuestions((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const addManualImage = (idx, base64DataUrl) => {
+    if (!base64DataUrl) return;
+    setGeneratedTest(prev => {
+      const q = prev.questionsList[idx];
+      const urls = q.imageUrls || (q.imageUrl ? [q.imageUrl] : []);
+      const newUrls = [...urls, base64DataUrl];
+      
+      const newQuestionsList = [...prev.questionsList];
+      newQuestionsList[idx] = { ...q, imageUrls: newUrls, imageUrl: newUrls.length > 0 ? newUrls[0] : null };
+      return { ...prev, questionsList: newQuestionsList };
+    });
+  };
+
+  const removeManualImage = (idx, imgIndex) => {
+    setGeneratedTest(prev => {
+      const q = prev.questionsList[idx];
+      const urls = q.imageUrls || (q.imageUrl ? [q.imageUrl] : []);
+      const newUrls = urls.filter((_, i) => i !== imgIndex);
+      
+      const newQuestionsList = [...prev.questionsList];
+      newQuestionsList[idx] = { ...q, imageUrls: newUrls, imageUrl: newUrls.length > 0 ? newUrls[0] : null };
+      return { ...prev, questionsList: newQuestionsList };
+    });
+  };
+
   const updateManualQuestion = (idx, field, val) => {
     setManualQuestions((prev) =>
       prev.map((q, i) => (i === idx ? { ...q, [field]: val } : q))
@@ -443,6 +468,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         section: approvalStatus?.section || q.section || "General",
         passage: approvalStatus?.passage ?? (q.passage || ""),
         imageUrl: approvalStatus?.chartImageUrl ?? approvalStatus?.imageUrl ?? (q.chartImageUrl || q.imageUrl || ""),
+        imageUrls: approvalStatus?.chartImageUrls || q.chartImageUrls || approvalStatus?.imageUrls || q.imageUrls || [],
         solutionImageUrl: approvalStatus?.solutionImageUrl ?? (q.solutionImageUrl || ""),
         question: approvalStatus?.questionText ?? (q.question_text || q.question || `Question ${idx + 1}`),
         options: optsArray,
@@ -897,6 +923,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             options: optionsArray,
             correctAnswerIndex: ansIndex < optionsArray.length ? ansIndex : 0,
             explanation: q.explanation || "Verification pending.",
+            imageUrl: q.chartImageUrl || q.imageUrl || "",
+            chartImageUrl: q.chartImageUrl || "",
           });
       });
       const draftTest = { ...result, questionsList: finalQuestions, id: "draft_" + Date.now() };
@@ -964,10 +992,31 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   };
 
     const editChartImage = (idx, base64DataUrl) => {
-    setApprovedQuestions(prev => ({
-      ...prev,
-      [idx]: { ...prev[idx], chartImageUrl: base64DataUrl || null }
-    }));
+    if (!base64DataUrl) return;
+    setApprovedQuestions(prev => {
+      const q = prev[idx] || {};
+      const currentUrls = q.chartImageUrls || (q.chartImageUrl ? [q.chartImageUrl] : []);
+      return {
+        ...prev,
+        [idx]: { ...q, chartImageUrls: [...currentUrls, base64DataUrl], chartImageUrl: base64DataUrl }
+      };
+    });
+  };
+
+  const removeChartImage = (idx, imgIndex) => {
+    setApprovedQuestions(prev => {
+      const q = prev[idx] || {};
+      const currentUrls = q.chartImageUrls || (q.chartImageUrl ? [q.chartImageUrl] : []);
+      const newUrls = currentUrls.filter((_, i) => i !== imgIndex);
+      return {
+        ...prev,
+        [idx]: { 
+          ...q, 
+          chartImageUrls: newUrls,
+          chartImageUrl: newUrls.length > 0 ? newUrls[0] : null
+        }
+      };
+    });
   };
 
   const editQuestionSection = (idx, sectionName) => {
@@ -1517,6 +1566,19 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                     {/* Image Attachment */}
                     <div>
                       <label className="text-xs font-bold text-ink-muted mb-1 block">Attach Chart / Image (Optional)</label>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {(q.imageUrls || (q.imageUrl ? [q.imageUrl] : [])).map((url, imgIdx) => (
+                          <div key={imgIdx} className="relative max-w-sm rounded-xl border border-black/10 overflow-hidden bg-white p-2">
+                            <img src={url} className="w-full h-auto object-contain max-h-48" alt="Preview" />
+                            <button
+                              type="button"
+                              onClick={() => removeManualImage(qIdx, imgIdx)}
+                              className="absolute top-1 right-1 bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold hover:bg-rose-600 shadow"
+                            >✕</button>
+                          </div>
+                        ))}
+                      </div>
+                      
                       <div className="flex items-center gap-3">
                         <input
                           type="file"
@@ -1528,26 +1590,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             if (file) {
                               const reader = new FileReader();
                               reader.onloadend = () => {
-                                updateManualQuestion(qIdx, "imageUrl", reader.result);
+                                addManualImage(qIdx, reader.result);
                               };
                               reader.readAsDataURL(file);
                             }
                           }}
                         />
                         <label htmlFor={`img-upload-${qIdx}`} className="btn-soft text-xs px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-200 cursor-pointer flex items-center gap-1.5 rounded-xl text-ink-soft font-bold shadow-xs">
-                          <ImageIcon size={14} /> {q.imageUrl ? "Change Chart/Image" : "Attach Chart/Image"}
+                          <ImageIcon size={14} /> Add Chart/Image
                         </label>
-                        {q.imageUrl && (
-                          <button type="button" onClick={() => updateManualQuestion(qIdx, "imageUrl", "")} className="text-rose-500 hover:bg-rose-50 p-1.5 rounded-xl border border-rose-100 text-xs font-bold flex items-center gap-1">
-                            <X size={14} /> Remove Image
-                          </button>
-                        )}
                       </div>
-                      {q.imageUrl && (
-                        <div className="mt-2 max-w-sm rounded-xl border border-black/10 overflow-hidden relative bg-white p-2">
-                           <img src={q.imageUrl} className="w-full h-auto object-contain max-h-48" alt="Preview" />
-                        </div>
-                      )}
 
                       {/* Solution Image Upload */}
                       <label className="text-xs font-bold text-ink-muted mb-1 mt-4 block">Attach Solution Image (Optional)</label>
@@ -1694,18 +1746,22 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         <label className="text-[11px] font-bold text-ink-muted mb-1 block">
                           📊 Attach Chart / Table / Graph Image (Optional):
                         </label>
-                        {(approvedQuestions[idx]?.chartImageUrl ?? q.chartImageUrl) ? (
-                          <div className="relative mb-2">
-                            <img src={approvedQuestions[idx]?.chartImageUrl ?? q.chartImageUrl} alt="Chart" className="max-h-48 rounded-lg border border-black/10 object-contain bg-white w-full" />
-                            <button
-                              type="button"
-                              onClick={() => editChartImage(idx, null)}
-                              className="absolute top-1 right-1 bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold hover:bg-rose-600 shadow"
-                            >✕ Remove</button>
+                        
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            {(approvedQuestions[idx]?.chartImageUrls || (approvedQuestions[idx]?.chartImageUrl ? [approvedQuestions[idx].chartImageUrl] : (q.chartImageUrls || (q.chartImageUrl ? [q.chartImageUrl] : [])))).map((url, imgIdx) => (
+                              <div key={imgIdx} className="relative w-full max-w-sm">
+                                <img src={url} alt="Chart" className="max-h-48 rounded-lg border border-black/10 object-contain bg-white w-full" />
+                                <button
+                                  type="button"
+                                  onClick={() => removeChartImage(idx, imgIdx)}
+                                  className="absolute top-1 right-1 bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold hover:bg-rose-600 shadow"
+                                >✕</button>
+                              </div>
+                            ))}
                           </div>
-                        ) : (
-                          <label className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border-2 border-dashed border-brand-300 bg-brand-50/50 hover:bg-brand-100/50 text-brand-700 text-[11px] font-semibold mb-2 transition-colors">
-                            <span>📎 Upload Chart / Graph / Table Image (PNG, JPG)</span>
+                          
+                          <label className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border-2 border-dashed border-brand-300 bg-brand-50/50 hover:bg-brand-100/50 text-brand-700 text-[11px] font-semibold mb-2 transition-colors w-fit">
+                            <span>📎 Add Chart / Graph Image</span>
                             <input
                               type="file"
                               accept="image/*"
@@ -1719,7 +1775,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                               }}
                             />
                           </label>
-                        )}
+
                         <p className="text-[10px] text-ink-muted mb-2">The image will be shown to students alongside this question during the mock test.</p>
                       </div>
 
@@ -2581,6 +2637,20 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       {/* Image / Chart Attachment */}
                       <div>
                         <label className="text-[11px] font-bold text-ink-muted mb-1 block">Chart / Image Attachment (Optional):</label>
+                        
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {(q.imageUrls || (q.imageUrl ? [q.imageUrl] : [])).map((url, imgIdx) => (
+                            <div key={imgIdx} className="relative h-28 max-w-sm rounded-xl border border-black/10 overflow-hidden bg-black/5 p-1">
+                              <img src={url} className="w-full h-full object-contain" alt="Attached preview" />
+                              <button
+                                type="button"
+                                onClick={() => removeEditingImage(qIdx, imgIdx)}
+                                className="absolute top-1 right-1 bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold hover:bg-rose-600 shadow"
+                              >✕</button>
+                            </div>
+                          ))}
+                        </div>
+
                         <div className="flex items-center gap-2">
                           <input
                             type="file"
@@ -2592,7 +2662,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                               if (file) {
                                 const reader = new FileReader();
                                 reader.onloadend = () => {
-                                  updateEditingQuestion(qIdx, "imageUrl", reader.result);
+                                  addEditingImage(qIdx, reader.result);
                                 };
                                 reader.readAsDataURL(file);
                               }
@@ -2602,24 +2672,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             htmlFor={`edit-img-upload-${qIdx}`}
                             className="btn-soft text-xs px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 cursor-pointer flex items-center gap-1.5 flex-1 justify-center whitespace-nowrap rounded-lg text-ink-soft font-semibold"
                           >
-                            <ImageIcon size={14} /> {q.imageUrl ? "Change Image/Chart" : "Attach Chart/Image"}
+                            <ImageIcon size={14} /> Attach Image/Chart
                           </label>
-                          {q.imageUrl && (
-                            <button
-                              type="button"
-                              onClick={() => updateEditingQuestion(qIdx, "imageUrl", "")}
-                              className="btn-ghost text-rose-500 hover:bg-rose-50 p-1.5 rounded-lg border border-rose-100"
-                              title="Remove Image"
-                            >
-                              <X size={14} />
-                            </button>
-                          )}
                         </div>
-                        {q.imageUrl && (
-                          <div className="mt-2 h-28 w-full max-w-sm rounded-xl border border-black/10 overflow-hidden relative group bg-black/5 p-1">
-                             <img src={q.imageUrl} className="w-full h-full object-contain" alt="Attached preview" />
-                          </div>
-                        )}
                       </div>
 
                       {/* Explanation */}

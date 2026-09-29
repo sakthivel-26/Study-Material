@@ -593,6 +593,24 @@ export default function MockTestRunner({ test, onClose }) {
                     </div>
                   )}
 
+                  {(() => {
+                    const urls = currentQ.imageUrls && currentQ.imageUrls.length > 0 ? currentQ.imageUrls : ((currentQ.imageUrl || currentQ.image || currentQ.chartUrl || currentQ.img) ? [currentQ.imageUrl || currentQ.image || currentQ.chartUrl || currentQ.img] : []);
+                    if (urls.length === 0) return null;
+                    return (
+                      <div className={`mt-2 mb-6 grid gap-3 ${urls.length > 1 ? "grid-cols-2" : "grid-cols-1 max-w-xl"}`}>
+                        {urls.map((url, idx) => (
+                          <div key={idx} className="rounded-xl border border-black/20 dark:border-slate-700/80 bg-white p-2.5 shadow-xl overflow-hidden flex items-center justify-center">
+                            <img
+                              src={url}
+                              alt="Question Chart / Image"
+                              className="w-full max-h-[220px] object-contain rounded-lg block"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
                   <div className="space-y-3 pt-2">
                     <div className="flex items-center justify-between mb-2">
                       {currentQ.passage ? (
@@ -616,16 +634,6 @@ export default function MockTestRunner({ test, onClose }) {
                       {renderFormattedText(currentQ.question)}
                     </div>
                   </div>
-
-                  {(currentQ.imageUrl || currentQ.image || currentQ.chartUrl || currentQ.img) && (
-                    <div className="my-4 rounded-xl border border-black/20 dark:border-slate-700/80 max-w-xl bg-white p-2.5 shadow-xl overflow-hidden">
-                      <img
-                        src={currentQ.imageUrl || currentQ.image || currentQ.chartUrl || currentQ.img}
-                        alt="Question Chart / Image"
-                        className="w-full max-h-[350px] object-contain rounded-lg block"
-                      />
-                    </div>
-                  )}
 
                   {/* Options List */}
                   <div className="space-y-3 pt-4 pb-6">
