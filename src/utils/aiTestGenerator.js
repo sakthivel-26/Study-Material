@@ -682,15 +682,15 @@ export async function generateAIMockTest({ category, subject, topic, questionsCo
 // Upload a PYQ paper PDF → AI extracts exact questions → Mock Test
 // ------------------------------------------------------------------
 
-const buildExtractionPrompt = (pdfChunk, limit) => `You are a strict data extractor for Indian competitive exam question papers (IBPS, SBI, TNPSC, SSC, etc.). Extract exactly ${limit} questions from this text.
+const buildExtractionPrompt = (pdfChunk, limit) => `You are a strict data extractor for Indian competitive exam question papers. Extract up to ${limit} questions from this text.
 Output a JSON object. No markdown, no extra text outside the JSON block.
 
 FORMAT:
 {
   "questions": [
     {
-      "passage": "CRITICAL: If questions are based on a shared puzzle, seating arrangement, blood relation, coding-decoding, reading comprehension, or data interpretation (DI) set, copy the FULL shared paragraph/directions/data here verbatim. Do NOT leave this empty for such questions. For standalone math or simple questions, leave it as empty string.",
-      "question": "Only the specific question being asked (e.g. 'Who sits immediate left of E?'). Do NOT include the puzzle/passage text here.",
+      "passage": "If the question is part of a Reading Comprehension, Puzzle, Seating Arrangement, Data Interpretation (DI), or any group of questions sharing a common paragraph/directions, you MUST copy the ENTIRE shared paragraph verbatim here. Do NOT leave this empty for such questions. For standalone questions, leave as empty string.",
+      "question": "Only the specific question being asked (e.g. 'Who sits immediate left of E?'). Do NOT put the puzzle/passage text here.",
       "options": ["option text A", "option text B", "option text C", "option text D"],
       "correctAnswerIndex": 0,
       "explanation": "Step-by-step explanation for the correct answer."
@@ -698,12 +698,16 @@ FORMAT:
   ]
 }
 
-CRITICAL RULES:
-1. options must be EXACTLY 4 or 5 strings (no labels like 'A)', '(a)', '1.' prefix in the option text itself).
-2. correctAnswerIndex must be 0, 1, 2, 3, or 4.
-3. PASSAGE RULE (most important): For ANY question that belongs to a set (seating arrangement, blood relation, reading comprehension, data interpretation, puzzle), copy the entire shared problem description/passage into the "passage" field. Every question in that set must have the SAME passage text. The "question" field should only contain the individual question (e.g. "Who sits to the left of B?").
-4. For standalone questions (simple math, vocabulary, GK), leave passage as empty string "".
-5. Provide detailed explanation in the "explanation" field.
+!!! EXTREMELY IMPORTANT: THE PASSAGE / PUZZLE RULE !!!
+1. ANY question that belongs to a set (Puzzle, Seating Arrangement, Reading Comprehension, DI) MUST have the full problem description/paragraph placed in the "passage" field. 
+2. Do NOT lump the paragraph into the "question" field. The "question" field is strictly for the single question being asked.
+3. Every single question in a group MUST have the exact same "passage" text included in its JSON object.
+4. If you fail to include the paragraph in the "passage" field for a puzzle, the user will be unable to solve it. This is a critical failure.
+
+OTHER RULES:
+- options must be EXACTLY 4 or 5 strings (no labels like 'A)', '(a)', '1.' prefix in the option text itself).
+- correctAnswerIndex must be 0, 1, 2, 3, or 4.
+- Provide detailed explanation in the "explanation" field.
 
 TEXT:
 ${pdfChunk}
