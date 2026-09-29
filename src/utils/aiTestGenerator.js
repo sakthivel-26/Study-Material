@@ -928,7 +928,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
   }
 
-  const chunks = chunkText(enrichedText, 1500);
+  const chunks = chunkText(enrichedText, 5000);
   let allQuestions = [];
   let completedChunks = 0;
 
@@ -984,7 +984,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   async function processChunk(chunk, index, workerIndex) {
     if (signal?.aborted) throw new Error("Extraction cancelled by user.");
     let chunkQuestions = [];
-    const limits = [6, 3, 2];
+    const limits = [20, 15, 10];
     let currentLimitIndex = 0;
 
     while (currentLimitIndex < limits.length) {
