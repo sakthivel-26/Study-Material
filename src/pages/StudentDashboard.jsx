@@ -1,16 +1,18 @@
+import { useState } from "react";
 import HeroBanner from "../components/HeroBanner.jsx";
 import CourseCatalog from "../components/CourseCatalog.jsx";
 import { RightSidebar } from "../components/RightSidebar.jsx";
 import { useApp } from "../store.jsx";
-import { Clock, Play, HelpCircle, TrendingUp, Zap, ArrowRight } from "lucide-react";
+import { Clock, Play, HelpCircle, TrendingUp, Zap, ArrowRight, Sparkles, Divide, Calculator, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { MapPin, Phone, Mail } from "lucide-react";
+import MockTestRunner from "../components/MockTestRunner.jsx";
+import { generateAIMockTest } from "../utils/aiTestGenerator.js";
 
 function FeaturedFreeMocks() {
   const { mockTests } = useApp();
   const navigate = useNavigate();
-  // Get top 3 free tests
   const freeTests = mockTests.filter(t => t.isFree === true).slice(0, 3);
 
   if (freeTests.length === 0) return null;
@@ -24,7 +26,7 @@ function FeaturedFreeMocks() {
           </h2>
           <p className="text-sm text-ink-muted mt-0.5">Start practicing immediately for free.</p>
         </div>
-        <button onClick={() => navigate("/free-mocks")} className="btn-ghost text-sm text-brand-700 font-semibold px-3 py-1.5">
+        <button onClick={() => navigate("/free-mocks")} className="btn-ghost text-sm text-brand-700 font-semibold px-3 py-1.5 flex items-center gap-1">
           View All <ArrowRight size={16} />
         </button>
       </div>
@@ -64,11 +66,152 @@ function FeaturedFreeMocks() {
   );
 }
 
+const DASHBOARD_SPEED_DRILLS = [
+  {
+    id: "squares_cubes",
+    title: "Tough Squares & Cubes",
+    category: "Speed Math (Squares & Cubes)",
+    badge: "Powers & Differences",
+    sample: "(43² - 29²) ÷ 16 + 15² = ?",
+    icon: Sparkles,
+    color: "#2563EB",
+  },
+  {
+    id: "roots",
+    title: "4-Digit Roots & Radicals",
+    category: "Speed Math (Roots & Radicals)",
+    badge: "Square & Cube Roots",
+    sample: "√5184 + √2704 - √1764 = ?",
+    icon: Zap,
+    color: "#059669",
+  },
+  {
+    id: "fractions",
+    title: "Numerator & Denominator",
+    category: "Speed Math (Numerator & Denominator)",
+    badge: "Rational Fractions",
+    sample: "(3/7) × 441 + [(38² - 22²) ÷ 32] = ?",
+    icon: Divide,
+    color: "#DB2777",
+  },
+  {
+    id: "simplification",
+    title: "Tough Simplification Master",
+    category: "Speed Math (Simplification)",
+    badge: "Bank Exam Speed",
+    sample: "[(43² - 29²) ÷ 16] + √5184 ÷ 12 = ?",
+    icon: Calculator,
+    color: "#7C3AED",
+  },
+];
+
+function SpeedMathDashboardSection({ onStartDrill, generatingId }) {
+  const navigate = useNavigate();
+
+  return (
+    <section className="mb-8">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-extrabold text-ink flex items-center gap-2">
+            <Zap size={20} className="text-brand-600" /> Speed Math Arena (Tough Calculation Drills)
+          </h2>
+          <p className="text-sm text-ink-muted mt-0.5">High-speed calculation: Tough Squares, Cubes, 4-digit Roots & Numerator/Denominator Fractions.</p>
+        </div>
+        <button onClick={() => navigate("/daily-practice")} className="btn-ghost text-sm text-brand-700 font-semibold px-3 py-1.5 flex items-center gap-1">
+          View All <ArrowRight size={16} />
+        </button>
+      </div>
+
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {DASHBOARD_SPEED_DRILLS.map((d, i) => (
+          <motion.div
+            key={d.id}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05 }}
+            className="card p-4 flex flex-col bg-white border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all rounded-2xl"
+            style={{ borderTop: `3px solid ${d.color}` }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white" style={{ background: d.color }}>
+                <d.icon size={18} />
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider" style={{ background: `${d.color}15`, color: d.color }}>
+                {d.badge}
+              </span>
+            </div>
+
+            <h3 className="font-extrabold text-ink text-sm mb-1.5">{d.title}</h3>
+
+            <div className="bg-slate-50 border border-slate-100 rounded-lg p-2 my-1.5 text-[11px] font-mono font-semibold text-slate-700 leading-tight">
+              {d.sample}
+            </div>
+
+            <p className="text-[11px] text-slate-500 mb-4 mt-1 flex-1">
+              30 rapid questions · 15 mins
+            </p>
+
+            <button
+              onClick={() => onStartDrill(d)}
+              disabled={generatingId !== null}
+              className={`w-full py-2 rounded-xl text-xs font-bold text-white shadow-sm hover:shadow transition-all flex items-center justify-center gap-1.5 ${generatingId ? "opacity-75 cursor-not-allowed" : ""}`}
+              style={{ background: d.color }}
+            >
+              {generatingId === d.id ? (
+                <>
+                  <Loader2 size={13} className="animate-spin" /> Generating...
+                </>
+              ) : (
+                <>
+                  <Play size={13} /> Start 30 Qs Drill
+                </>
+              )}
+            </button>
+          </motion.div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function StudentDashboard() {
+  const [activeTest, setActiveTest] = useState(null);
+  const [generatingId, setGeneratingId] = useState(null);
+  const { pushToast } = useApp();
+
+  const handleStartDrill = async (drill) => {
+    setGeneratingId(drill.id);
+    try {
+      const res = await generateAIMockTest({
+        category: drill.category,
+        questionsCount: 30,
+        timeLimit: "15 min"
+      });
+
+      const speedMock = {
+        id: `speed_mock_${drill.id}_${Date.now()}`,
+        title: `${drill.title} - Speed Drill`,
+        category: "Speed Math",
+        questions: res.questionsList.length || 30,
+        time: "15 min",
+        durationMinutes: 15,
+        questionsList: res.questionsList,
+        color: drill.color,
+      };
+
+      setActiveTest(speedMock);
+    } catch (err) {
+      pushToast("Failed to generate questions. Please try again.", "error");
+    } finally {
+      setGeneratingId(null);
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
       <div className="min-w-0 space-y-8">
         <HeroBanner />
+        <SpeedMathDashboardSection onStartDrill={handleStartDrill} generatingId={generatingId} />
         <FeaturedFreeMocks />
         <CourseCatalog compact />
         <div className="mt-12 mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -121,6 +264,10 @@ export default function StudentDashboard() {
         </div>
       </div>
       <aside className="hidden xl:block"><div className="sticky top-[88px]"><RightSidebar /></div></aside>
+
+      {activeTest && (
+        <MockTestRunner test={activeTest} onClose={() => setActiveTest(null)} />
+      )}
     </div>
   );
 }
