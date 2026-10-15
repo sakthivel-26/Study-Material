@@ -51,5 +51,11 @@ service cloud.firestore {
       allow create: if true; // Anyone can submit an inquiry / lead
       allow read, update, delete: if true; // Admin and app can view and manage leads
     }
+
+    // 6. Global Settings (Promo Banner, Pricing Plans, Coupons)
+    match /settings/{id} {
+      allow read: if true; // Publicly readable on all devices and visitors
+      allow write: if true; // Admin updates settings from admin panel
+    }
   }
 }

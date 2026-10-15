@@ -75,9 +75,15 @@ export async function subscribeBackend(user, { onUploads, onTests, onNotificatio
   
   if (onSettings) {
     unsubs.push(
-      onSnapshot(doc(db, COLLECTIONS.settings, "global"), (snap) => {
-        if (snap.exists()) onSettings(snap.data());
-      })
+      onSnapshot(
+        doc(db, COLLECTIONS.settings, "global"),
+        (snap) => {
+          if (snap.exists()) onSettings(snap.data());
+        },
+        (err) => {
+          console.warn("Firestore settings onSnapshot error:", err);
+        }
+      )
     );
   }
   return () => unsubs.forEach((u) => u());
@@ -248,9 +254,23 @@ export async function fsSyncUser(user) {
 export const useRealtimeBackend = isFirebaseConfigured;
 
 export async function fsUpdateSettings(data) {
+  if (!isFirebaseConfigured) return;
   const { doc, setDoc } = await import("firebase/firestore");
   const db = await getFirebaseDb();
   await setDoc(doc(db, COLLECTIONS.settings, "global"), data, { merge: true });
+}
+
+export async function fsGetSettings() {
+  if (!isFirebaseConfigured) return null;
+  try {
+    const { doc, getDoc } = await import("firebase/firestore");
+    const db = await getFirebaseDb();
+    const snap = await getDoc(doc(db, COLLECTIONS.settings, "global"));
+    return snap.exists() ? snap.data() : null;
+  } catch (err) {
+    console.warn("Error fetching settings from Firestore:", err);
+    return null;
+  }
 }
 
 

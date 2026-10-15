@@ -3275,86 +3275,341 @@ export function AnalyticsPage() {
 
 /* -------------------------- Plans & Coupon Codes -------------------------- */
 export function PlansPage() {
-  const { pushToast, promoBanner, updatePromoBanner } = useApp();
-  const defaults = [
-    { id: "banking", name: "Banking Full Mock Package", amount: "499", exams: "SBI, IBPS & RRB" },
-    { id: "tnpsc", name: "TNPSC Full Mock Package", amount: "599", exams: "Group I, II, IV & VAO" },
-    { id: "ssc", name: "SSC Full Mock Package", amount: "499", exams: "CGL, CHSL, MTS & GD" },
-    { id: "railway", name: "Railway Full Mock Package", amount: "399", exams: "NTPC, Group D & ALP" },
-    { id: "navy", name: "Defence & Navy Mock Package", amount: "399", exams: "Navy, NDA & Agniveer" },
-  ];
-  const [plans, setPlans] = useState(() => { try { return JSON.parse(localStorage.getItem("ken_plans")) || defaults; } catch { return defaults; } });
+  const { pushToast, promoBanner, updatePromoBanner, plans = [], updatePlans, coupons = [], updateCoupons } = useApp();
   const [coupon, setCoupon] = useState({ code: "", discount: "", description: "" });
-  const [coupons, setCoupons] = useState(() => { try { return JSON.parse(localStorage.getItem("ken_coupons")) || []; } catch { return []; } });
-  
   const [banner, setBanner] = useState(promoBanner);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isSavingBanner, setIsSavingBanner] = useState(false);
 
-  const savePlans = (next) => { setPlans(next); localStorage.setItem("ken_plans", JSON.stringify(next)); pushToast("Plans saved. Students will see the updated prices."); };
-  const addCoupon = () => { if (!coupon.code.trim() || !Number(coupon.discount)) return pushToast("Enter a coupon code and discount percentage."); const next=[...coupons,{...coupon,code:coupon.code.trim().toUpperCase()}];setCoupons(next);localStorage.setItem("ken_coupons",JSON.stringify(next));setCoupon({code:"",discount:"",description:""});pushToast("Coupon created successfully."); };
-  
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setBanner({ ...banner, image: ev.target.result });
-    };
-    reader.readAsDataURL(file);
+  // Synchronize banner local state with live promoBanner from cloud
+  useEffect(() => {
+    if (promoBanner) {
+      setBanner(promoBanner);
+    }
+  }, [promoBanner]);
+
+  const savePlans = async (next) => {
+    try {
+      await updatePlans(next);
+      pushToast("Plans saved & synced to all devices! 🎉");
+    } catch (e) {
+      pushToast("Saved locally. Cloud sync pending.");
+    }
   };
 
-  return <><PageHeader icon={<ClipboardPlus size={22}/>} title="Plans, Pricing & Offers" subtitle="Set full mock-package amounts and promotional coupon codes."/>
-    <div className="grid xl:grid-cols-[1.35fr_.85fr] gap-6"><section className="card p-6"><h3 className="font-bold text-ink mb-1">Full mock-test packages</h3><p className="text-sm text-ink-muted mb-5">The first mock remains free. Students see these amounts when a package is locked.</p><div className="space-y-3">{plans.map((plan,i)=><div key={plan.id} className="rounded-xl border border-black/5 p-4 grid sm:grid-cols-[1fr_120px] gap-3"><div><p className="font-semibold text-ink">{plan.name}</p><p className="text-xs text-ink-muted">{plan.exams}</p></div><label className="text-xs font-semibold text-ink-muted">Amount (₹)<input className="input mt-1 py-2" type="number" min="0" value={plan.amount} onChange={e=>savePlans(plans.map((p,x)=>x===i?{...p,amount:e.target.value}:p))}/></label></div>)}</div></section>
-    <section className="card p-6"><h3 className="font-bold text-ink">Create offer coupon</h3><p className="text-sm text-ink-muted mt-1 mb-5">Coupons can be applied at payment checkout.</p><div className="space-y-3"><input className="input" placeholder="Code e.g. BANK20" value={coupon.code} onChange={e=>setCoupon({...coupon,code:e.target.value})}/><input className="input" type="number" min="1" max="100" placeholder="Discount %" value={coupon.discount} onChange={e=>setCoupon({...coupon,discount:e.target.value})}/><input className="input" placeholder="Offer description (optional)" value={coupon.description} onChange={e=>setCoupon({...coupon,description:e.target.value})}/><button onClick={addCoupon} className="btn-primary w-full py-2.5"><Plus size={16}/>Create coupon</button></div><div className="mt-6 pt-5 border-t border-black/5 space-y-2">{coupons.length===0?<p className="text-sm text-ink-muted">No coupons created yet.</p>:coupons.map((c,i)=><div key={c.code} className="flex justify-between rounded-lg bg-brand-50 p-3"><span><b>{c.code}</b><small className="block text-ink-muted">{c.description}</small></span><span className="font-bold text-brand-700">{c.discount}% OFF <button onClick={()=>{const n=coupons.filter((_,x)=>x!==i);setCoupons(n);localStorage.setItem("ken_coupons",JSON.stringify(n))}} className="ml-2 text-rose-600">×</button></span></div>)}</div></section></div>
-    
-    <div className="mt-6 card p-6">
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h3 className="font-bold text-ink">Global Promo Banner</h3>
-          <p className="text-sm text-ink-muted mt-1">Configure the announcement banner displayed at the top of the student dashboard.</p>
-        </div>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" className="sr-only peer" checked={banner.enabled} onChange={e => {
-            const next = {...banner, enabled: e.target.checked};
-            setBanner(next);
-            updatePromoBanner(next);
-          }} />
-          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-600 relative"></div>
-        </label>
+  const addCoupon = async () => {
+    if (!coupon.code.trim() || !Number(coupon.discount)) {
+      return pushToast("Enter a coupon code and discount percentage.");
+    }
+    const next = [...coupons, { ...coupon, code: coupon.code.trim().toUpperCase() }];
+    try {
+      await updateCoupons(next);
+      setCoupon({ code: "", discount: "", description: "" });
+      pushToast("Coupon created & synced to all devices! 🎉");
+    } catch (e) {
+      pushToast("Coupon created locally.");
+    }
+  };
+
+  const removeCoupon = async (idx) => {
+    const next = coupons.filter((_, x) => x !== idx);
+    try {
+      await updateCoupons(next);
+      pushToast("Coupon removed.");
+    } catch (e) {
+      pushToast("Coupon removed locally.");
+    }
+  };
+
+  // Compress image on canvas to max 900x600 at 0.75 quality so it never exceeds Firestore limits (<50KB)
+  const compressImage = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (e) => {
+        const img = new Image();
+        img.src = e.target.result;
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          const maxW = 900;
+          const maxH = 600;
+          if (width > maxW || height > maxH) {
+            if (width / height > maxW / maxH) {
+              height = Math.round((height * maxW) / width);
+              width = maxW;
+            } else {
+              width = Math.round((width * maxH) / height);
+              height = maxH;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", 0.75));
+        };
+        img.onerror = reject;
+      };
+      reader.onerror = reject;
+    });
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setIsUploading(true);
+    try {
+      const compressed = await compressImage(file);
+      setBanner(prev => ({ ...prev, image: compressed }));
+      pushToast("Image compressed & attached! Click 'Publish & Sync Banner' below.");
+    } catch (err) {
+      console.error("Image upload failed:", err);
+      pushToast("Failed to process image. Try a smaller image.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handlePublishBanner = async () => {
+    setIsSavingBanner(true);
+    try {
+      await updatePromoBanner(banner);
+      pushToast("Promo banner published & synced across all devices! 🎉");
+    } catch (err) {
+      console.error("Failed to publish banner:", err);
+      pushToast("Saved locally. Error syncing to cloud: " + (err.message || "Failed"));
+    } finally {
+      setIsSavingBanner(false);
+    }
+  };
+
+  return (
+    <>
+      <PageHeader
+        icon={<ClipboardPlus size={22} />}
+        title="Plans, Pricing & Offers"
+        subtitle="Set full mock-package amounts and promotional coupon codes."
+      />
+      <div className="grid xl:grid-cols-[1.35fr_.85fr] gap-6">
+        <section className="card p-6">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-bold text-ink">Full mock-test packages</h3>
+            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+              Live Cloud Sync
+            </span>
+          </div>
+          <p className="text-sm text-ink-muted mb-5">The first mock remains free. Students see these amounts when a package is locked.</p>
+          <div className="space-y-3">
+            {plans.map((plan, i) => (
+              <div key={plan.id} className="rounded-xl border border-black/5 p-4 grid sm:grid-cols-[1fr_120px] gap-3">
+                <div>
+                  <p className="font-semibold text-ink">{plan.name}</p>
+                  <p className="text-xs text-ink-muted">{plan.exams}</p>
+                </div>
+                <label className="text-xs font-semibold text-ink-muted">
+                  Amount (₹)
+                  <input
+                    className="input mt-1 py-2"
+                    type="number"
+                    min="0"
+                    value={plan.amount}
+                    onChange={(e) => savePlans(plans.map((p, x) => (x === i ? { ...p, amount: e.target.value } : p)))}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="card p-6">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-bold text-ink">Create offer coupon</h3>
+            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+              Live Cloud Sync
+            </span>
+          </div>
+          <p className="text-sm text-ink-muted mt-1 mb-5">Coupons can be applied at payment checkout across all devices.</p>
+          <div className="space-y-3">
+            <input
+              className="input uppercase"
+              placeholder="Code e.g. BANK20"
+              value={coupon.code}
+              onChange={(e) => setCoupon({ ...coupon, code: e.target.value })}
+            />
+            <input
+              className="input"
+              type="number"
+              min="1"
+              max="100"
+              placeholder="Discount %"
+              value={coupon.discount}
+              onChange={(e) => setCoupon({ ...coupon, discount: e.target.value })}
+            />
+            <input
+              className="input"
+              placeholder="Offer description (optional)"
+              value={coupon.description}
+              onChange={(e) => setCoupon({ ...coupon, description: e.target.value })}
+            />
+            <button onClick={addCoupon} className="btn-primary w-full py-2.5">
+              <Plus size={16} />Create coupon
+            </button>
+          </div>
+          <div className="mt-6 pt-5 border-t border-black/5 space-y-2">
+            {coupons.length === 0 ? (
+              <p className="text-sm text-ink-muted">No coupons created yet.</p>
+            ) : (
+              coupons.map((c, i) => (
+                <div key={c.code} className="flex justify-between items-center rounded-lg bg-brand-50 p-3">
+                  <div>
+                    <b>{c.code}</b>
+                    <small className="block text-ink-muted">{c.description || "Applicable at checkout"}</small>
+                  </div>
+                  <span className="font-bold text-brand-700 flex items-center gap-2">
+                    {c.discount}% OFF
+                    <button onClick={() => removeCoupon(i)} className="text-rose-600 hover:text-rose-800 p-1 text-base font-bold">
+                      ×
+                    </button>
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
       </div>
-      <div className="grid sm:grid-cols-2 gap-4">
-        <div>
-          <label className="text-xs font-semibold text-ink-muted">Offer Text</label>
-          <input className="input mt-1" value={banner.text} onChange={e => setBanner({...banner, text: e.target.value})} />
+
+      <div className="mt-6 card p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-ink">Global Promo Banner</h3>
+              <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                Realtime Cloud Sync
+              </span>
+            </div>
+            <p className="text-sm text-ink-muted mt-1">
+              Configure the top announcement banner & popup modal displayed across ALL student devices.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={!!banner.enabled}
+              onChange={async (e) => {
+                const next = { ...banner, enabled: e.target.checked };
+                setBanner(next);
+                try {
+                  await updatePromoBanner(next);
+                  pushToast(next.enabled ? "Global Banner Enabled on all devices!" : "Global Banner Disabled.");
+                } catch (err) {
+                  pushToast("Banner setting saved locally.");
+                }
+              }}
+            />
+            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-600 relative"></div>
+          </label>
         </div>
-        <div>
-          <label className="text-xs font-semibold text-ink-muted">Coupon Code (optional)</label>
-          <input className="input mt-1" value={banner.code} onChange={e => setBanner({...banner, code: e.target.value})} />
-        </div>
-        <div>
-          <label className="text-xs font-semibold text-ink-muted">Background Color</label>
-          <select className="input mt-1" value={banner.color} onChange={e => setBanner({...banner, color: e.target.value})}>
-             <option value="bg-brand-600">Blue (Default)</option>
-             <option value="bg-rose-600">Red</option>
-             <option value="bg-emerald-600">Green</option>
-             <option value="bg-orange-500">Orange</option>
-             <option value="bg-indigo-600">Indigo</option>
-             <option value="bg-slate-900">Dark</option>
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-semibold text-ink-muted">Offer Banner Image (optional)</label>
-          <div className="flex items-center gap-3 mt-1">
-            {banner.image && <img src={banner.image} alt="Preview" className="h-10 w-10 object-cover rounded shadow-sm border border-black/10" />}
-            <input type="file" accept="image/*" onChange={handleImageUpload} className="input text-xs" />
-            {banner.image && <button onClick={() => setBanner({...banner, image: ""})} className="text-rose-500 font-medium text-xs whitespace-nowrap">Remove</button>}
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-semibold text-ink-muted">Offer Text</label>
+            <input
+              className="input mt-1"
+              value={banner.text || ""}
+              onChange={(e) => setBanner({ ...banner, text: e.target.value })}
+              placeholder="e.g. Festival Special: Get 50% OFF on all packages! Use code"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-ink-muted">Coupon Code (optional)</label>
+            <input
+              className="input mt-1 uppercase"
+              value={banner.code || ""}
+              onChange={(e) => setBanner({ ...banner, code: e.target.value })}
+              placeholder="FESTIVAL50"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-ink-muted">Background Color</label>
+            <select
+              className="input mt-1"
+              value={banner.color || "bg-brand-600"}
+              onChange={(e) => setBanner({ ...banner, color: e.target.value })}
+            >
+              <option value="bg-brand-600">Blue (Default)</option>
+              <option value="bg-rose-600">Red</option>
+              <option value="bg-emerald-600">Green</option>
+              <option value="bg-orange-500">Orange</option>
+              <option value="bg-indigo-600">Indigo</option>
+              <option value="bg-slate-900">Dark</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-ink-muted">Offer Banner Image / Poster (optional)</label>
+            <div className="flex flex-col gap-2 mt-1">
+              <div className="flex items-center gap-3">
+                {banner.image && (
+                  <img
+                    src={banner.image}
+                    alt="Preview"
+                    className="h-10 w-16 object-contain rounded shadow-sm border border-black/10 bg-black/5"
+                  />
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  disabled={isUploading}
+                  className="input text-xs"
+                />
+                {banner.image && (
+                  <button
+                    onClick={() => setBanner({ ...banner, image: "" })}
+                    className="text-rose-500 font-medium text-xs whitespace-nowrap hover:underline"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              <input
+                className="input text-xs"
+                placeholder="Or paste direct image URL (https://...)"
+                value={banner.image && !banner.image.startsWith("data:") ? banner.image : ""}
+                onChange={(e) => setBanner({ ...banner, image: e.target.value })}
+              />
+            </div>
+            <p className="text-[11px] text-ink-muted mt-1">
+              When an image is provided, it automatically appears as a welcome popup modal for students.
+            </p>
           </div>
         </div>
+
+        <div className="mt-5 flex items-center justify-between pt-4 border-t border-black/5">
+          <div className="text-xs text-ink-muted">
+            {banner.enabled ? (
+              <span className="text-emerald-700 font-medium flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                Banner is currently LIVE for all devices
+              </span>
+            ) : (
+              <span className="text-slate-500">Banner is currently disabled</span>
+            )}
+          </div>
+          <button
+            onClick={handlePublishBanner}
+            disabled={isSavingBanner || isUploading}
+            className="btn-primary py-2 px-6 flex items-center gap-2"
+          >
+            {isSavingBanner ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            {isSavingBanner ? "Publishing..." : "Publish & Sync Banner"}
+          </button>
+        </div>
       </div>
-      <div className="mt-5 flex justify-end">
-        <button onClick={() => { updatePromoBanner(banner); pushToast("Promo banner updated!"); }} className="btn-primary py-2 px-6">Save Banner Settings</button>
-      </div>
-    </div>
-  </>;
+    </>
+  );
 }
 
 export function AdmissionsPage() {

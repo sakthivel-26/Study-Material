@@ -24,10 +24,17 @@ const PACKAGES = {
   railway: { label: "Railway", groups: ["Railway"], amount: "399" },
   navy: { label: "Defence & Navy", groups: ["Navy"], amount: "399" }
 };
-const planAmount = (id, fallback) => { try { return (JSON.parse(localStorage.getItem("ken_plans")) || []).find(p=>p.id===id)?.amount || fallback; } catch { return fallback; } };
+const planAmount = (id, fallback) => {
+  try {
+    const saved = JSON.parse(localStorage.getItem("ken_plans")) || [];
+    const match = saved.find(p => p.id === id);
+    if (match && match.amount) return match.amount;
+  } catch (e) {}
+  return fallback;
+};
 
 export default function MockTestsPage() {
-  const { mockTests, getLatestAttempt } = useApp();
+  const { mockTests, getLatestAttempt, plans = [] } = useApp();
   const { user, isAdmin, isAuthed } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();

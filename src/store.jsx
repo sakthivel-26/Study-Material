@@ -15,6 +15,7 @@ import {
   fsDeleteNotification,
   useRealtimeBackend,
   fsUpdateSettings,
+  fsGetSettings,
   fsSaveTestAttempt,
   fsGetTestAttempts,
 } from "./backend.js";
@@ -103,11 +104,86 @@ export function AppProvider({ children }) {
     setPromoBanner(newBanner);
     try {
       localStorage.setItem("ken_ias_promobanner", JSON.stringify(newBanner));
-      if (useRealtimeBackend) {
+      if (isFirebaseConfigured) {
         await fsUpdateSettings({ promoBanner: newBanner });
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Failed to update promo banner in cloud:", e);
+      throw e;
+    }
   };
+
+  const DEFAULT_PLANS = [
+    { id: "banking", name: "Banking Full Mock Package", amount: "499", exams: "SBI, IBPS & RRB" },
+    { id: "tnpsc", name: "TNPSC Full Mock Package", amount: "599", exams: "Group I, II, IV & VAO" },
+    { id: "ssc", name: "SSC Full Mock Package", amount: "499", exams: "CGL, CHSL, MTS & GD" },
+    { id: "railway", name: "Railway Full Mock Package", amount: "399", exams: "NTPC, Group D & ALP" },
+    { id: "navy", name: "Defence & Navy Mock Package", amount: "399", exams: "Navy, NDA & Agniveer" },
+  ];
+
+  const [plans, setPlans] = useState(() => {
+    try {
+      const saved = localStorage.getItem("ken_plans");
+      return saved ? JSON.parse(saved) : DEFAULT_PLANS;
+    } catch {
+      return DEFAULT_PLANS;
+    }
+  });
+
+  const [coupons, setCoupons] = useState(() => {
+    try {
+      const saved = localStorage.getItem("ken_coupons");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const updatePlans = async (newPlans) => {
+    setPlans(newPlans);
+    try {
+      localStorage.setItem("ken_plans", JSON.stringify(newPlans));
+      if (isFirebaseConfigured) {
+        await fsUpdateSettings({ plans: newPlans });
+      }
+    } catch (e) {
+      console.warn("Failed to update plans in cloud:", e);
+      throw e;
+    }
+  };
+
+  const updateCoupons = async (newCoupons) => {
+    setCoupons(newCoupons);
+    try {
+      localStorage.setItem("ken_coupons", JSON.stringify(newCoupons));
+      if (isFirebaseConfigured) {
+        await fsUpdateSettings({ coupons: newCoupons });
+      }
+    } catch (e) {
+      console.warn("Failed to update coupons in cloud:", e);
+      throw e;
+    }
+  };
+
+  // Immediate cloud settings fetch on initial mount
+  useEffect(() => {
+    if (!isFirebaseConfigured) return;
+    fsGetSettings().then((settings) => {
+      if (!settings) return;
+      if (settings.promoBanner) {
+        setPromoBanner(settings.promoBanner);
+        try { localStorage.setItem("ken_ias_promobanner", JSON.stringify(settings.promoBanner)); } catch (e) {}
+      }
+      if (Array.isArray(settings.plans) && settings.plans.length > 0) {
+        setPlans(settings.plans);
+        try { localStorage.setItem("ken_plans", JSON.stringify(settings.plans)); } catch (e) {}
+      }
+      if (Array.isArray(settings.coupons)) {
+        setCoupons(settings.coupons);
+        try { localStorage.setItem("ken_coupons", JSON.stringify(settings.coupons)); } catch (e) {}
+      }
+    }).catch((err) => console.warn("Failed to fetch initial settings:", err));
+  }, []);
 
   const [toast, setToast] = useState(null);
   const [ready, setReady] = useState(!useRealtimeBackend);
@@ -200,7 +276,22 @@ export function AppProvider({ children }) {
           }));
           setStudents(studentUsers);
         },
-        onAdmissions: setAdmissions
+        onAdmissions: setAdmissions,
+        onSettings: (settings) => {
+          if (!settings) return;
+          if (settings.promoBanner) {
+            setPromoBanner(settings.promoBanner);
+            try { localStorage.setItem("ken_ias_promobanner", JSON.stringify(settings.promoBanner)); } catch (e) {}
+          }
+          if (Array.isArray(settings.plans) && settings.plans.length > 0) {
+            setPlans(settings.plans);
+            try { localStorage.setItem("ken_plans", JSON.stringify(settings.plans)); } catch (e) {}
+          }
+          if (Array.isArray(settings.coupons)) {
+            setCoupons(settings.coupons);
+            try { localStorage.setItem("ken_coupons", JSON.stringify(settings.coupons)); } catch (e) {}
+          }
+        }
       });
       setReady(true);
     })();
@@ -510,6 +601,10 @@ export function AppProvider({ children }) {
       admissions,
       promoBanner,
       updatePromoBanner,
+      plans,
+      updatePlans,
+      coupons,
+      updateCoupons,
       deleteStudent,
       refreshStudents,
       addDownloadRecord,
@@ -527,7 +622,7 @@ export function AppProvider({ children }) {
       markAllRead,
       resetAllData,
     }),
-    [uploads, notifications, mockTests, testHistory, testAttempts, bookmarks, downloads, toast, ready, students, admissions, promoBanner]
+    [uploads, notifications, mockTests, testHistory, testAttempts, bookmarks, downloads, toast, ready, students, admissions, promoBanner, plans, coupons]
   );
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

@@ -27,15 +27,24 @@ function Footer() {
 
 export default function Layout() {
   const [menu, setMenu] = useState(false);
-  const { notifications, promoBanner, updatePromoBanner } = useApp();
+  const { notifications, promoBanner } = useApp();
   const unread = notifications.filter((n) => !n.read).length;
+
+  // Track local dismissal in sessionStorage so closing on one device never disables it globally for others
+  const [dismissedBanner, setDismissedBanner] = useState(() => {
+    try {
+      return sessionStorage.getItem("ken_dismissed_promo_banner") === "true";
+    } catch {
+      return false;
+    }
+  });
 
   return (
     <div className="flex min-h-screen bg-appbg">
       <Sidebar open={menu} onClose={() => setMenu(false)} unread={unread} />
       <div className="flex-1 flex flex-col min-w-0 bg-appbg">
         <Header onMenu={() => setMenu(true)} unread={unread} />
-        {promoBanner?.enabled && (
+        {promoBanner?.enabled && !dismissedBanner && (
           <div className={`${promoBanner.color || "bg-brand-600"} text-white px-4 py-2 flex items-center justify-between text-sm shadow-sm z-10 relative overflow-hidden gap-3`}>
             <div className="flex items-center shrink-0 z-20">
               {promoBanner.image && <img src={promoBanner.image} alt="Offer" className="h-7 w-auto object-contain rounded bg-white/10" />}
@@ -48,7 +57,16 @@ export default function Layout() {
               </p>
             </div>
 
-            <button onClick={() => updatePromoBanner({ ...promoBanner, enabled: false })} className="shrink-0 text-white/80 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors z-20">
+            <button
+              onClick={() => {
+                setDismissedBanner(true);
+                try {
+                  sessionStorage.setItem("ken_dismissed_promo_banner", "true");
+                } catch (e) {}
+              }}
+              title="Dismiss banner"
+              className="shrink-0 text-white/80 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors z-20"
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
           </div>
