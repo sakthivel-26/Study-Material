@@ -26,6 +26,11 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if signedIn() && request.auth.uid == userId;
       allow read, write: if isAdmin();
+
+      match /mock_attempts/{attemptId} {
+        allow read, write: if signedIn() && request.auth.uid == userId;
+        allow read, write: if isAdmin();
+      }
     }
 
     // 2. Mock Tests Collection
