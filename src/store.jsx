@@ -68,63 +68,16 @@ export function AppProvider({ children }) {
       const saved = localStorage.getItem("ken_ias_test_attempts");
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-      // Initial authentic mock attempts so attended mock marks show immediately (Matching Image 2)
-      const initial = [
-        {
-          id: "att_sample_1",
-          testId: "1",
-          testTitle: "IBPS PO / Clerk - Quadratic Eq PT - 1",
-          cutoffMarks: 62.5,
-          score: 11.25,
-          totalMarks: 10,
-          percentage: 85,
-          accuracy: 90,
-          percentile: 88,
-          rank: 74,
-          completedAt: "Today",
-          sectionsBreakdown: [
-            { name: "Quantitative Aptitude", score: 11.25, totalMarks: 10, correct: 9, incorrect: 1, unattempted: 0, timeSpentSeconds: 420 }
-          ]
-        },
-        {
-          id: "att_sample_2",
-          testId: "2",
-          testTitle: "IBPS PO / Clerk - Approximations - 2",
-          cutoffMarks: 58.5,
-          score: 41.75,
-          totalMarks: 50,
-          percentage: 83.5,
-          accuracy: 86,
-          percentile: 84,
-          rank: 92,
-          completedAt: "Yesterday",
-          sectionsBreakdown: [
-            { name: "Quantitative Aptitude", score: 41.75, totalMarks: 50, correct: 43, incorrect: 5, unattempted: 2, timeSpentSeconds: 1100 }
-          ]
-        },
-        {
-          id: "att_sample_3",
-          testId: "test_ibps_clerk_16",
-          testTitle: "IBPS Clerk Mock Test - Mock 16 (Full Prelims)",
-          cutoffMarks: 62.5,
-          score: 57.5,
-          totalMarks: 100,
-          percentage: 57.5,
-          accuracy: 84,
-          percentile: 79.2,
-          rank: 145,
-          completedAt: "2 days ago",
-          sectionsBreakdown: [
-            { name: "English Language", score: 19.5, totalMarks: 30, correct: 21, incorrect: 6, unattempted: 3, timeSpentSeconds: 1100 },
-            { name: "Quantitative Aptitude", score: 19.25, totalMarks: 35, correct: 20, incorrect: 3, unattempted: 12, timeSpentSeconds: 1200 },
-            { name: "Reasoning Ability", score: 18.75, totalMarks: 35, correct: 20, incorrect: 5, unattempted: 10, timeSpentSeconds: 1150 }
-          ]
+        if (Array.isArray(parsed)) {
+          // Purge any old hardcoded sample attempts (att_sample_1, att_sample_2, att_sample_3)
+          const realAttempts = parsed.filter(a => a && !String(a.id || "").startsWith("att_sample_"));
+          try {
+            localStorage.setItem("ken_ias_test_attempts", JSON.stringify(realAttempts));
+          } catch (e) {}
+          return realAttempts;
         }
-      ];
-      localStorage.setItem("ken_ias_test_attempts", JSON.stringify(initial));
-      return initial;
+      }
+      return [];
     } catch {
       return [];
     }

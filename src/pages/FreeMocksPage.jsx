@@ -221,7 +221,9 @@ export default function FreeMocksPage() {
                     <div className="flex items-center gap-6 text-center mr-0 md:mr-6">
                       <div>
                         <span className="text-sm md:text-base font-black text-slate-800 block">
-                          {latestAttempt.cutoffMarks || 62.5}
+                          {latestAttempt.cutoffMarks != null
+                            ? latestAttempt.cutoffMarks
+                            : (latestAttempt.totalMarks ? +(latestAttempt.totalMarks * 0.625).toFixed(1) : 0)}
                         </span>
                         <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                           Cut off Marks
