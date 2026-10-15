@@ -115,18 +115,19 @@ export default function MockTestsPage() {
   };
 
   // Helper for tag pill styling
-  const getTagPill = (test, index) => {
-    const shiftTags = [
-      { label: "Based on 4th Oct 2025 – Shift 1", color: "border-sky-300 bg-sky-50 text-sky-700" },
-      { label: "Exam Pattern Based", color: "border-blue-300 bg-blue-50 text-blue-700" },
-      { label: "Moderate", color: "border-amber-300 bg-amber-50 text-amber-800" },
-      { label: "Easy", color: "border-emerald-300 bg-emerald-50 text-emerald-800" },
-      { label: "Difficult", color: "border-rose-300 bg-rose-50 text-rose-700" },
-    ];
+  const getTagPill = (test) => {
     if (test.tag) {
       return { label: test.tag, color: "border-sky-300 bg-sky-50 text-sky-700" };
     }
-    return shiftTags[index % shiftTags.length];
+    if (test.difficulty) {
+      const diffColors = {
+        Easy: "border-emerald-300 bg-emerald-50 text-emerald-800",
+        Moderate: "border-amber-300 bg-amber-50 text-amber-800",
+        Difficult: "border-rose-300 bg-rose-50 text-rose-700",
+      };
+      return { label: test.difficulty, color: diffColors[test.difficulty] || "border-slate-300 bg-slate-50 text-slate-700" };
+    }
+    return null;
   };
 
   return (
@@ -185,8 +186,8 @@ export default function MockTestsPage() {
             const tAmount = tPkg ? planAmount(tPkg.id, tPkg.amount) : "—";
             const free = firstForCategory(t) && !claimed[t.category];
             const unlocked = hasAccessToPkg(tPkg?.id);
-            const latestAttempt = getLatestAttempt ? getLatestAttempt(t.id) : null;
-            const tag = getTagPill(t, i);
+            const latestAttempt = getLatestAttempt ? getLatestAttempt(t.id, t.title) : null;
+            const tag = getTagPill(t);
             const isAttempted = !!latestAttempt;
 
             return (
@@ -214,10 +215,12 @@ export default function MockTestsPage() {
                       <h3 className="font-extrabold text-sm md:text-base text-slate-900 truncate">
                         {t.title}
                       </h3>
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold border ${tag.color}`}>
-                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                        {tag.label}
-                      </span>
+                      {tag && (
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold border ${tag.color}`}>
+                          <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                          {tag.label}
+                        </span>
+                      )}
                     </div>
 
                     <p className="text-[11px] text-slate-400 font-medium">
