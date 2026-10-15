@@ -15,6 +15,8 @@ import {
   fsDeleteNotification,
   useRealtimeBackend,
   fsUpdateSettings,
+  fsSaveTestAttempt,
+  fsGetTestAttempts,
 } from "./backend.js";
 
 
@@ -50,12 +52,24 @@ export function AppProvider({ children }) {
     if (useRealtimeBackend) return [];
     try {
       const saved = localStorage.getItem("ken_ias_mocktests");
-      return saved ? JSON.parse(saved) : MOCK_TESTS;
+      if (!saved) return MOCK_TESTS;
+      const parsed = JSON.parse(saved);
+      const existingIds = new Set(parsed.map(t => t.id));
+      const missingDefaults = MOCK_TESTS.filter(t => !existingIds.has(t.id));
+      return [...missingDefaults, ...parsed];
     } catch {
       return MOCK_TESTS;
     }
   });
   const [testHistory, setTestHistory] = useState(MOCK_TESTS_HISTORY);
+  const [testAttempts, setTestAttempts] = useState(() => {
+    try {
+      const saved = localStorage.getItem("ken_ias_test_attempts");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [bookmarks, setBookmarks] = useState([]);
   const [downloads, setDownloads] = useState(() => {
     try {
@@ -373,6 +387,86 @@ export function AppProvider({ children }) {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
+  // Sync test attempts from Firestore
+  useEffect(() => {
+    if (isAuthed && user?.id && isFirebaseConfigured) {
+      fsGetTestAttempts(user.id).then(attempts => {
+        if (Array.isArray(attempts) && attempts.length > 0) {
+          setTestAttempts(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const newOnes = attempts.filter(a => !existingIds.has(a.id));
+            const merged = [...newOnes, ...prev];
+            localStorage.setItem("ken_ias_test_attempts", JSON.stringify(merged));
+            return merged;
+          });
+        }
+      }).catch(() => {});
+    }
+  }, [isAuthed, user?.id]);
+
+  const saveTestAttempt = async (attempt) => {
+    const attemptWithMeta = {
+      ...attempt,
+      id: attempt.id || ("att_" + Date.now()),
+      userId: user?.id || "guest",
+      userName: user?.name || "Student",
+      timestamp: Date.now(),
+      completedAt: attempt.completedAt || new Date().toLocaleString("en-IN", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true
+      })
+    };
+
+    setTestAttempts(prev => {
+      const next = [attemptWithMeta, ...prev.filter(a => a.id !== attemptWithMeta.id)];
+      try {
+        localStorage.setItem("ken_ias_test_attempts", JSON.stringify(next));
+      } catch (e) {
+        console.warn("Failed to save attempt to localStorage", e);
+      }
+      return next;
+    });
+
+    setTestHistory(prev => [
+      {
+        id: attemptWithMeta.id,
+        testId: attemptWithMeta.testId,
+        title: attemptWithMeta.testTitle,
+        score: attemptWithMeta.score + " / " + attemptWithMeta.totalMarks,
+        percent: attemptWithMeta.percentage,
+        date: attemptWithMeta.completedAt || "Just now",
+        timeSpentSeconds: attemptWithMeta.timeSpentSeconds || 0,
+        accuracy: attemptWithMeta.accuracy,
+        percentile: attemptWithMeta.percentile,
+      },
+      ...prev
+    ]);
+
+    if (user?.id && isFirebaseConfigured) {
+      try {
+        await fsSaveTestAttempt(user.id, attemptWithMeta);
+      } catch (err) {
+        console.warn("Firestore attempt save failed, saved locally", err);
+      }
+    }
+
+    pushToast("Performance report saved to database! Score: " + attemptWithMeta.score + "/" + attemptWithMeta.totalMarks + " 🎉");
+    return attemptWithMeta;
+  };
+
+  const getLatestAttempt = (testId) => {
+    return testAttempts.find(a => a.testId === testId) || null;
+  };
+
+  const getAllAttempts = (testId) => {
+    return testId ? testAttempts.filter(a => a.testId === testId) : testAttempts;
+  };
+
   const resetAllData = () => {
     setUploads(useRealtimeBackend ? [] : UPLOADS);
     setNotifications(useRealtimeBackend ? [] : NOTIFICATIONS);
@@ -433,7 +527,7 @@ export function AppProvider({ children }) {
       markAllRead,
       resetAllData,
     }),
-    [uploads, notifications, mockTests, testHistory, bookmarks, downloads, toast, ready, students, admissions, promoBanner]
+    [uploads, notifications, mockTests, testHistory, testAttempts, bookmarks, downloads, toast, ready, students, admissions, promoBanner]
   );
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

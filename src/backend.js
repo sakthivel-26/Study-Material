@@ -252,3 +252,26 @@ export async function fsUpdateSettings(data) {
   const db = await getFirebaseDb();
   await setDoc(doc(db, COLLECTIONS.settings, "global"), data, { merge: true });
 }
+
+
+export async function fsSaveTestAttempt(uid, attempt) {
+  const { collection, addDoc, serverTimestamp } = await import("firebase/firestore");
+  const db = await getFirebaseDb();
+  const cleanAttempt = Object.fromEntries(
+    Object.entries(attempt).filter(([_, v]) => v !== undefined)
+  );
+  const userAttemptRef = collection(db, "users", uid, "mock_attempts");
+  const ref = await addDoc(userAttemptRef, {
+    ...cleanAttempt,
+    createdAt: serverTimestamp(),
+  });
+  return { ...cleanAttempt, id: ref.id };
+}
+
+export async function fsGetTestAttempts(uid) {
+  const { collection, getDocs, query, orderBy } = await import("firebase/firestore");
+  const db = await getFirebaseDb();
+  const q = query(collection(db, "users", uid, "mock_attempts"), orderBy("createdAt", "desc"));
+  const snap = await getDocs(q);
+  return snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+}

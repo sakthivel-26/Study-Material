@@ -35,7 +35,66 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [pdfPageInfo, setPdfPageInfo] = useState("");
   const pdfInputRef = useRef(null);
   const DEFAULT_SECTIONS = ["Quantitative Aptitude", "Reasoning Ability", "English Language", "General Awareness", "General"];
-  const [f, setF] = useState({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault, isSectionalTimed: false, sections: [...DEFAULT_SECTIONS] });
+  const BANKING_DEFAULT_SECTIONS = [
+    { name: "English Language", durationMinutes: 20, questionCount: 30 },
+    { name: "Quantitative Aptitude", durationMinutes: 20, questionCount: 35 },
+    { name: "Reasoning Ability", durationMinutes: 20, questionCount: 35 },
+  ];
+  const [testType, setTestType] = useState("full_mock"); // "full_mock" | "standard"
+  const [sectionsConfig, setSectionsConfig] = useState(BANKING_DEFAULT_SECTIONS);
+  const [activeManualSectionTab, setActiveManualSectionTab] = useState("English Language");
+
+  const updateSectionConfig = (idx, field, value) => {
+    setSectionsConfig(prev => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: value };
+      return next;
+    });
+  };
+
+  const addSectionToConfig = () => {
+    setSectionsConfig(prev => [
+      ...prev,
+      { name: `Section ${prev.length + 1}`, durationMinutes: 20, questionCount: 25 }
+    ]);
+  };
+
+  const removeSectionFromConfig = (idx) => {
+    if (sectionsConfig.length <= 1) return pushToast("A mock test must have at least one section.");
+    setSectionsConfig(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const resetToBankingPresets = () => {
+    setSectionsConfig([
+      { name: "English Language", durationMinutes: 20, questionCount: 30 },
+      { name: "Quantitative Aptitude", durationMinutes: 20, questionCount: 35 },
+      { name: "Reasoning Ability", durationMinutes: 20, questionCount: 35 },
+    ]);
+    pushToast("Loaded Standard Banking Prelims sections!");
+  };
+
+  const autoGenerateQuestionSlots = () => {
+    const slots = [];
+    sectionsConfig.forEach(sec => {
+      const count = parseInt(sec.questionCount) || 10;
+      for (let i = 1; i <= count; i++) {
+        slots.push({
+          section: sec.name,
+          question: "",
+          passage: "",
+          imageUrl: "",
+          solutionImageUrl: "",
+          options: ["Option A", "Option B", "Option C", "Option D", "Option E"],
+          correctAnswerIndex: 0,
+          explanation: "",
+        });
+      }
+    });
+    setManualQuestions(slots);
+    pushToast(`Generated ${slots.length} question slots across ${sectionsConfig.length} sections!`);
+  };
+
+  const [f, setF] = useState({ title: "", category: "Banking", subject: "Prelims Full Mock", topic: "All Sections", questions: 100, time: "60 min", isFree: isFreeByDefault, isSectionalTimed: true, sections: [...DEFAULT_SECTIONS] });
   const [generating, setGenerating] = useState(false);
   const [generatedTest, setGeneratedTest] = useState(null);
   const [approvedQuestions, setApprovedQuestions] = useState({});
@@ -250,19 +309,20 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     },
   ]);
 
-  const addManualQuestion = () => {
+  const addManualQuestion = (targetSec = null) => {
     const count = parseInt(bulkAddCount) || 1;
+    const secName = targetSec || (activeManualSectionTab !== "all" ? activeManualSectionTab : (sectionsConfig[0]?.name || "English Language"));
     setManualQuestions((prev) => {
       const newQuestions = [];
       const inheritedPassage = prev.length > 0 ? prev[prev.length - 1].passage : "";
       for (let i = 0; i < count; i++) {
         newQuestions.push({
-          section: f.subject || "Quantitative Aptitude",
+          section: secName,
           question: "",
           passage: inheritedPassage,
           imageUrl: "",
           solutionImageUrl: "",
-          options: ["Option A", "Option B", "Option C", "Option D"],
+          options: ["Option A", "Option B", "Option C", "Option D", "Option E"],
           correctAnswerIndex: 0,
           explanation: "",
         });
@@ -569,18 +629,26 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           return pushToast("Add at least one valid question");
         }
 
+        const totalDuration = testType === "full_mock"
+          ? sectionsConfig.reduce((acc, s) => acc + (parseInt(s.durationMinutes) || 0), 0) || 60
+          : (parseInt(f.time) || 30);
+
         testToPublish = {
           id: `mock_manual_${Date.now()}`,
           title: f.title.trim(),
           category: f.category,
           color,
           questions: validQuestions.length,
-          time: f.time,
-          durationMinutes: parseInt(f.time) || 30,
+          time: `${totalDuration} min`,
+          durationMinutes: totalDuration,
+          isFullMock: testType === "full_mock",
+          isSectionalTimed: testType === "full_mock" || !!f.isSectionalTimed,
+          sectionsConfig: testType === "full_mock" ? sectionsConfig : undefined,
+          sections: testType === "full_mock" ? sectionsConfig.map(s => s.name) : (f.sections || DEFAULT_SECTIONS),
           taken: 0,
           isFree: f.isFree,
-          subject: f.subject,
-          topic: f.topic,
+          subject: f.subject || (testType === "full_mock" ? "Banking Prelims Full Mock" : ""),
+          topic: f.topic || (testType === "full_mock" ? "All Sections" : ""),
           questionsList: validQuestions,
           createdAt: new Date().toISOString(),
         };
@@ -1372,272 +1440,445 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
           {mode === "manual" && (
             <div className="pt-4 border-t border-black/5 space-y-6">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <h4 className="font-extrabold text-base text-ink flex items-center gap-2">
-                    <BookOpen size={18} className="text-brand-600" /> Manual Questions Builder ({manualQuestions.length})
-                  </h4>
-                  <p className="text-xs text-ink-muted mt-0.5">Build questions manually with custom statements, passage context, images, and options up to G.</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-black/10 shadow-sm">
-                    <span className="text-xs font-bold text-ink-muted">Add</span>
-                    <input type="number" min="1" max="50" className="input text-xs w-14 px-2 py-1 text-center font-bold" value={bulkAddCount} onChange={(e) => setBulkAddCount(e.target.value)} />
-                    <span className="text-xs font-bold text-ink-muted">Questions</span>
+              {/* Mock Type Selector */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 p-4 rounded-2xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-extrabold text-sm text-ink flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-lg bg-[#1B4F72] text-white flex items-center justify-center text-xs">🏛</span>
+                      Exam Type &amp; Sectional Breakdown
+                    </h4>
+                    <p className="text-xs text-ink-muted mt-0.5">
+                      Configure full banking exam pattern (60 min total, 20 min per section) or standard topic test.
+                    </p>
                   </div>
-                  <button type="button" onClick={addManualQuestion} className="btn-primary text-xs px-4 py-2 h-[38px] text-white bg-brand-600 hover:bg-brand-500 flex items-center gap-1.5 font-bold shadow-sm rounded-xl">
-                    <Plus size={16} /> Add Now
-                  </button>
+                  <div className="inline-flex p-1 rounded-xl bg-white border border-black/10 shadow-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTestType("full_mock");
+                        set("isSectionalTimed", true);
+                        const totalDur = sectionsConfig.reduce((a, s) => a + (parseInt(s.durationMinutes) || 0), 0) || 60;
+                        set("time", `${totalDur} min`);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        testType === "full_mock" ? "bg-[#1B4F72] text-white shadow-xs" : "text-ink-soft hover:bg-slate-100"
+                      }`}
+                    >
+                      🏦 Full Mock (Banking / Sectional Timed)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTestType("standard");
+                        set("isSectionalTimed", false);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        testType === "standard" ? "bg-[#1B4F72] text-white shadow-xs" : "text-ink-soft hover:bg-slate-100"
+                      }`}
+                    >
+                      🎯 Single Section / Standard Quiz
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="space-y-6 max-h-[75vh] md:max-h-[850px] overflow-y-auto pr-1">
-                {manualQuestions.map((q, qIdx) => (
-                  <div key={qIdx} className="p-5 rounded-2xl border-2 border-black/10 bg-slate-50/50 space-y-4 relative shadow-xs">
-                    
-                    {/* Header */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="w-7 h-7 rounded-xl bg-brand-600 text-white flex items-center justify-center text-xs font-extrabold shadow-sm">
-                          {qIdx + 1}
-                        </span>
-                        <select
-                          className="input text-xs py-1 px-3 font-bold bg-white border-black/10 rounded-xl"
-                          value={q.section || (f.sections && f.sections[0]) || "Quantitative Aptitude"}
-                          onChange={(e) => updateManualQuestion(qIdx, "section", e.target.value)}
+                {/* Section Configuration Inputs (English 20m / 35Q, Quant 20m / 35Q, Reasoning 20m / 35Q) */}
+                {testType === "full_mock" && (
+                  <div className="pt-3 border-t border-blue-200/60 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <span className="text-xs font-bold text-[#1B4F72] uppercase tracking-wider">
+                        Configure Sections (Timing &amp; Question Target):
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={resetToBankingPresets}
+                          className="text-[11px] font-bold text-blue-700 bg-white hover:bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg transition-colors"
                         >
-                          {(f.sections || DEFAULT_SECTIONS).map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
+                          ↻ Reset to Banking Prelims (60m · 100Q)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={addSectionToConfig}
+                          className="text-[11px] font-bold text-white bg-[#1B4F72] hover:bg-[#153e5b] px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <Plus size={12} /> Add Section
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Section Rows */}
+                    <div className="grid sm:grid-cols-3 gap-3">
+                      {sectionsConfig.map((sec, secIdx) => (
+                        <div key={secIdx} className="bg-white p-3 rounded-xl border border-blue-200/80 shadow-xs space-y-2 relative">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-extrabold text-[#1B4F72] flex items-center gap-1">
+                              <span className="w-4 h-4 rounded-full bg-blue-100 text-[#1B4F72] flex items-center justify-center text-[10px]">
+                                {secIdx + 1}
+                              </span>
+                              Section {secIdx + 1}
+                            </span>
+                            {sectionsConfig.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removeSectionFromConfig(secIdx)}
+                                className="text-rose-500 hover:text-rose-700 text-[10px] font-bold"
+                              >
+                                ✕ Remove
+                              </button>
+                            )}
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-bold text-ink-muted block mb-0.5">Section Name</label>
+                            <input
+                              type="text"
+                              value={sec.name}
+                              onChange={(e) => updateSectionConfig(secIdx, "name", e.target.value)}
+                              placeholder="e.g. English Language"
+                              className="input text-xs py-1 px-2 font-bold bg-slate-50 border-black/10 rounded-lg w-full"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-ink-muted block mb-0.5">Duration (mins)</label>
+                              <input
+                                type="number"
+                                min="1"
+                                max="180"
+                                value={sec.durationMinutes}
+                                onChange={(e) => {
+                                  updateSectionConfig(secIdx, "durationMinutes", parseInt(e.target.value) || 1);
+                                  const totalDur = sectionsConfig.reduce((a, s, i) => a + (i === secIdx ? (parseInt(e.target.value) || 1) : (parseInt(s.durationMinutes) || 0)), 0);
+                                  set("time", `${totalDur} min`);
+                                }}
+                                className="input text-xs py-1 px-2 font-bold bg-slate-50 border-black/10 rounded-lg w-full text-center"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-ink-muted block mb-0.5">Questions</label>
+                              <input
+                                type="number"
+                                min="1"
+                                max="200"
+                                value={sec.questionCount}
+                                onChange={(e) => updateSectionConfig(secIdx, "questionCount", parseInt(e.target.value) || 1)}
+                                className="input text-xs py-1 px-2 font-bold bg-slate-50 border-black/10 rounded-lg w-full text-center"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Auto-calculated Total Stats Ribbon */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-xl border border-blue-200">
+                      <div className="flex items-center gap-4 text-xs font-bold text-[#1B4F72]">
+                        <span>
+                          ⏱ Total Exam Time: <strong className="text-ink">{sectionsConfig.reduce((a, s) => a + (parseInt(s.durationMinutes) || 0), 0)} Minutes</strong>
+                        </span>
+                        <span className="text-slate-300">|</span>
+                        <span>
+                          📝 Total Target Questions: <strong className="text-ink">{sectionsConfig.reduce((a, s) => a + (parseInt(s.questionCount) || 0), 0)} Questions</strong>
+                        </span>
+                        <span className="text-slate-300">|</span>
+                        <span>
+                          Questions in Builder: <strong className="text-emerald-700">{manualQuestions.length} Questions</strong>
+                        </span>
                       </div>
 
                       <button
                         type="button"
-                        onClick={() => removeManualQuestion(qIdx)}
-                        className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-100 transition-colors"
+                        onClick={autoGenerateQuestionSlots}
+                        className="btn-primary text-xs px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-xs flex items-center gap-1.5"
                       >
-                        <Trash2 size={13} /> Remove Q{qIdx + 1}
+                        <Sparkles size={13} /> Auto-Generate All Question Slots
                       </button>
                     </div>
-
-                    {/* Paragraph / Passage Context */}
-                    <div>
-                      <label className="text-xs font-bold text-ink-muted mb-1 block">Paragraph / Passage Context (Optional)</label>
-                      <textarea
-                        className="input text-xs min-h-[60px] bg-white border-black/10 focus:border-brand-500"
-                        placeholder="e.g. Read the following passage and answer the questions..."
-                        value={q.passage || ""}
-                        onChange={(e) => updateManualQuestion(qIdx, "passage", formatMathText(e.target.value))}
-                      />
-                    </div>
-
-                    {/* Question Statement */}
-                    <div>
-                      <label className="text-xs font-bold text-ink-muted mb-1 block">Question Statement</label>
-
-                      <div className="flex flex-wrap items-center gap-1.5 mb-2 bg-white p-2 rounded-xl border border-black/10">
-                        <span className="text-xs font-bold text-ink-muted mr-1">Math Insert:</span>
-                        {[
-                          { label: "⅓", insert: " ⅓ " },
-                          { label: "¼", insert: " ¼ " },
-                          { label: "½", insert: " ½ " },
-                          { label: "¾", insert: " ¾ " },
-                          { label: "⅔", insert: " ⅔ " },
-                          { label: "²", insert: "²" },
-                          { label: "³", insert: "³" },
-                          { label: "×", insert: " × " },
-                          { label: "÷", insert: " ÷ " },
-                          { label: "√", insert: " √" },
-                        ].map((sym, sIdx) => (
-                          <button
-                            key={sIdx}
-                            type="button"
-                            className="px-2 py-1 text-xs font-bold bg-slate-100 hover:bg-brand-50 hover:text-brand-700 border border-slate-200 rounded-lg transition-colors"
-                            onClick={() => {
-                              updateManualQuestion(qIdx, "question", formatMathText((q.question || "") + sym.insert));
-                            }}
-                          >
-                            {sym.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      <textarea
-                        className="input text-sm font-semibold bg-white min-h-[85px] p-3 border-black/10 focus:border-brand-500"
-                        placeholder="Enter question statement..."
-                        value={q.question}
-                        onChange={(e) => updateManualQuestion(qIdx, "question", formatMathText(e.target.value))}
-                      />
-                    </div>
-
-                    {/* Options Grid (Up to Option G) */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-ink-muted block">
-                          Options ({q.options.length}) &amp; Correct Answer Key (Click radio button to mark correct option):
-                        </label>
-                        <div className="flex items-center gap-2">
-                          {q.options.length < 7 && (
-                            <button
-                              type="button"
-                              onClick={() => addOptionToManual(qIdx)}
-                              className="text-[11px] font-bold text-brand-700 hover:text-brand-800 bg-brand-50 px-2.5 py-1 rounded-lg border border-brand-200 flex items-center gap-1"
-                            >
-                              <Plus size={12} /> Add Option ({String.fromCharCode(65 + q.options.length)})
-                            </button>
-                          )}
-                          {q.options.length > 2 && (
-                            <button
-                              type="button"
-                              onClick={() => removeOptionFromManual(qIdx)}
-                              className="text-[11px] font-bold text-rose-600 hover:text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-100"
-                            >
-                              - Remove Option
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-3">
-                        {q.options.map((opt, optIdx) => {
-                          const letter = String.fromCharCode(65 + optIdx);
-                          const isRight = +q.correctAnswerIndex === optIdx;
-                          return (
-                            <div
-                              key={optIdx}
-                              onClick={() => updateManualQuestion(qIdx, "correctAnswerIndex", optIdx)}
-                              className={`flex items-center gap-2.5 p-2.5 rounded-xl border-2 transition-all cursor-pointer ${
-                                isRight 
-                                  ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-500/20 font-bold shadow-sm' 
-                                  : 'bg-white border-black/10 hover:border-emerald-300'
-                              }`}
-                            >
-                              <span
-                                className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 transition-transform active:scale-95 ${
-                                  isRight ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700'
-                                }`}
-                              >
-                                {letter}
-                              </span>
-
-                              <input
-                                type="radio"
-                                name={`manual_ans_${qIdx}`}
-                                checked={isRight}
-                                onChange={() => updateManualQuestion(qIdx, "correctAnswerIndex", optIdx)}
-                                className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
-                              />
-
-                              <textarea 
-                                rows={2}
-                                className="input text-xs py-1.5 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text resize-y min-h-[40px]"
-                                value={opt}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => updateManualOption(qIdx, optIdx, formatMathText(e.target.value))}
-                                onPaste={(e) => handleOptionPaste(e, qIdx, optIdx)}
-                                placeholder={`Option ${letter}`}
-                              />
-
-                              <span
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all ${
-                                  isRight ? "bg-emerald-600 text-white shadow-sm" : "bg-slate-100 text-slate-600"
-                                }`}
-                              >
-                                {isRight ? "✓ Correct" : "Select"}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Solution Explanation */}
-                    <div className="grid sm:grid-cols-1 gap-3">
-                      <div>
-                        <label className="text-xs font-bold text-ink-muted mb-1 block">Solution Explanation (Optional)</label>
-                        <textarea
-                          className="input text-xs min-h-[60px] bg-white border-black/10"
-                          placeholder="Step-by-step math shortcut or reason..."
-                          value={q.explanation || ""}
-                          onChange={(e) => updateManualQuestion(qIdx, "explanation", formatMathText(e.target.value))}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Image Attachment */}
-                    <div>
-                      <label className="text-xs font-bold text-ink-muted mb-1 block">Attach Chart / Image (Optional)</label>
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {(q.imageUrls || (q.imageUrl ? [q.imageUrl] : [])).map((url, imgIdx) => (
-                          <div key={imgIdx} className="relative max-w-sm rounded-xl border border-black/10 overflow-hidden bg-white p-2">
-                            <img src={url} className="w-full h-auto object-contain max-h-48" alt="Preview" />
-                            <button
-                              type="button"
-                              onClick={() => removeManualImage(qIdx, imgIdx)}
-                              className="absolute top-1 right-1 bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold hover:bg-rose-600 shadow"
-                            >✕</button>
-                          </div>
-                        ))}
-                      </div>
-                      
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          id={`img-upload-${qIdx}`}
-                          onChange={(e) => {
-                            const file = e.target.files[0];
-                            if (file) {
-                              const reader = new FileReader();
-                              reader.onloadend = () => {
-                                addManualImage(qIdx, reader.result);
-                              };
-                              reader.readAsDataURL(file);
-                            }
-                          }}
-                        />
-                        <label htmlFor={`img-upload-${qIdx}`} className="btn-soft text-xs px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-200 cursor-pointer flex items-center gap-1.5 rounded-xl text-ink-soft font-bold shadow-xs">
-                          <ImageIcon size={14} /> Add Chart/Image
-                        </label>
-                      </div>
-
-                      {/* Solution Image Upload */}
-                      <label className="text-xs font-bold text-ink-muted mb-1 mt-4 block">Attach Solution Image (Optional)</label>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          id={`sol-img-upload-${qIdx}`}
-                          onChange={(e) => {
-                            const file = e.target.files[0];
-                            if (file) {
-                              const reader = new FileReader();
-                              reader.onloadend = () => {
-                                updateManualQuestion(qIdx, "solutionImageUrl", reader.result);
-                              };
-                              reader.readAsDataURL(file);
-                            }
-                          }}
-                        />
-                        <label htmlFor={`sol-img-upload-${qIdx}`} className="btn-soft text-xs px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 cursor-pointer flex items-center gap-1.5 rounded-xl text-emerald-700 font-bold shadow-xs">
-                          <ImageIcon size={14} /> {q.solutionImageUrl ? "Change Solution Image" : "Attach Solution Image"}
-                        </label>
-                        {q.solutionImageUrl && (
-                          <button type="button" onClick={() => updateManualQuestion(qIdx, "solutionImageUrl", "")} className="text-rose-500 hover:bg-rose-50 p-1.5 rounded-xl border border-rose-100 text-xs font-bold flex items-center gap-1">
-                            <X size={14} /> Remove Solution Image
-                          </button>
-                        )}
-                      </div>
-                      {q.solutionImageUrl && (
-                        <div className="mt-2 max-w-sm rounded-xl border border-black/10 overflow-hidden relative bg-white p-2">
-                           <img src={q.solutionImageUrl} className="w-full h-auto object-contain max-h-48" alt="Solution Preview" />
-                        </div>
-                      )}
-                    </div>
-
                   </div>
-                ))}
+                )}
+              </div>
+
+              {/* Section Tabs to filter/view questions */}
+              <div className="flex items-center justify-between flex-wrap gap-2 pt-2">
+                <div className="flex items-center gap-1 overflow-x-auto py-1 scrollbar-none">
+                  <button
+                    type="button"
+                    onClick={() => setActiveManualSectionTab("all")}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      activeManualSectionTab === "all"
+                        ? "bg-[#1B4F72] text-white shadow-xs"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    All ({manualQuestions.length})
+                  </button>
+
+                  {sectionsConfig.map((sec, sIdx) => {
+                    const countInSec = manualQuestions.filter(q => (q.section || "") === sec.name).length;
+                    const isTargetMet = countInSec >= (sec.questionCount || 0);
+                    const isSelected = activeManualSectionTab === sec.name;
+
+                    return (
+                      <button
+                        key={sIdx}
+                        type="button"
+                        onClick={() => setActiveManualSectionTab(sec.name)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          isSelected
+                            ? "bg-[#1B4F72] text-white shadow-xs"
+                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        }`}
+                      >
+                        <span>{sec.name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
+                          isSelected
+                            ? "bg-white/20 text-white"
+                            : isTargetMet
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-amber-100 text-amber-800"
+                        }`}>
+                          {countInSec}/{sec.questionCount || 35}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-black/10 shadow-xs">
+                    <span className="text-xs font-bold text-ink-muted">Add</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      className="input text-xs w-12 px-1 py-0.5 text-center font-bold"
+                      value={bulkAddCount}
+                      onChange={(e) => setBulkAddCount(e.target.value)}
+                    />
+                    <span className="text-xs font-bold text-ink-muted">to {activeManualSectionTab === "all" ? sectionsConfig[0]?.name : activeManualSectionTab}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => addManualQuestion(activeManualSectionTab === "all" ? sectionsConfig[0]?.name : activeManualSectionTab)}
+                    className="btn-primary text-xs px-3.5 py-2 text-white bg-[#1B4F72] hover:bg-[#153e5b] flex items-center gap-1.5 font-bold shadow-xs rounded-xl"
+                  >
+                    <Plus size={15} /> Add Question
+                  </button>
+                </div>
+              </div>
+
+              {/* Questions List (Filtered by active tab) */}
+              <div className="space-y-6 max-h-[75vh] md:max-h-[850px] overflow-y-auto pr-1">
+                {manualQuestions
+                  .map((q, qIdx) => ({ ...q, originalIndex: qIdx }))
+                  .filter((q) => activeManualSectionTab === "all" || q.section === activeManualSectionTab)
+                  .map((q) => {
+                    const qIdx = q.originalIndex;
+                    return (
+                      <div key={qIdx} className="p-5 rounded-2xl border-2 border-black/10 bg-slate-50/50 space-y-4 relative shadow-xs">
+                        {/* Header */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="w-7 h-7 rounded-xl bg-[#1B4F72] text-white flex items-center justify-center text-xs font-extrabold shadow-xs">
+                              {qIdx + 1}
+                            </span>
+                            <select
+                              className="input text-xs py-1 px-3 font-bold bg-white border-black/10 rounded-xl"
+                              value={q.section || sectionsConfig[0]?.name || "English Language"}
+                              onChange={(e) => updateManualQuestion(qIdx, "section", e.target.value)}
+                            >
+                              {sectionsConfig.map((s, idx) => (
+                                <option key={idx} value={s.name}>{s.name}</option>
+                              ))}
+                            </select>
+                            <span className="text-[11px] font-semibold text-slate-500">
+                              Section: <strong className="text-slate-800">{q.section}</strong>
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => removeManualQuestion(qIdx)}
+                            className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-100 transition-colors"
+                          >
+                            <Trash2 size={13} /> Remove Q{qIdx + 1}
+                          </button>
+                        </div>
+
+                        {/* Paragraph / Passage Context (Essential for Banking Exams!) */}
+                        <div>
+                          <label className="text-xs font-bold text-ink-muted mb-1 flex items-center justify-between">
+                            <span>Directions / Passage Context (Crucial for Reading Comprehension, Cloze tests, DI sets &amp; Puzzles)</span>
+                            <span className="text-[10px] text-slate-400 font-normal">Optional</span>
+                          </label>
+                          <textarea
+                            className="input text-xs min-h-[65px] bg-white border-black/10 focus:border-[#1B4F72]"
+                            placeholder="e.g. Directions: Read the following information carefully and answer the questions given below: India may appear to be __A__ on climate goals..."
+                            value={q.passage || ""}
+                            onChange={(e) => updateManualQuestion(qIdx, "passage", formatMathText(e.target.value))}
+                          />
+                        </div>
+
+                        {/* Question Statement */}
+                        <div>
+                          <label className="text-xs font-bold text-ink-muted mb-1 block">Question Statement</label>
+
+                          <div className="flex flex-wrap items-center gap-1.5 mb-2 bg-white p-2 rounded-xl border border-black/10">
+                            <span className="text-xs font-bold text-ink-muted mr-1">Math Insert:</span>
+                            {[
+                              { label: "⅓", insert: " ⅓ " },
+                              { label: "¼", insert: " ¼ " },
+                              { label: "½", insert: " ½ " },
+                              { label: "¾", insert: " ¾ " },
+                              { label: "⅔", insert: " ⅔ " },
+                              { label: "²", insert: "²" },
+                              { label: "³", insert: "³" },
+                              { label: "×", insert: " × " },
+                              { label: "÷", insert: " ÷ " },
+                              { label: "√", insert: " √" },
+                            ].map((sym, sIdx) => (
+                              <button
+                                key={sIdx}
+                                type="button"
+                                className="px-2 py-1 text-xs font-bold bg-slate-100 hover:bg-blue-50 hover:text-blue-700 border border-slate-200 rounded-lg transition-colors"
+                                onClick={() => {
+                                  updateManualQuestion(qIdx, "question", formatMathText((q.question || "") + sym.insert));
+                                }}
+                              >
+                                {sym.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          <textarea
+                            className="input text-sm font-semibold bg-white min-h-[80px] p-3 border-black/10 focus:border-[#1B4F72]"
+                            placeholder="Enter question statement (e.g. What is the value of B in the passage?)..."
+                            value={q.question}
+                            onChange={(e) => updateManualQuestion(qIdx, "question", formatMathText(e.target.value))}
+                          />
+                        </div>
+
+                        {/* Options Grid (Up to Option G, Default 5 Options A to E for Banking) */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-ink-muted block">
+                              Options ({q.options.length}) &amp; Correct Answer Key (Click radio to mark correct option):
+                            </label>
+                            <div className="flex items-center gap-2">
+                              {q.options.length < 7 && (
+                                <button
+                                  type="button"
+                                  onClick={() => addOptionToManual(qIdx)}
+                                  className="text-[11px] font-bold text-blue-700 hover:text-blue-800 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 flex items-center gap-1"
+                                >
+                                  <Plus size={12} /> Add Option ({String.fromCharCode(65 + q.options.length)})
+                                </button>
+                              )}
+                              {q.options.length > 2 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeOptionFromManual(qIdx)}
+                                  className="text-[11px] font-bold text-rose-600 hover:text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-100"
+                                >
+                                  - Remove Option
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-2.5">
+                            {q.options.map((opt, optIdx) => {
+                              const letter = String.fromCharCode(65 + optIdx);
+                              const isRight = +q.correctAnswerIndex === optIdx;
+                              return (
+                                <div
+                                  key={optIdx}
+                                  onClick={() => updateManualQuestion(qIdx, "correctAnswerIndex", optIdx)}
+                                  className={`flex items-center gap-2.5 p-2 rounded-xl border-2 transition-all cursor-pointer ${
+                                    isRight
+                                      ? "bg-emerald-50 border-emerald-400 ring-2 ring-emerald-500/20 font-bold shadow-xs"
+                                      : "bg-white border-black/10 hover:border-emerald-300"
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-extrabold shrink-0 ${
+                                      isRight ? "bg-emerald-600 text-white shadow-xs" : "bg-slate-100 text-slate-700"
+                                    }`}
+                                  >
+                                    {letter}
+                                  </span>
+
+                                  <input
+                                    type="radio"
+                                    name={`manual_ans_${qIdx}`}
+                                    checked={isRight}
+                                    onChange={() => updateManualQuestion(qIdx, "correctAnswerIndex", optIdx)}
+                                    className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
+                                  />
+
+                                  <input
+                                    type="text"
+                                    className="input text-xs py-1.5 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
+                                    value={opt}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => updateManualOption(qIdx, optIdx, formatMathText(e.target.value))}
+                                    placeholder={`Option ${letter}`}
+                                  />
+
+                                  <span
+                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 ${
+                                      isRight ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"
+                                    }`}
+                                  >
+                                    {isRight ? "✓ Correct" : "Select"}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Solution Explanation */}
+                        <div>
+                          <label className="text-xs font-bold text-ink-muted mb-1 block">Solution Explanation (Optional)</label>
+                          <textarea
+                            className="input text-xs min-h-[55px] bg-white border-black/10"
+                            placeholder="Step-by-step logic, grammar rule, or math shortcut..."
+                            value={q.explanation || ""}
+                            onChange={(e) => updateManualQuestion(qIdx, "explanation", formatMathText(e.target.value))}
+                          />
+                        </div>
+
+                        {/* Chart / Image Attachment */}
+                        <div>
+                          <label className="text-xs font-bold text-ink-muted mb-1 block">Attach Chart / Image (Optional)</label>
+                          {q.imageUrl && (
+                            <div className="relative max-w-xs rounded-xl border border-black/10 overflow-hidden bg-white p-2 mb-2">
+                              <img src={q.imageUrl} className="w-full h-auto object-contain max-h-40" alt="Preview" />
+                              <button
+                                type="button"
+                                onClick={() => updateManualQuestion(qIdx, "imageUrl", "")}
+                                className="absolute top-1 right-1 bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold hover:bg-rose-600 shadow"
+                              >✕ Remove</button>
+                            </div>
+                          )}
+
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            id={`img-upload-${qIdx}`}
+                            onChange={(e) => attachImageToManual(qIdx, e.target.files[0])}
+                          />
+                          <label htmlFor={`img-upload-${qIdx}`} className="btn-soft text-xs px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 cursor-pointer inline-flex items-center gap-1.5 rounded-xl text-ink-soft font-bold shadow-xs">
+                            <ImageIcon size={14} /> {q.imageUrl ? "Change Diagram" : "Add Diagram / DI Chart"}
+                          </label>
+                        </div>
+                      </div>
+                    );
+                  })}
               </div>
             </div>
           )}

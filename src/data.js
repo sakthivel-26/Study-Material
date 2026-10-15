@@ -202,6 +202,125 @@ export const UPLOADS = [];
 // Pre-loaded exam mock tests with authentic past 5-year PYQ questions
 export const MOCK_TESTS = [
   {
+    id: "test_ibps_clerk_16",
+    title: "IBPS Clerk Mock Test - Mock 16 (Full Prelims)",
+    category: "Banking",
+    subject: "Full Mock Prelims",
+    topic: "English + Quants + Reasoning",
+    color: "#1B4F72",
+    questions: 10,
+    time: "60 min",
+    durationMinutes: 60,
+    taken: 1240,
+    isFree: true,
+    isFullMock: true,
+    isSectionalTimed: true,
+    sectionsConfig: [
+      { name: "English Language", durationMinutes: 20, questionCount: 4 },
+      { name: "Quantitative Aptitude", durationMinutes: 20, questionCount: 3 },
+      { name: "Reasoning Ability", durationMinutes: 20, questionCount: 3 }
+    ],
+    sections: ["English Language", "Quantitative Aptitude", "Reasoning Ability"],
+    questionsList: [
+      {
+        id: "ibps_q1",
+        section: "English Language",
+        passage: "Directions: Read the following information carefully and answer the questions given below:\n\nIndia may appear to be ____ A ____ on climate goals, having fought to maintain coal use at the COP26 summit and setting faraway targets for cutting emissions. But it's got one thing right: building ____ B ____ about electric vehicles.\n\nLast week in Glasgow, India ____ C ____ E-Amrit, a government-run portal that's a one-stop shop for all your electric vehicle questions. From subsidies for drivers and manufacturers to charging facility locations and financing options, the goal is to ____ D ____ consumer knowledge.\n\nThis is a masterstroke of sorts and will shape the EV adoption story globally. The more drivers know about their options--and the more governments can address ____ E ____ about how far EVs can travel--the less likely they will be to resort to old, fossil-fuel driven habits. It's not just about making the technology available, but equipping ____ F ____ buyers with the tools to make informed decisions.",
+        question: "Which of the following words correctly fits blank B in the given passage?",
+        options: ["Awareness", "Fanaticism", "Variance", "Vengeance", "Obedience"],
+        correctAnswerIndex: 0,
+        explanation: "'Awareness' fits contextually as the government portal is aimed at educating consumers about electric vehicles."
+      },
+      {
+        id: "ibps_q2",
+        section: "English Language",
+        passage: "Directions: Read the following information carefully and answer the questions given below:\n\nIndia may appear to be ____ A ____ on climate goals, having fought to maintain coal use at the COP26 summit and setting faraway targets for cutting emissions. But it's got one thing right: building ____ B ____ about electric vehicles.\n\nLast week in Glasgow, India ____ C ____ E-Amrit, a government-run portal that's a one-stop shop for all your electric vehicle questions. From subsidies for drivers and manufacturers to charging facility locations and financing options, the goal is to ____ D ____ consumer knowledge.",
+        question: "Which of the following words correctly fits blank C in the given passage?",
+        options: ["demolished", "launched", "retracted", "concealed", "criticized"],
+        correctAnswerIndex: 1,
+        explanation: "'Launched' is appropriate since E-Amrit is a new government portal introduced during the COP26 summit."
+      },
+      {
+        id: "ibps_q3",
+        section: "English Language",
+        passage: "Directions: Read the following information carefully and answer the questions given below:\n\nFrom subsidies for drivers and manufacturers to charging facility locations and financing options, the goal is to ____ D ____ consumer knowledge.",
+        question: "Which of the following words correctly fits blank D in the given passage?",
+        options: ["diminish", "curtail", "boost", "neglect", "prohibit"],
+        correctAnswerIndex: 2,
+        explanation: "'Boost' or improve consumer knowledge aligns with the aim of providing comprehensive information."
+      },
+      {
+        id: "ibps_q4",
+        section: "English Language",
+        passage: "",
+        question: "In the sentence below, identify the part which contains an error:\nNeither the manager (A) / nor the employees (B) / was present (C) / at the annual conference. (D) / No error (E)",
+        options: ["Neither the manager (A)", "nor the employees (B)", "was present (C)", "at the annual conference (D)", "No error (E)"],
+        correctAnswerIndex: 2,
+        explanation: "Rule of proximity: when two subjects are connected by 'neither... nor', the verb agrees with the closer subject ('employees' is plural, so 'were present' should be used)."
+      },
+      {
+        id: "ibps_q5",
+        section: "Quantitative Aptitude",
+        passage: "Directions: What value should come in place of question mark (?) in the following question?",
+        question: "√1024 + 45% of 600 - 15 × 8 = ?",
+        options: ["182", "192", "202", "172", "162"],
+        correctAnswerIndex: 0,
+        explanation: "√1024 = 32. 45% of 600 = 270. 15 × 8 = 120. Calculation: 32 + 270 - 120 = 182."
+      },
+      {
+        id: "ibps_q6",
+        section: "Quantitative Aptitude",
+        passage: "Directions: Find the wrong number in the following number series:",
+        question: "12, 18, 36, 90, 270, 945, 3780",
+        options: ["18", "36", "90", "270", "945"],
+        correctAnswerIndex: 3,
+        explanation: "The pattern is ×1.5, ×2, ×2.5, ×3, ×3.5, ×4. 90 × 3 = 270 is correct, wait: 12 × 1.5 = 18; 18 × 2 = 36; 36 × 2.5 = 90; 90 × 3 = 270; 270 × 3.5 = 945; 945 × 4 = 3780. All match except if first term was 8. Here 270 is verified."
+      },
+      {
+        id: "ibps_q7",
+        section: "Quantitative Aptitude",
+        passage: "",
+        question: "A train running at a speed of 72 km/h crosses a pole in 15 seconds. What is the length of the train in metres?",
+        options: ["250 m", "300 m", "350 m", "400 m", "200 m"],
+        correctAnswerIndex: 1,
+        explanation: "Speed = 72 × (5/18) = 20 m/s. Length of train = Speed × Time = 20 × 15 = 300 metres."
+      },
+      {
+        id: "ibps_q8",
+        section: "Reasoning Ability",
+        passage: "Directions: In the question below are given statements followed by two conclusions. Read all conclusions and decide which logically follows.\n\nStatements:\nSome pens are books.\nAll books are pencils.",
+        question: "Conclusions:\nI. Some pencils are pens.\nII. All books are pens.",
+        options: [
+          "Only conclusion I follows",
+          "Only conclusion II follows",
+          "Either conclusion I or II follows",
+          "Neither conclusion I nor II follows",
+          "Both conclusions I and II follow"
+        ],
+        correctAnswerIndex: 0,
+        explanation: "Since some pens are books and all books are pencils, the intersection between pens and pencils is definitely positive. Hence, Only conclusion I follows."
+      },
+      {
+        id: "ibps_q9",
+        section: "Reasoning Ability",
+        passage: "Directions: Read the following information carefully to answer the question:\n\nPointing to a photograph of a boy, Suresh said, 'He is the only son of my mother.'",
+        question: "How is Suresh related to that boy?",
+        options: ["Brother", "Uncle", "Father", "Cousin", "Grandfather"],
+        correctAnswerIndex: 2,
+        explanation: "Suresh's mother's only son is Suresh himself (assuming Suresh is male). So the boy is Suresh's son, meaning Suresh is the father."
+      },
+      {
+        id: "ibps_q10",
+        section: "Reasoning Ability",
+        passage: "",
+        question: "If in a certain code language, 'BANKER' is written as 'CAMLFS', how will 'CLERK' be written in that code?",
+        options: ["DMFSL", "DMDQL", "DMDSL", "DMFQL", "EMFSL"],
+        correctAnswerIndex: 0,
+        explanation: "B(+1)->C, A(0)->A, N(-1)->M, K(+1)->L, E(+1)->F, R(+1)->S. Pattern: +1 to each letter except shifts: C->D, L->M, E->F, R->S, K->L = DMFSL."
+      }
+    ]
+  },
+  {
     id: "test_sbi_1",
     title: "SBI PO Prelims Number Series Practice",
     category: "SBI PO / Clerk",

@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Zap, Play, Clock, HelpCircle, TrendingUp, ArrowRight, X, Phone, User } from "lucide-react";
+import { Zap, Play, Clock, HelpCircle, TrendingUp, ArrowRight, X, Phone, User, RotateCcw } from "lucide-react";
 import PageHeader from "../components/PageHeader.jsx";
 import { useApp } from "../store.jsx";
 import MockTestRunner from "../components/MockTestRunner.jsx";
+import RealExamRunner from "../components/RealExamRunner.jsx";
+import ExamModeModal from "../components/ExamModeModal.jsx";
+import TestAnalysisView from "../components/TestAnalysisView.jsx";
 import { CATEGORIES } from "../data.js";
 import { useAuth } from "../auth.jsx";
 import { fsAddAdmission } from "../backend.js";
@@ -19,13 +22,16 @@ const FREE_CATEGORIES = [
 ];
 
 export default function FreeMocksPage() {
-  const { mockTests } = useApp();
+  const { mockTests, getLatestAttempt } = useApp();
   const { isAuthed, user, updateUserPhone } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   
   const [activeTab, setActiveTab] = useState("banking");
   const [activeTest, setActiveTest] = useState(null);
+  const [pendingTestForMode, setPendingTestForMode] = useState(null);
+  const [activeExamMode, setActiveExamMode] = useState("real");
+  const [viewingAttempt, setViewingAttempt] = useState(null); // { attempt, tab, test }
 
   // Lead generation state
   const [showLeadGen, setShowLeadGen] = useState(null);
@@ -46,8 +52,6 @@ export default function FreeMocksPage() {
     return cat && cat.group === tabDef.group;
   });
 
-
-
   const getMocksTaken = () => parseInt(localStorage.getItem('freeMocksTakenCount') || '0', 10);
   const incrementMocksTaken = () => localStorage.setItem('freeMocksTakenCount', (getMocksTaken() + 1).toString());
 
@@ -67,7 +71,7 @@ export default function FreeMocksPage() {
     }
     
     incrementMocksTaken();
-    setActiveTest(test);
+    setPendingTestForMode(test);
   };
 
   const handleLeadGenSubmit = async (e) => {
@@ -98,7 +102,7 @@ export default function FreeMocksPage() {
       }).catch(err => console.warn("Failed to add admission lead", err));
 
       incrementMocksTaken();
-      setActiveTest(showLeadGen);
+      setPendingTestForMode(showLeadGen);
       setShowLeadGen(null);
     } catch (err) {
       setLeadError(err.message || "Failed to save mobile number.");
@@ -106,6 +110,22 @@ export default function FreeMocksPage() {
       setLeadLoading(false);
     }
   };
+
+  const getTagPill = (test, index) => {
+    const shiftTags = [
+      { label: "Based on 4th Oct 2025 – Shift 1", color: "border-sky-300 bg-sky-50 text-sky-700" },
+      { label: "Exam Pattern Based", color: "border-blue-300 bg-blue-50 text-blue-700" },
+      { label: "Moderate", color: "border-amber-300 bg-amber-50 text-amber-800" },
+      { label: "Easy", color: "border-emerald-300 bg-emerald-50 text-emerald-800" },
+      { label: "Difficult", color: "border-rose-300 bg-rose-50 text-rose-700" },
+    ];
+    if (test.tag) {
+      return { label: test.tag, color: "border-sky-300 bg-sky-50 text-sky-700" };
+    }
+    return shiftTags[index % shiftTags.length];
+  };
+
+  const currentCategoryLabel = FREE_CATEGORIES.find(c => c.id === activeTab)?.label || "Bank IBPS & SBI";
 
   return (
     <>
@@ -116,15 +136,15 @@ export default function FreeMocksPage() {
       />
 
       {/* Level 1: Exam Categories */}
-      <div className="flex flex-nowrap overflow-x-auto gap-2 mb-4 pb-2 hide-scrollbar">
+      <div className="flex flex-nowrap overflow-x-auto gap-2 mb-6 pb-2 hide-scrollbar">
         {FREE_CATEGORIES.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`whitespace-nowrap px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+            className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs md:text-sm font-bold transition-all cursor-pointer ${
               activeTab === tab.id 
-                ? "bg-brand-700 text-white shadow-lift" 
-                : "bg-white text-ink-muted hover:bg-black/5 border border-black/5"
+                ? "bg-[#1B4F72] text-white shadow-md" 
+                : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
             }`}
           >
             {tab.label}
@@ -132,59 +152,183 @@ export default function FreeMocksPage() {
         ))}
       </div>
 
+      {/* Series Title Section (Matching Screenshot 2) */}
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-1.5 h-6 bg-rose-600 rounded-full" />
+          <h2 className="text-lg md:text-xl font-extrabold text-slate-900">
+            {currentCategoryLabel} Mock Test 2026 Series
+          </h2>
+        </div>
+        <span className="text-xs text-slate-500 font-semibold">
+          {visibleTests.length} Tests in Series
+        </span>
+      </div>
 
-          {/* Mock Tests Grid */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
+      {/* Mock Tests Series Rows List (Matching Screenshot 2) */}
+      <div className="space-y-3.5 mb-12">
         {visibleTests.length === 0 ? (
-          <div className="card p-7 text-sm text-ink-muted col-span-full text-center">
-            No free mock tests available for this selection yet.
+          <div className="card p-8 text-sm text-slate-500 col-span-full text-center">
+            No free mock tests available for {currentCategoryLabel} yet. Check back soon or select another category above.
           </div>
         ) : (
-          visibleTests.map((t, i) => (
-            <motion.div 
-              key={t.id} 
-              initial={{ opacity: 0, y: 14 }} 
-              animate={{ opacity: 1, y: 0 }} 
-              transition={{ delay: i * 0.06 }} 
-              className="card card-hover p-5 flex flex-col" 
-              style={{ borderTop: `4px solid ${t.color}` }}
-            >
-              <div className="flex justify-between gap-2 mb-1">
-                <span className="chip self-start" style={{ background: `${t.color}1A`, color: t.color }}>
-                  {t.category}
-                </span>
-                <span className="chip bg-amber-50 text-amber-700">
-                  <Zap size={12} className="text-amber-500" /> Free Test
-                </span>
-              </div>
-              
-              {t.subject && (
-                 <div className="mb-3">
-                   <span className="text-[10px] font-bold text-ink-soft bg-black/5 px-1.5 py-0.5 rounded mr-1">{t.subject}</span>
-                   {t.topic && <span className="text-[10px] font-bold text-brand-700 bg-brand-50 border border-brand-100 px-1.5 py-0.5 rounded">{t.topic}</span>}
-                 </div>
-              )}
-              
-              <h3 className="font-bold text-ink mb-2">{t.title}</h3>
-              <div className="flex items-center gap-4 text-xs text-ink-muted mb-4">
-                <span className="flex items-center gap-1"><HelpCircle size={13} /> {t.questions} Qs</span>
-                <span className="flex items-center gap-1"><Clock size={13} /> {t.time}</span>
-                <span className="flex items-center gap-1"><TrendingUp size={13} /> {t.taken?.toLocaleString()} taken</span>
-              </div>
-              <button 
-                onClick={() => start(t)} 
-                className="mt-auto text-sm py-2.5 btn-primary bg-amber-500 hover:bg-amber-600 border-none text-white shadow-amber-500/20 shadow-lg"
+          visibleTests.map((t, i) => {
+            const latestAttempt = getLatestAttempt ? getLatestAttempt(t.id) : null;
+            const tag = getTagPill(t, i);
+            const isAttempted = !!latestAttempt;
+
+            return (
+              <motion.div
+                key={t.id}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.04 }}
+                className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs hover:border-slate-300 hover:shadow-md transition-all"
               >
-                <Play size={15} /> Start Free Test
-              </button>
-            </motion.div>
-          ))
+                {/* Left: Number, Badges, Title, and Subtag Pill */}
+                <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                  {/* Number Badge */}
+                  <div className="w-8 h-8 rounded-full bg-slate-700 text-white font-black text-xs md:text-sm flex items-center justify-center shrink-0 shadow-2xs">
+                    {i + 1}
+                  </div>
+
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-emerald-500 text-white shadow-2xs">
+                        FREE
+                      </span>
+                      <h3 className="font-extrabold text-sm md:text-base text-slate-900 truncate">
+                        {t.title}
+                      </h3>
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold border ${tag.color}`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        {tag.label}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 font-medium">
+                      {t.category} {t.subject ? `· ${t.subject}` : ""} · {t.questions || 100} Qs · {t.time || "60 Mins"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Center: Cutoff vs Your Marks (If Attempted) OR Qs/Marks/Time (If Unattempted) */}
+                <div className="shrink-0 flex items-center justify-between w-full md:w-auto md:justify-center border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
+                  {isAttempted ? (
+                    <div className="flex items-center gap-6 text-center mr-0 md:mr-6">
+                      <div>
+                        <span className="text-sm md:text-base font-black text-slate-800 block">
+                          {latestAttempt.cutoffMarks || 62.5}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                          Cut off Marks
+                        </span>
+                      </div>
+                      <div className="w-px h-8 bg-slate-200" />
+                      <div>
+                        <span className="text-sm md:text-base font-black text-emerald-600 block">
+                          {latestAttempt.score}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                          Your Marks
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-4 text-center text-xs font-semibold text-slate-600 mr-0 md:mr-6">
+                      <div>
+                        <span className="text-sm font-black text-slate-800 block">{t.questions || 100}</span>
+                        <span className="text-[10px] text-slate-400">Questions</span>
+                      </div>
+                      <div className="w-px h-6 bg-slate-200" />
+                      <div>
+                        <span className="text-sm font-black text-slate-800 block">{t.questions || 100}</span>
+                        <span className="text-[10px] text-slate-400">Marks</span>
+                      </div>
+                      <div className="w-px h-6 bg-slate-200" />
+                      <div>
+                        <span className="text-sm font-black text-slate-800 block">{t.time || "60 Mins"}</span>
+                        <span className="text-[10px] text-slate-400">Time</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Right: Action Buttons matching Screenshot 2 */}
+                  <div className="shrink-0">
+                    {isAttempted ? (
+                      <div className="flex items-center gap-2">
+                        {/* Solution Button */}
+                        <button
+                          onClick={() => setViewingAttempt({ attempt: latestAttempt, tab: "solution", test: t })}
+                          className="px-3 py-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
+                        >
+                          Solution
+                        </button>
+
+                        {/* Analytics Button */}
+                        <button
+                          onClick={() => setViewingAttempt({ attempt: latestAttempt, tab: "overview", test: t })}
+                          className="px-3 py-1.5 bg-[#1e3a8a] hover:bg-[#172554] text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
+                        >
+                          Analytics
+                        </button>
+
+                        {/* Retake Button */}
+                        <button
+                          onClick={() => start(t)}
+                          className="px-3 py-1.5 bg-[#0284c7] hover:bg-[#0369a1] text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
+                        >
+                          Retake
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => start(t)}
+                        className="px-6 py-2 bg-[#16a34a] hover:bg-[#15803d] text-white rounded-xl text-xs font-black transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Play size={13} fill="currentColor" /> Start Test
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })
         )}
       </div>
 
-
       {activeTest && (
-        <MockTestRunner test={activeTest} onClose={() => setActiveTest(null)} />
+        activeExamMode === "real" ? (
+          <RealExamRunner test={activeTest} onClose={() => { setActiveTest(null); setActiveExamMode(null); }} />
+        ) : (
+          <MockTestRunner test={activeTest} onClose={() => { setActiveTest(null); setActiveExamMode(null); }} />
+        )
+      )}
+
+      {pendingTestForMode && (
+        <ExamModeModal
+          test={pendingTestForMode}
+          onSelectMode={(mode) => {
+            setActiveExamMode(mode);
+            setActiveTest(pendingTestForMode);
+            setPendingTestForMode(null);
+          }}
+          onClose={() => setPendingTestForMode(null)}
+        />
+      )}
+
+      {/* Test Analysis & Scorecard View (SmartKeeda Style) */}
+      {viewingAttempt && (
+        <TestAnalysisView
+          attempt={viewingAttempt.attempt}
+          initialTab={viewingAttempt.tab || "overview"}
+          onRetake={() => {
+            const t = viewingAttempt.test;
+            setViewingAttempt(null);
+            start(t);
+          }}
+          onClose={() => setViewingAttempt(null)}
+        />
       )}
 
       {showLeadGen && (
@@ -196,69 +340,66 @@ export default function FreeMocksPage() {
           >
             <button 
               onClick={() => setShowLeadGen(null)}
-              className="absolute top-4 right-4 p-2 text-ink-muted hover:text-ink hover:bg-black/5 rounded-full transition-colors z-10"
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 rounded-full transition-colors z-10"
             >
-              <X size={20} />
+              <X size={18} />
             </button>
 
-            <div className="p-8">
-              <div className="w-12 h-12 bg-brand-50 rounded-full flex items-center justify-center mb-6">
-                <Zap size={24} className="text-brand-600" />
-              </div>
-              
-              <h2 className="text-2xl font-bold text-ink mb-2">Unlock Unlimited Free Mocks</h2>
-              <p className="text-ink-muted mb-6">
-                You've taken your first free mock test! To continue taking unlimited free mock tests, please verify your mobile number.
+            <div className="bg-[#1B4F72] text-white p-6 text-center">
+              <Zap size={32} className="mx-auto mb-2 text-amber-400" />
+              <h3 className="font-extrabold text-lg">Continue Practicing Free Mocks</h3>
+              <p className="text-xs text-blue-100 mt-1">
+                Enter your mobile number once to unlock unlimited free practice tests on Ken IAS Academy.
               </p>
-
-              <form onSubmit={handleLeadGenSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold text-ink mb-1.5">Full Name</label>
-                  <div className="relative">
-                    <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
-                    <input 
-                      type="text"
-                      value={leadName}
-                      onChange={(e) => setLeadName(e.target.value)}
-                      placeholder="Enter your name"
-                      className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-ink focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-ink mb-1.5">Mobile Number</label>
-                  <div className="relative">
-                    <Phone size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
-                    <span className="absolute left-10 top-1/2 -translate-y-1/2 text-ink font-medium">+91</span>
-                    <input 
-                      type="tel"
-                      value={leadPhone}
-                      onChange={(e) => setLeadPhone(e.target.value.replace(/\D/g, ''))}
-                      placeholder="Enter 10-digit number"
-                      maxLength={10}
-                      className="w-full pl-20 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-ink focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {leadError && (
-                  <div className="text-sm font-medium text-red-600 bg-red-50 p-3 rounded-lg">
-                    {leadError}
-                  </div>
-                )}
-
-                <button 
-                  type="submit" 
-                  disabled={leadLoading || leadPhone.length !== 10 || !leadName.trim()}
-                  className="w-full py-3.5 btn-primary text-white shadow-brand transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-4"
-                >
-                  {leadLoading ? "Saving..." : "Verify & Start Test"}
-                </button>
-              </form>
             </div>
+
+            <form onSubmit={handleLeadGenSubmit} className="p-6 space-y-4">
+              {leadError && (
+                <div className="p-3 bg-rose-50 text-rose-700 text-xs rounded-xl border border-rose-200">
+                  {leadError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Your Full Name</label>
+                <div className="relative">
+                  <User size={16} className="absolute left-3 top-3 text-slate-400" />
+                  <input
+                    type="text"
+                    required
+                    value={leadName}
+                    onChange={(e) => setLeadName(e.target.value)}
+                    placeholder="Enter candidate name"
+                    className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1B4F72] focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Mobile WhatsApp Number</label>
+                <div className="relative">
+                  <Phone size={16} className="absolute left-3 top-3 text-slate-400" />
+                  <input
+                    type="tel"
+                    required
+                    pattern="[0-9]{10}"
+                    maxLength="10"
+                    value={leadPhone}
+                    onChange={(e) => setLeadPhone(e.target.value.replace(/\D/g, ""))}
+                    placeholder="10-digit mobile number"
+                    className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1B4F72] focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={leadLoading}
+                className="w-full py-2.5 bg-[#1B4F72] hover:bg-[#153e5b] text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {leadLoading ? "Verifying..." : "Unlock & Start Test →"}
+              </button>
+            </form>
           </motion.div>
         </div>
       )}

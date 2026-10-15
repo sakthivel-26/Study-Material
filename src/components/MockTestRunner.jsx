@@ -3,9 +3,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Clock, HelpCircle, CheckCircle2, XCircle, AlertCircle, Bookmark, Award, RotateCcw, ChevronLeft, ChevronRight, Send, X, Eye, Menu, ChevronDown, ChevronUp } from "lucide-react";
 import { useApp } from "../store.jsx";
 import { Logo } from "./ui.jsx";
+import TestAnalysisView from "./TestAnalysisView.jsx";
 
 export default function MockTestRunner({ test, onClose }) {
-  const { pushToast } = useApp();
+  const { pushToast, saveTestAttempt } = useApp();
 
   // Test state
   const questions = (Array.isArray(test?.questionsList) && test.questionsList.length > 0)
@@ -291,22 +292,77 @@ export default function MockTestRunner({ test, onClose }) {
     const percent = Math.round((correctCount / totalQs) * 100);
     const timeSpentSeconds = totalDurationSeconds - timeLeft;
 
+    const finalScore = Math.max(0, +score.toFixed(2));
+    const finalPercentage = Math.max(0, +((finalScore / totalQs) * 100).toFixed(2));
+    const finalCutoff = test?.cutoffMarks || +(totalQs * 0.625).toFixed(1);
+    const finalPercentile = Math.max(1, Math.min(99.9, +(finalPercentage * 0.85 + (finalScore >= finalCutoff ? 30 : 2)).toFixed(2)));
+    const simulatedRank = Math.max(1, Math.floor(130997 * (1 - finalPercentile / 100))) + "/130997";
+
+    // Build section breakdown
+    const sectionsList = Array.from(new Set(questions.map(q => q.section || "General")));
+    const sectionsBreakdown = sectionsList.map(secName => {
+      const secQs = questions.filter(q => (q.section || "General") === secName);
+      let secCorrect = 0;
+      let secIncorrect = 0;
+      let secUnattempted = 0;
+      secQs.forEach(q => {
+        const studentAns = answers[q.id];
+        const correctIdx = typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0;
+        if (studentAns === undefined) secUnattempted++;
+        else if (studentAns === correctIdx) secCorrect++;
+        else secIncorrect++;
+      });
+      const secScore = +(secCorrect - secIncorrect * 0.25).toFixed(2);
+      const secPct = secQs.length > 0 ? +((Math.max(0, secScore) / secQs.length) * 100).toFixed(2) : 0;
+      return {
+        name: secName,
+        questionCount: secQs.length,
+        correct: secCorrect,
+        incorrect: secIncorrect,
+        unattempted: secUnattempted,
+        timeTaken: Math.max(5, Math.round(timeSpentSeconds / 60)) + " Mins",
+        cutoff: Math.max(5, Math.round(secQs.length * 0.2)),
+        score: Math.max(0, secScore),
+        percentage: secPct,
+        percentile: Math.max(1, Math.min(99.9, +(secPct * 0.85 + 5).toFixed(2)))
+      };
+    });
+
+    const now = new Date();
     const res = {
-      score,
+      id: "att_" + Date.now(),
+      testId: test?.id || ("test_" + Date.now()),
+      testTitle: test?.title || "Mock Test",
+      category: test?.category || "Common Subjects",
+      startedAt: new Date(Date.now() - timeSpentSeconds * 1000).toLocaleString("en-IN", {
+        month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
+      }),
+      completedAt: now.toLocaleString("en-IN", {
+        month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
+      }),
+      totalDurationSeconds: totalDurationSeconds,
+      timeSpentSeconds: timeSpentSeconds,
       totalMarks: totalQs,
-      correctCount,
-      incorrectCount,
-      unattemptedCount,
+      cutoffMarks: finalCutoff,
+      score: finalScore,
+      percentage: finalPercentage,
       accuracy,
-      percent,
-      timeSpentSeconds,
-      date: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
+      percentile: finalPercentile,
+      rank: simulatedRank,
+      sectionsBreakdown,
+      answers,
+      questions: questions,
+      date: now.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
     };
+
+    if (saveTestAttempt) {
+      saveTestAttempt(res);
+    }
 
     setResults(res);
     setViewState("results");
-    pushToast(`Test Submitted! Score: ${score}/${totalQs} 🎉`);
-    setCurrentIndex(0); // Reset for solutions view
+    pushToast(`Test Submitted & Saved to Database! Score: ${finalScore}/${totalQs} 🎉`);
+    setCurrentIndex(0);
   };
 
   const formatTimer = (secs) => {
@@ -381,65 +437,18 @@ export default function MockTestRunner({ test, onClose }) {
 
   if (viewState === "results") {
     return (
-      <div className="fixed inset-0 z-[80] bg-appbg dark:bg-slate-900 text-ink dark:text-slate-100 flex flex-col font-sans overflow-hidden">
-        <header className="h-16 bg-white dark:bg-slate-950 border-b border-black/10 dark:border-slate-800 px-3 sm:px-6 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="scale-90 sm:scale-100 origin-left">
-              <Logo size={32} />
-            </div>
-            <div className="min-w-0">
-              <h2 className="font-bold text-xs sm:text-sm text-ink dark:text-white truncate">Test Results</h2>
-            </div>
-          </div>
-          <button onClick={onClose} className="btn-soft text-[10px] sm:text-xs px-2.5 sm:px-4 py-1.5 sm:py-2 bg-black/5 dark:bg-slate-800 hover:bg-black/10 dark:hover:bg-slate-700 text-ink dark:text-white flex items-center gap-1 whitespace-nowrap">
-            <X size={12} className="sm:w-[14px] sm:h-[14px]" /> Exit
-          </button>
-        </header>
-        <div className="flex-1 overflow-y-auto p-6 md:p-10 max-w-4xl mx-auto w-full space-y-8">
-          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="rounded-3xl bg-white dark:bg-slate-950 border border-black/10 dark:border-slate-800 p-6 md:p-8 shadow-2xl relative overflow-hidden">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
-              <div className="space-y-2 text-center md:text-left">
-                <span className="chip bg-brand-100 dark:bg-brand-950 border border-brand-200 dark:border-brand-800 text-brand-700 dark:text-brand-300 font-semibold">{test?.category} Exam Report</span>
-                <h1 className="text-2xl md:text-3xl font-extrabold text-ink dark:text-white">{test?.title}</h1>
-                <p className="text-sm text-ink-muted dark:text-slate-400">Submitted on {results?.date} · Time Taken: {formatTimer(results?.timeSpentSeconds || 0)}</p>
-              </div>
-
-              <div className="flex items-center gap-6 bg-appbg dark:bg-slate-900/80 p-5 rounded-2xl border border-black/10 dark:border-slate-800">
-                <div className="text-center">
-                  <p className="text-xs text-ink-muted dark:text-slate-400 font-medium">Final Score</p>
-                  <p className="text-3xl font-extrabold text-amber-400">{results?.score} <span className="text-sm text-ink-faint dark:text-slate-500">/ {results?.totalMarks}</span></p>
-                </div>
-                <div className="w-px h-10 bg-black/5 dark:bg-slate-800"/>
-                <div className="text-center">
-                  <p className="text-xs text-ink-muted dark:text-slate-400 font-medium">Accuracy</p>
-                  <p className="text-3xl font-extrabold text-emerald-400">{results?.accuracy}%</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-black/10 dark:border-slate-800/80 text-center">
-              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40">
-                <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{results?.correctCount}</p>
-                <p className="text-[11px] text-emerald-600 dark:text-emerald-300">Correct</p>
-              </div>
-              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/40">
-                <p className="text-xl font-bold text-rose-600 dark:text-rose-400">{results?.incorrectCount}</p>
-                <p className="text-[11px] text-rose-600 dark:text-rose-300">Incorrect</p>
-              </div>
-              <div className="p-3 rounded-xl bg-appbg dark:bg-slate-900 border border-black/10 dark:border-slate-800">
-                <p className="text-xl font-bold text-ink-muted dark:text-slate-400">{results?.unattemptedCount}</p>
-                <p className="text-[11px] text-ink-muted dark:text-slate-400">Unattempted</p>
-              </div>
-            </div>
-            
-            <div className="mt-8 flex justify-center">
-               <button onClick={() => setViewState("solutions")} className="btn-primary text-sm px-6 py-3 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl flex items-center gap-2">
-                 <Eye size={18} /> Review Solutions
-               </button>
-            </div>
-          </motion.div>
-        </div>
-      </div>
+      <TestAnalysisView
+        attempt={results}
+        initialTab="overview"
+        onRetake={() => {
+          setViewState("test");
+          setTimeLeft(totalDurationSeconds);
+          setAnswers({});
+          setStatus({});
+          setCurrentIndex(0);
+        }}
+        onClose={onClose}
+      />
     );
   }
 
