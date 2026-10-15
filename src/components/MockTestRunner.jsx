@@ -372,18 +372,9 @@ export default function MockTestRunner({ test, onClose }) {
   };
 
   useEffect(() => {
-    // Attempt fullscreen
-    const requestFullscreen = async () => {
-      try {
-        if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
-          await document.documentElement.requestFullscreen();
-        }
-      } catch (err) {
-        // Silently ignore: Browsers block fullscreen without direct user gesture
-      }
-    };
-    if (viewState === "test") {
-      requestFullscreen();
+    // Attempt fullscreen only if initiated by a direct user gesture to avoid browser security warning
+    if (viewState === "test" && navigator.userActivation?.isActive && document.documentElement.requestFullscreen && !document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
     }
 
     const handleVisibilityChange = () => {

@@ -532,6 +532,34 @@ const SSC_POOL = [
 // ------------------------------------------------------------------
 export async function generateAIMockTest({ category, subject, topic, questionsCount = 10, timeLimit = "30 min" }) {
   let questions = [];
+  const catLower = (category || "").toLowerCase();
+  const isSpeedMath = catLower.includes("speed math") || catLower.includes("square") || catLower.includes("cube") || catLower.includes("root") || catLower.includes("fraction") || catLower.includes("numerator") || catLower.includes("denominator") || catLower.includes("simplification");
+
+  if (isSpeedMath) {
+    if (catLower.includes("square") || catLower.includes("cube")) {
+      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathSquaresCubes(i + 1));
+    } else if (catLower.includes("root") || catLower.includes("radical")) {
+      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathRoots(i + 1));
+    } else if (catLower.includes("fraction") || catLower.includes("numerator") || catLower.includes("denominator")) {
+      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathFractions(i + 1));
+    } else if (catLower.includes("approximation")) {
+      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathApproximation(i + 1));
+    } else {
+      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathToughSimplification(i + 1));
+    }
+
+    return {
+      id: `mock_speed_${Date.now()}`,
+      title: `${category} Speed Test`,
+      category: "Speed Math",
+      questions: questions.length,
+      time: timeLimit,
+      durationMinutes: parseInt(timeLimit) || 15,
+      taken: 0,
+      questionsList: questions,
+      createdAt: new Date().toISOString(),
+    };
+  }
   const prompt = buildPrompt(category, subject, topic, questionsCount);
 
   const errors = [];
@@ -983,10 +1011,23 @@ async function callGroq(apiKey, prompt) {
       const jsonEnd = cleaned.lastIndexOf("]");
       
       let parsed;
-      if (jsonStart !== -1 && jsonEnd !== -1) {
-        parsed = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
-      } else {
-        parsed = JSON.parse(cleaned);
+      try {
+        if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+          parsed = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+        } else {
+          parsed = JSON.parse(cleaned);
+        }
+      } catch (parseErr) {
+        const lastBrace = cleaned.lastIndexOf("}");
+        if (lastBrace !== -1 && jsonStart !== -1 && lastBrace > jsonStart) {
+          try {
+            parsed = JSON.parse(cleaned.substring(jsonStart, lastBrace + 1) + "]");
+          } catch {
+            throw parseErr;
+          }
+        } else {
+          throw parseErr;
+        }
       }
       
       return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed || [];
