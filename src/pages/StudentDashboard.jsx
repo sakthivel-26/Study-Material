@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { MapPin, Phone, Mail } from "lucide-react";
 import MockTestRunner from "../components/MockTestRunner.jsx";
+import SpeedMathLevelModal from "../components/SpeedMathLevelModal.jsx";
 import { generateAIMockTest } from "../utils/aiTestGenerator.js";
 
 function FeaturedFreeMocks() {
@@ -129,11 +130,12 @@ function SpeedMathDashboardSection({ onStartDrill, generatingId }) {
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.05 }}
-            className="card p-4 flex flex-col bg-white border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all rounded-2xl"
+            onClick={() => onStartDrill(d)}
+            className="card p-4 flex flex-col bg-white border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all rounded-2xl cursor-pointer group"
             style={{ borderTop: `3px solid ${d.color}` }}
           >
             <div className="flex items-center justify-between mb-2">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white" style={{ background: d.color }}>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white transition-transform group-hover:scale-105" style={{ background: d.color }}>
                 <d.icon size={18} />
               </div>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider" style={{ background: `${d.color}15`, color: d.color }}>
@@ -141,7 +143,7 @@ function SpeedMathDashboardSection({ onStartDrill, generatingId }) {
               </span>
             </div>
 
-            <h3 className="font-extrabold text-ink text-sm mb-1.5">{d.title}</h3>
+            <h3 className="font-extrabold text-ink text-sm mb-1.5 group-hover:text-brand-600 transition-colors">{d.title}</h3>
 
             <div className="bg-slate-50 border border-slate-100 rounded-lg p-2 my-1.5 text-[11px] font-mono font-semibold text-slate-700 leading-tight">
               {d.sample}
@@ -152,20 +154,14 @@ function SpeedMathDashboardSection({ onStartDrill, generatingId }) {
             </p>
 
             <button
-              onClick={() => onStartDrill(d)}
-              disabled={generatingId !== null}
-              className={`w-full py-2 rounded-xl text-xs font-bold text-white shadow-sm hover:shadow transition-all flex items-center justify-center gap-1.5 ${generatingId ? "opacity-75 cursor-not-allowed" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onStartDrill(d);
+              }}
+              className="w-full py-2 rounded-xl text-xs font-bold text-white shadow-sm hover:shadow transition-all flex items-center justify-center gap-1.5"
               style={{ background: d.color }}
             >
-              {generatingId === d.id ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" /> Generating...
-                </>
-              ) : (
-                <>
-                  <Play size={13} /> Start 30 Qs Drill
-                </>
-              )}
+              <Play size={13} /> Choose Level (Easy/Mid/Hard)
             </button>
           </motion.div>
         ))}
@@ -176,22 +172,30 @@ function SpeedMathDashboardSection({ onStartDrill, generatingId }) {
 
 export default function StudentDashboard() {
   const [activeTest, setActiveTest] = useState(null);
-  const [generatingId, setGeneratingId] = useState(null);
+  const [selectedDrill, setSelectedDrill] = useState(null);
+  const [generatingLevel, setGeneratingLevel] = useState(null);
   const { pushToast } = useApp();
 
-  const handleStartDrill = async (drill) => {
-    setGeneratingId(drill.id);
+  const handleOpenLevelModal = (drill) => {
+    setSelectedDrill(drill);
+  };
+
+  const handleSelectLevel = async (drill, levelId) => {
+    setGeneratingLevel(levelId);
     try {
       const res = await generateAIMockTest({
         category: drill.category,
+        level: levelId,
         questionsCount: 30,
         timeLimit: "15 min"
       });
 
+      const levelLabel = levelId.charAt(0).toUpperCase() + levelId.slice(1);
       const speedMock = {
-        id: `speed_mock_${drill.id}_${Date.now()}`,
-        title: `${drill.title} - Speed Drill`,
+        id: `speed_mock_${drill.id}_${levelId}_${Date.now()}`,
+        title: `${drill.title} (${levelLabel} Level)`,
         category: "Speed Math",
+        difficulty: levelLabel,
         questions: res.questionsList.length || 30,
         time: "15 min",
         durationMinutes: 15,
@@ -199,11 +203,12 @@ export default function StudentDashboard() {
         color: drill.color,
       };
 
+      setSelectedDrill(null);
       setActiveTest(speedMock);
     } catch (err) {
       pushToast("Failed to generate questions. Please try again.", "error");
     } finally {
-      setGeneratingId(null);
+      setGeneratingLevel(null);
     }
   };
 
@@ -211,7 +216,7 @@ export default function StudentDashboard() {
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
       <div className="min-w-0 space-y-8">
         <HeroBanner />
-        <SpeedMathDashboardSection onStartDrill={handleStartDrill} generatingId={generatingId} />
+        <SpeedMathDashboardSection onStartDrill={handleOpenLevelModal} />
         <FeaturedFreeMocks />
         <CourseCatalog compact />
         <div className="mt-12 mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -264,6 +269,15 @@ export default function StudentDashboard() {
         </div>
       </div>
       <aside className="hidden xl:block"><div className="sticky top-[88px]"><RightSidebar /></div></aside>
+
+      {/* Difficulty Level Selection Popup */}
+      <SpeedMathLevelModal
+        open={!!selectedDrill}
+        drill={selectedDrill}
+        onClose={() => setSelectedDrill(null)}
+        onSelectLevel={handleSelectLevel}
+        generating={generatingLevel}
+      />
 
       {activeTest && (
         <MockTestRunner test={activeTest} onClose={() => setActiveTest(null)} />

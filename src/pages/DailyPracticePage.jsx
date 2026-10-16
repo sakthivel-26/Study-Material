@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Zap, Play, Calculator, Sigma, Loader2, Sparkles, Divide, CheckCircle2 } from "lucide-react";
 import PageHeader from "../components/PageHeader.jsx";
 import MockTestRunner from "../components/MockTestRunner.jsx";
+import SpeedMathLevelModal from "../components/SpeedMathLevelModal.jsx";
 import { generateAIMockTest } from "../utils/aiTestGenerator.js";
 import { useApp } from "../store.jsx";
 
@@ -61,34 +62,43 @@ const SPEED_MOCKS = [
 
 export default function DailyPracticePage() {
   const [activeTest, setActiveTest] = useState(null);
-  const [generating, setGenerating] = useState(false);
+  const [selectedDrill, setSelectedDrill] = useState(null);
+  const [generatingLevel, setGeneratingLevel] = useState(null);
   const { pushToast } = useApp();
 
-  const startSpeedMock = async (mockType) => {
-    setGenerating(mockType.id);
+  const handleOpenLevelModal = (mockType) => {
+    setSelectedDrill(mockType);
+  };
+
+  const handleSelectLevel = async (drill, levelId) => {
+    setGeneratingLevel(levelId);
     try {
       const res = await generateAIMockTest({ 
-        category: mockType.category, 
+        category: drill.category, 
+        level: levelId,
         questionsCount: 30, 
         timeLimit: "15 min" 
       });
       
+      const levelLabel = levelId.charAt(0).toUpperCase() + levelId.slice(1);
       const speedMock = {
-        id: `speed_mock_${mockType.id}_${Date.now()}`,
-        title: `${mockType.title} - Speed Drill`,
+        id: `speed_mock_${drill.id}_${levelId}_${Date.now()}`,
+        title: `${drill.title} (${levelLabel} Level)`,
         category: "Speed Math",
+        difficulty: levelLabel,
         questions: res.questionsList.length || 30,
         time: "15 min",
         durationMinutes: 15,
         questionsList: res.questionsList,
-        color: mockType.color,
+        color: drill.color,
       };
 
+      setSelectedDrill(null);
       setActiveTest(speedMock);
     } catch (err) {
       pushToast("Failed to generate questions. Please try again.", "error");
     } finally {
-      setGenerating(false);
+      setGeneratingLevel(null);
     }
   };
 
@@ -107,11 +117,12 @@ export default function DailyPracticePage() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.08 }}
-            className="card p-5 flex flex-col h-full bg-white border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all rounded-2xl"
+            onClick={() => handleOpenLevelModal(m)}
+            className="card p-5 flex flex-col h-full bg-white border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all rounded-2xl cursor-pointer group"
             style={{ borderTop: `4px solid ${m.color}` }}
           >
             <div className="flex items-center justify-between mb-3">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white" style={{ background: m.color }}>
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white transition-transform group-hover:scale-105" style={{ background: m.color }}>
                 <m.icon size={24} />
               </div>
               <span className="text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider" style={{ background: `${m.color}15`, color: m.color }}>
@@ -119,7 +130,7 @@ export default function DailyPracticePage() {
               </span>
             </div>
 
-            <h3 className="font-extrabold text-lg text-slate-800 mb-1">{m.title}</h3>
+            <h3 className="font-extrabold text-lg text-slate-800 mb-1 group-hover:text-blue-600 transition-colors">{m.title}</h3>
             
             <div className="bg-slate-50 border border-slate-100 rounded-lg p-2 my-2 text-xs font-mono font-semibold text-slate-700">
               {m.sampleEq}
@@ -128,24 +139,27 @@ export default function DailyPracticePage() {
             <p className="text-xs text-slate-500 mb-5 flex-1 leading-relaxed">{m.description}</p>
             
             <button 
-              onClick={() => startSpeedMock(m)}
-              disabled={generating !== false}
-              className={`btn text-white w-full py-2.5 rounded-xl font-bold text-sm shadow hover:shadow-md transition-all flex items-center justify-center gap-2 ${generating ? "opacity-70 cursor-not-allowed" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenLevelModal(m);
+              }}
+              className="btn text-white w-full py-2.5 rounded-xl font-bold text-sm shadow hover:shadow-md transition-all flex items-center justify-center gap-2"
               style={{ background: m.color }}
             >
-              {generating === m.id ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" /> Generating Tough Questions...
-                </>
-              ) : (
-                <>
-                  <Play size={16} /> Start 30 Qs Drill (15 Min)
-                </>
-              )}
+              <Play size={16} /> Choose Level (Easy / Mid / Hard)
             </button>
           </motion.div>
         ))}
       </div>
+
+      {/* Difficulty Level Selection Popup */}
+      <SpeedMathLevelModal
+        open={!!selectedDrill}
+        drill={selectedDrill}
+        onClose={() => setSelectedDrill(null)}
+        onSelectLevel={handleSelectLevel}
+        generating={generatingLevel}
+      />
 
       {activeTest && (
         <MockTestRunner test={activeTest} onClose={() => setActiveTest(null)} />

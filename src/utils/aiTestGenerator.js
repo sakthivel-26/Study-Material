@@ -530,28 +530,660 @@ const SSC_POOL = [
 // ------------------------------------------------------------------
 // Main Entrypoint supporting Gemma-7B, Gemini, OpenAI, DeepSeek & Fallbacks
 // ------------------------------------------------------------------
-export async function generateAIMockTest({ category, subject, topic, questionsCount = 10, timeLimit = "30 min" }) {
+// Precomputed verified Root & Cube Pools
+const EASY_SQUARES = [
+  { val: 100, r: 10 }, { val: 121, r: 11 }, { val: 144, r: 12 }, { val: 169, r: 13 },
+  { val: 196, r: 14 }, { val: 225, r: 15 }, { val: 256, r: 16 }, { val: 289, r: 17 },
+  { val: 324, r: 18 }, { val: 361, r: 19 }, { val: 400, r: 20 }, { val: 441, r: 21 },
+  { val: 484, r: 22 }, { val: 529, r: 23 }, { val: 576, r: 24 }, { val: 625, r: 25 },
+  { val: 676, r: 26 }, { val: 729, r: 27 }, { val: 784, r: 28 }, { val: 841, r: 29 },
+  { val: 900, r: 30 }
+];
+
+const MEDIUM_SQUARES = [
+  { val: 961, r: 31 }, { val: 1024, r: 32 }, { val: 1089, r: 33 }, { val: 1156, r: 34 },
+  { val: 1225, r: 35 }, { val: 1296, r: 36 }, { val: 1369, r: 37 }, { val: 1444, r: 38 },
+  { val: 1521, r: 39 }, { val: 1600, r: 40 }, { val: 1681, r: 41 }, { val: 1764, r: 42 },
+  { val: 1849, r: 43 }, { val: 1936, r: 44 }, { val: 2025, r: 45 }, { val: 2116, r: 46 },
+  { val: 2209, r: 47 }, { val: 2304, r: 48 }, { val: 2401, r: 49 }, { val: 2500, r: 50 },
+  { val: 2704, r: 52 }, { val: 2916, r: 54 }, { val: 3136, r: 56 }, { val: 3364, r: 58 },
+  { val: 3600, r: 60 }
+];
+
+const HARD_SQUARES = [
+  { val: 3844, r: 62 }, { val: 3969, r: 63 }, { val: 4096, r: 64 }, { val: 4225, r: 65 },
+  { val: 4624, r: 68 }, { val: 4900, r: 70 }, { val: 5184, r: 72 }, { val: 5625, r: 75 },
+  { val: 6084, r: 78 }, { val: 6400, r: 80 }, { val: 6724, r: 82 }, { val: 7056, r: 84 },
+  { val: 7225, r: 85 }, { val: 7744, r: 88 }, { val: 8100, r: 90 }, { val: 8464, r: 92 },
+  { val: 9025, r: 95 }, { val: 9216, r: 96 }, { val: 9604, r: 98 }, { val: 9801, r: 99 }
+];
+
+const EASY_CUBES = [
+  { val: 8, r: 2 }, { val: 27, r: 3 }, { val: 64, r: 4 }, { val: 125, r: 5 },
+  { val: 216, r: 6 }, { val: 343, r: 7 }, { val: 512, r: 8 }, { val: 729, r: 9 }, { val: 1000, r: 10 }
+];
+
+const MEDIUM_CUBES = [
+  { val: 1331, r: 11 }, { val: 1728, r: 12 }, { val: 2197, r: 13 }, { val: 2744, r: 14 },
+  { val: 3375, r: 15 }, { val: 4096, r: 16 }, { val: 4913, r: 17 }, { val: 5832, r: 18 }
+];
+
+const HARD_CUBES = [
+  { val: 6859, r: 19 }, { val: 8000, r: 20 }, { val: 9261, r: 21 }, { val: 10648, r: 22 },
+  { val: 12167, r: 23 }, { val: 13824, r: 24 }, { val: 15625, r: 25 }, { val: 17576, r: 26 },
+  { val: 19683, r: 27 }, { val: 21952, r: 28 }, { val: 24389, r: 29 }, { val: 27000, r: 30 }
+];
+
+function makeQuestionObject(idPrefix, idx, sectionName, qText, ansVal, explanationText) {
+  const distractors = new Set([ansVal]);
+  let loopCount = 0;
+  while (distractors.size < 4 && loopCount < 50) {
+    loopCount++;
+    const offset = pickRandom([-30, -25, -20, -15, -12, -10, -8, -5, -4, -2, -1, 1, 2, 4, 5, 8, 10, 12, 15, 20, 25, 30]);
+    const fake = ansVal + offset;
+    if (fake > 0) distractors.add(fake);
+  }
+  let fallbackStep = 1;
+  while (distractors.size < 4) {
+    distractors.add(ansVal + fallbackStep);
+    fallbackStep++;
+  }
+  const optionsArr = shuffle(Array.from(distractors)).map(String);
+  const correctIdx = optionsArr.indexOf(String(ansVal));
+  return {
+    id: `${idPrefix}_${idx}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    section: sectionName,
+    question: qText,
+    options: optionsArr,
+    correctAnswerIndex: correctIdx >= 0 ? correctIdx : 0,
+    explanation: explanationText
+  };
+}
+
+// 1. Dynamic Squares & Cubes Generator (Zero repetition, Easy/Medium/Hard)
+function genSpeedMathSquaresCubes(idx, level = "medium", seenEquations = new Set()) {
+  let qText = "", ansVal = 0, exp = "";
+  let attempts = 0;
+
+  do {
+    attempts++;
+    const type = (idx + attempts) % 5;
+
+    if (level === "easy") {
+      if (type === 0) {
+        const a = randInt(11, 28);
+        const c = randInt(10, 70);
+        const isAdd = Math.random() > 0.4;
+        ansVal = isAdd ? (a * a + c) : (a * a - c);
+        qText = `${a}² ${isAdd ? "+" : "-"} ${c} = ?`;
+        exp = `${a}² = ${a * a}. ${a * a} ${isAdd ? "+" : "-"} ${c} = ${ansVal}.`;
+      } else if (type === 1) {
+        const a = randInt(12, 22);
+        const b = randInt(5, 11);
+        ansVal = (a * a) - (b * b);
+        qText = `${a}² - ${b}² = ?`;
+        exp = `${a}² = ${a * a}, ${b}² = ${b * b}. ${a * a} - ${b * b} = ${ansVal}.`;
+      } else if (type === 2) {
+        const a = randInt(3, 9);
+        const b = randInt(5, 15);
+        ansVal = (a * a * a) + (b * b);
+        qText = `${a}³ + ${b}² = ?`;
+        exp = `${a}³ = ${a * a * a}, ${b}² = ${b * b}. ${a * a * a} + ${b * b} = ${ansVal}.`;
+      } else if (type === 3) {
+        const a = randInt(5, 10);
+        const b = randInt(2, 4);
+        ansVal = (a * a * a) - (b * b * b);
+        qText = `${a}³ - ${b}³ = ?`;
+        exp = `${a}³ = ${a * a * a}, ${b}³ = ${b * b * b}. ${a * a * a} - ${b * b * b} = ${ansVal}.`;
+      } else {
+        const a = pickRandom([12, 14, 16, 18, 20, 22, 24]);
+        const d = pickRandom([2, 4, 8]);
+        const c = randInt(15, 60);
+        ansVal = ((a * a) / d) + c;
+        qText = `(${a}² ÷ ${d}) + ${c} = ?`;
+        exp = `${a}² = ${a * a}. ${a * a} ÷ ${d} = ${(a * a) / d}. ${(a * a) / d} + ${c} = ${ansVal}.`;
+      }
+    } else if (level === "medium") {
+      if (type === 0) {
+        const a = randInt(22, 50);
+        const b = randInt(12, a - 2);
+        const diff = (a * a) - (b * b);
+        const divs = [2, 3, 4, 5, 6, 8, 10, 12, 16, 20].filter(d => diff % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : 2;
+        const c = randInt(12, 40);
+        ansVal = (diff / d) + c;
+        qText = `[(${a}² - ${b}²) ÷ ${d}] + ${c} = ?`;
+        exp = `${a}² - ${b}² = ${diff}. ${diff} ÷ ${d} = ${diff / d}. ${diff / d} + ${c} = ${ansVal}.`;
+      } else if (type === 1) {
+        const a = randInt(20, 45);
+        const b = randInt(15, 35);
+        const c = randInt(10, 25);
+        ansVal = (a * a) + (b * b) - (c * c);
+        qText = `${a}² + ${b}² - ${c}² = ?`;
+        exp = `${a}² = ${a * a}, ${b}² = ${b * b}, ${c}² = ${c * c}. Total = ${ansVal}.`;
+      } else if (type === 2) {
+        const cb = pickRandom(MEDIUM_CUBES);
+        const divs = [2, 3, 4, 6, 8, 9, 12, 16, 18, 24, 36, 48].filter(d => cb.val % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : 4;
+        const b = randInt(12, 25);
+        ansVal = (cb.val / d) + (b * b);
+        qText = `${cb.r}³ ÷ ${d} + ${b}² = ?`;
+        exp = `${cb.r}³ = ${cb.val}. ${cb.val} ÷ ${d} = ${cb.val / d}. ${b}² = ${b * b}. Total = ${ansVal}.`;
+      } else if (type === 3) {
+        const a = randInt(8, 14);
+        const b = randInt(4, 8);
+        const c = randInt(12, 25);
+        ansVal = (a * a * a) - (b * b * b) + (c * c);
+        qText = `${a}³ - ${b}³ + ${c}² = ?`;
+        exp = `${a}³ = ${a * a * a}, ${b}³ = ${b * b * b}, ${c}² = ${c * c}. Result = ${ansVal}.`;
+      } else {
+        const cb = pickRandom(MEDIUM_CUBES);
+        const a = randInt(15, 32);
+        const b = randInt(15, 60);
+        ansVal = cb.r + (a * a) - b;
+        qText = `∛${cb.val} + ${a}² - ${b} = ?`;
+        exp = `∛${cb.val} = ${cb.r}. ${a}² = ${a * a}. ${cb.r} + ${a * a} - ${b} = ${ansVal}.`;
+      }
+    } else {
+      // HARD LEVEL
+      if (type === 0) {
+        const a = randInt(42, 92);
+        const b = randInt(22, a - 4);
+        const diff = (a * a) - (b * b);
+        const divs = [4, 5, 6, 8, 10, 12, 16, 20, 24, 25, 28, 32, 40, 48, 50, 60, 65, 70, 80].filter(d => diff % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : 4;
+        const c = randInt(15, 35);
+        ansVal = (diff / d) + (c * c);
+        qText = `[(${a}² - ${b}²) ÷ ${d}] + ${c}² = ?`;
+        exp = `${a}² - ${b}² = (${a} - ${b})(${a} + ${b}) = ${a - b} × ${a + b} = ${diff}. ${diff} ÷ ${d} = ${diff / d}. ${c}² = ${c * c}. ${diff / d} + ${c * c} = ${ansVal}.`;
+      } else if (type === 1) {
+        const a = randInt(35, 85);
+        const b = randInt(25, 65);
+        const c = randInt(18, Math.min(a, b));
+        ansVal = (a * a) + (b * b) - (c * c);
+        qText = `${a}² + ${b}² - ${c}² = ?`;
+        exp = `${a}² = ${a * a}, ${b}² = ${b * b}, ${c}² = ${c * c}. ${a * a} + ${b * b} - ${c * c} = ${ansVal}.`;
+      } else if (type === 2) {
+        const cb = pickRandom(HARD_CUBES);
+        const divs = [36, 45, 56, 63, 64, 72, 96, 125, 144].filter(d => cb.val % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : (cb.r * 2);
+        const b = randInt(20, 45);
+        ansVal = Math.round(cb.val / d) + (b * b);
+        qText = `${cb.r}³ ÷ ${d} + ${b}² = ?`;
+        exp = `${cb.r}³ = ${cb.val}. ${cb.val} ÷ ${d} = ${Math.round(cb.val / d)}. ${b}² = ${b * b}. Total = ${ansVal}.`;
+      } else if (type === 3) {
+        const a = randInt(13, 22);
+        const b = randInt(9, 15);
+        const c = randInt(18, 38);
+        ansVal = (a * a * a) - (b * b * b) + (c * c);
+        qText = `${a}³ - ${b}³ + ${c}² = ?`;
+        exp = `${a}³ = ${a * a * a}, ${b}³ = ${b * b * b}, ${c}² = ${c * c}. Result = ${ansVal}.`;
+      } else {
+        const cb = pickRandom(HARD_CUBES);
+        const a = randInt(25, 65);
+        const b = randInt(15, a - 2);
+        ansVal = cb.r + (a * a) - (b * b);
+        qText = `∛${cb.val} + ${a}² - ${b}² = ?`;
+        exp = `∛${cb.val} = ${cb.r}. ${a}² = ${a * a}, ${b}² = ${b * b}. ${cb.r} + ${a * a} - ${b * b} = ${ansVal}.`;
+      }
+    }
+  } while (seenEquations.has(qText) && attempts < 30);
+
+  seenEquations.add(qText);
+  return makeQuestionObject("sqcb", idx, "Squares & Cubes", qText, ansVal, exp);
+}
+
+// 2. Dynamic Roots & Radicals Generator (Zero repetition, Easy/Medium/Hard)
+function genSpeedMathRoots(idx, level = "medium", seenEquations = new Set()) {
+  let qText = "", ansVal = 0, exp = "";
+  let attempts = 0;
+
+  const sqPool = level === "easy" ? EASY_SQUARES : level === "medium" ? MEDIUM_SQUARES : HARD_SQUARES;
+  const cbPool = level === "easy" ? EASY_CUBES : level === "medium" ? MEDIUM_CUBES : HARD_CUBES;
+
+  do {
+    attempts++;
+    const type = (idx + attempts) % 3;
+
+    if (level === "easy") {
+      if (type === 0) {
+        const s1 = pickRandom(sqPool);
+        let s2 = pickRandom(sqPool);
+        while (s2.val === s1.val) s2 = pickRandom(sqPool);
+        const isAdd = Math.random() > 0.3;
+        ansVal = isAdd ? (s1.r + s2.r) : Math.abs(s1.r - s2.r);
+        const [big, small] = s1.r >= s2.r ? [s1, s2] : [s2, s1];
+        qText = isAdd ? `√${s1.val} + √${s2.val} = ?` : `√${big.val} - √${small.val} = ?`;
+        exp = isAdd ? `√${s1.val} = ${s1.r}, √${s2.val} = ${s2.r}. ${s1.r} + ${s2.r} = ${ansVal}.` : `√${big.val} = ${big.r}, √${small.val} = ${small.r}. ${big.r} - ${small.r} = ${ansVal}.`;
+      } else if (type === 1) {
+        const s1 = pickRandom(sqPool);
+        const mult = randInt(3, 8);
+        const add = randInt(10, 50);
+        ansVal = (s1.r * mult) + add;
+        qText = `√${s1.val} × ${mult} + ${add} = ?`;
+        exp = `√${s1.val} = ${s1.r}. ${s1.r} × ${mult} = ${s1.r * mult}. ${s1.r * mult} + ${add} = ${ansVal}.`;
+      } else {
+        const c1 = pickRandom(cbPool);
+        const s1 = pickRandom(sqPool);
+        ansVal = c1.r + s1.r;
+        qText = `∛${c1.val} + √${s1.val} = ?`;
+        exp = `∛${c1.val} = ${c1.r}, √${s1.val} = ${s1.r}. ${c1.r} + ${s1.r} = ${ansVal}.`;
+      }
+    } else if (level === "medium") {
+      if (type === 0) {
+        const s1 = pickRandom(sqPool);
+        const s2 = pickRandom(sqPool);
+        const s3 = pickRandom(EASY_SQUARES);
+        ansVal = s1.r + s2.r - s3.r;
+        qText = `√${s1.val} + √${s2.val} - √${s3.val} = ?`;
+        exp = `√${s1.val} = ${s1.r}, √${s2.val} = ${s2.r}, √${s3.val} = ${s3.r}. ${s1.r} + ${s2.r} - ${s3.r} = ${ansVal}.`;
+      } else if (type === 1) {
+        const c1 = pickRandom(cbPool);
+        const s1 = pickRandom(sqPool);
+        const mult = randInt(3, 7);
+        const sub = randInt(15, 60);
+        ansVal = (c1.r * mult) + s1.r - sub;
+        qText = `∛${c1.val} × ${mult} + √${s1.val} - ${sub} = ?`;
+        exp = `∛${c1.val} = ${c1.r}, ${c1.r} × ${mult} = ${c1.r * mult}. √${s1.val} = ${s1.r}. Result = ${ansVal}.`;
+      } else {
+        const s1 = pickRandom(sqPool);
+        const divs = [2, 3, 4, 6, 8].filter(d => s1.r % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : 2;
+        const c1 = pickRandom(cbPool);
+        ansVal = (s1.r / d) + c1.r;
+        qText = `(√${s1.val} ÷ ${d}) + ∛${c1.val} = ?`;
+        exp = `√${s1.val} = ${s1.r}, ${s1.r} ÷ ${d} = ${s1.r / d}. ∛${c1.val} = ${c1.r}. Total = ${ansVal}.`;
+      }
+    } else {
+      // HARD LEVEL
+      if (type === 0) {
+        const s1 = pickRandom(HARD_SQUARES);
+        const s2 = pickRandom(MEDIUM_SQUARES);
+        const s3 = pickRandom(sqPool);
+        ansVal = s1.r + s2.r - s3.r;
+        qText = `√${s1.val} + √${s2.val} - √${s3.val} = ?`;
+        exp = `√${s1.val} = ${s1.r}, √${s2.val} = ${s2.r}, √${s3.val} = ${s3.r}. ${s1.r} + ${s2.r} - ${s3.r} = ${ansVal}.`;
+      } else if (type === 1) {
+        const s1 = pickRandom(HARD_SQUARES);
+        const c1 = pickRandom(HARD_CUBES);
+        const divs = [4, 6, 7, 8, 9, 12, 14, 16, 21, 24, 28].filter(d => (s1.r * c1.r) % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : 12;
+        const sq = randInt(15, 32);
+        ansVal = ((s1.r * c1.r) / d) + (sq * sq);
+        qText = `[(√${s1.val} × ∛${c1.val}) ÷ ${d}] + ${sq}² = ?`;
+        exp = `√${s1.val} = ${s1.r}, ∛${c1.val} = ${c1.r}. (${s1.r} × ${c1.r}) ÷ ${d} = ${(s1.r * c1.r) / d}. ${sq}² = ${sq * sq}. Total = ${ansVal}.`;
+      } else {
+        const s1 = pickRandom(HARD_SQUARES);
+        const divs = [4, 6, 7, 8, 9, 12, 14].filter(d => s1.r % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : 6;
+        const c1 = pickRandom(HARD_CUBES);
+        const mult = randInt(4, 9);
+        const s2 = pickRandom(MEDIUM_SQUARES);
+        ansVal = (s1.r / d) + (c1.r * mult) - s2.r;
+        qText = `(√${s1.val} ÷ ${d}) + ∛${c1.val} × ${mult} - √${s2.val} = ?`;
+        exp = `√${s1.val} = ${s1.r}, ${s1.r} ÷ ${d} = ${s1.r / d}. ∛${c1.val} = ${c1.r}, ${c1.r} × ${mult} = ${c1.r * mult}. √${s2.val} = ${s2.r}. Result = ${ansVal}.`;
+      }
+    }
+  } while (seenEquations.has(qText) && attempts < 30);
+
+  seenEquations.add(qText);
+  return makeQuestionObject("root", idx, "Roots & Radicals", qText, ansVal, exp);
+}
+
+// 3. Dynamic Numerator & Denominator (Fractions) Generator
+function genSpeedMathFractions(idx, level = "medium", seenEquations = new Set()) {
+  let qText = "", ansVal = 0, exp = "";
+  let attempts = 0;
+
+  do {
+    attempts++;
+    const type = (idx + attempts) % 4;
+
+    if (level === "easy") {
+      if (type === 0) {
+        const d = pickRandom([3, 4, 5, 6, 7, 8, 9, 10]);
+        const n = randInt(1, d - 1);
+        const mult = randInt(4, 18);
+        const m = d * mult;
+        const c = randInt(10, 50);
+        ansVal = (n * mult) + c;
+        qText = `(${n}/${d}) × ${m} + ${c} = ?`;
+        exp = `(${n}/${d}) × ${m} = ${n * mult}. ${n * mult} + ${c} = ${ansVal}.`;
+      } else if (type === 1) {
+        const d1 = pickRandom([3, 4, 5, 8]);
+        const n1 = randInt(1, d1 - 1);
+        const mult1 = randInt(4, 15);
+        const m1 = d1 * mult1;
+
+        const d2 = pickRandom([2, 5, 10]);
+        const n2 = randInt(1, d2 - 1);
+        const mult2 = randInt(4, 15);
+        const m2 = d2 * mult2;
+
+        ansVal = (n1 * mult1) + (n2 * mult2);
+        qText = `(${n1}/${d1}) × ${m1} + (${n2}/${d2}) × ${m2} = ?`;
+        exp = `(${n1}/${d1}) × ${m1} = ${n1 * mult1}. (${n2}/${d2}) × ${m2} = ${n2 * mult2}. Total = ${ansVal}.`;
+      } else if (type === 2) {
+        const a = randInt(2, 6);
+        const b = randInt(10, 30);
+        const c = randInt(2, 6);
+        ansVal = a * b + c;
+        qText = `(${a * c}/${c}) × ${b} + ${c} = ?`;
+        exp = `${a * c}/${c} = ${a}. ${a} × ${b} = ${a * b}. ${a * b} + ${c} = ${ansVal}.`;
+      } else {
+        const whole = randInt(2, 5);
+        const num = pickRandom([1, 3]);
+        const den = 4;
+        const k = 16;
+        const impNum = whole * den + num;
+        ansVal = (impNum * (k / den));
+        qText = `(${whole} ${num}/${den}) × ${k} = ?`;
+        exp = `${whole} ${num}/${den} = ${impNum}/${den}. (${impNum}/${den}) × ${k} = ${impNum} × ${k / den} = ${ansVal}.`;
+      }
+    } else if (level === "medium") {
+      if (type === 0) {
+        const d1 = pickRandom([7, 9, 11, 13, 15]);
+        const n1 = randInt(2, d1 - 1);
+        const mult1 = randInt(15, 45);
+        const m1 = d1 * mult1;
+
+        const d2 = pickRandom([5, 8, 12, 16]);
+        const n2 = randInt(2, d2 - 1);
+        const mult2 = randInt(10, 35);
+        const m2 = d2 * mult2;
+
+        ansVal = (n1 * mult1) + (n2 * mult2);
+        qText = `(${n1}/${d1}) × ${m1} + (${n2}/${d2}) × ${m2} = ?`;
+        exp = `(${n1}/${d1}) × ${m1} = ${n1 * mult1}. (${n2}/${d2}) × ${m2} = ${n2 * mult2}. Total = ${ansVal}.`;
+      } else if (type === 1) {
+        const a = randInt(24, 48);
+        const b = randInt(14, a - 2);
+        const diff = (a * a) - (b * b);
+        const divs = [4, 8, 10, 12, 16, 20, 24].filter(d => diff % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : 4;
+        const top = pickRandom([360, 480, 600, 720, 900]);
+        const btm = pickRandom([12, 15, 18, 20, 24]);
+        ansVal = (diff / d) + (top / btm);
+        qText = `[(${a}² - ${b}²) ÷ ${d}] + (${top} ÷ ${btm}) = ?`;
+        exp = `${a}² - ${b}² = ${diff}. ${diff} ÷ ${d} = ${diff / d}. ${top} ÷ ${btm} = ${top / btm}. ${diff / d} + ${top / btm} = ${ansVal}.`;
+      } else if (type === 2) {
+        const s1 = pickRandom(MEDIUM_SQUARES);
+        const divs = [3, 4, 6, 7, 8, 9, 12].filter(d => s1.r % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : 4;
+        const mult = randInt(10, 25);
+        const add = randInt(20, 80);
+        ansVal = ((s1.r * mult) / d) + add;
+        qText = `[(√${s1.val} × ${mult}) ÷ ${d}] + ${add} = ?`;
+        exp = `√${s1.val} = ${s1.r}. (${s1.r} × ${mult}) ÷ ${d} = ${(s1.r * mult) / d}. Result = ${ansVal}.`;
+      } else {
+        const pct = pickRandom([25, 40, 50, 75]);
+        const base = pickRandom([300, 400, 500, 600, 800]);
+        const c = randInt(15, 60);
+        ansVal = (pct / 100) * base + c;
+        qText = `(${pct}% of ${base}) + ${c} = ?`;
+        exp = `${pct}% of ${base} = ${(pct / 100) * base}. Total = ${ansVal}.`;
+      }
+    } else {
+      // HARD LEVEL
+      if (type === 0) {
+        const d1 = pickRandom([7, 9, 11, 13, 14, 17]);
+        const n1 = randInt(3, d1 - 1);
+        const m1 = d1 * d1; // square multiple!
+
+        const d2 = pickRandom([5, 8, 12, 16]);
+        const n2 = randInt(3, d2 - 1);
+        const m2 = d2 * randInt(20, 60);
+
+        const d3 = pickRandom([4, 5, 8]);
+        const n3 = randInt(2, d3 - 1);
+        const m3 = d3 * randInt(15, 50);
+
+        ansVal = (n1 * d1) + (n2 * (m2 / d2)) - (n3 * (m3 / d3));
+        qText = `(${n1}/${d1}) × ${m1} + (${n2}/${d2}) × ${m2} - (${n3}/${d3}) × ${m3} = ?`;
+        exp = `(${n1}/${d1}) × ${m1} = ${n1 * d1}. (${n2}/${d2}) × ${m2} = ${n2 * (m2 / d2)}. (${n3}/${d3}) × ${m3} = ${n3 * (m3 / d3)}. Total = ${ansVal}.`;
+      } else if (type === 1) {
+        const a = randInt(38, 72);
+        const b = randInt(20, a - 4);
+        const diff = (a * a) - (b * b);
+        const divs = [8, 12, 16, 20, 24, 32, 40, 48].filter(d => diff % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : 16;
+        const top = pickRandom([480, 600, 720, 840, 960, 1200]);
+        const btm = pickRandom([15, 16, 20, 24, 30]);
+        ansVal = (diff / d) + (top / btm);
+        qText = `[(${a}² - ${b}²) ÷ ${d}] + (${top} ÷ ${btm}) = ?`;
+        exp = `${a}² - ${b}² = ${diff}. ${diff} ÷ ${d} = ${diff / d}. ${top} ÷ ${btm} = ${top / btm}. ${diff / d} + ${top / btm} = ${ansVal}.`;
+      } else if (type === 2) {
+        const s1 = pickRandom(HARD_SQUARES);
+        const divs1 = [7, 8, 9, 12, 14, 16, 21].filter(d => s1.r % d === 0);
+        const d1 = divs1.length > 0 ? pickRandom(divs1) : 7;
+        const mult1 = randInt(12, 25);
+
+        const s2 = pickRandom(MEDIUM_SQUARES);
+        const divs2 = [6, 8, 9, 12, 15, 18].filter(d => s2.r % d === 0);
+        const d2 = divs2.length > 0 ? pickRandom(divs2) : 6;
+        const mult2 = randInt(15, 30);
+
+        ansVal = ((s1.r * mult1) / d1) + ((s2.r * mult2) / d2);
+        qText = `[(√${s1.val} × ${mult1}) ÷ ${d1}] + [(√${s2.val} × ${mult2}) ÷ ${d2}] = ?`;
+        exp = `√${s1.val} = ${s1.r}, (${s1.r} × ${mult1}) ÷ ${d1} = ${(s1.r * mult1) / d1}. √${s2.val} = ${s2.r}, (${s2.r} × ${mult2}) ÷ ${d2} = ${(s2.r * mult2) / d2}. Total = ${ansVal}.`;
+      } else {
+        // Tricky banking percentages
+        const pctOptions = [
+          { p: "37.5%", fN: 3, fD: 8, base: 640, val: 240 },
+          { p: "62.5%", fN: 5, fD: 8, base: 480, val: 300 },
+          { p: "16⅔%", fN: 1, fD: 6, base: 720, val: 120 },
+          { p: "14²⁄₇%", fN: 1, fD: 7, base: 560, val: 80 },
+          { p: "83⅓%", fN: 5, fD: 6, base: 360, val: 300 },
+          { p: "66⅔%", fN: 2, fD: 3, base: 450, val: 300 }
+        ];
+        const item1 = pickRandom(pctOptions);
+        let item2 = pickRandom(pctOptions);
+        while (item2.p === item1.p) item2 = pickRandom(pctOptions);
+
+        const sum = item1.val + item2.val;
+        const divs = [10, 15, 18, 20, 24, 25, 30].filter(d => sum % d === 0);
+        const d = divs.length > 0 ? pickRandom(divs) : 10;
+        const sq = randInt(14, 26);
+        ansVal = (sum / d) + (sq * sq);
+        qText = `[(${item1.p} of ${item1.base}) + (${item2.p} of ${item2.base})] ÷ ${d} + ${sq}² = ?`;
+        exp = `${item1.p} of ${item1.base} = ${item1.val}. ${item2.p} of ${item2.base} = ${item2.val}. Numerator = ${sum}. ${sum} ÷ ${d} = ${sum / d}. ${sq}² = ${sq * sq}. Result = ${ansVal}.`;
+      }
+    }
+  } while (seenEquations.has(qText) && attempts < 30);
+
+  seenEquations.add(qText);
+  return makeQuestionObject("frac", idx, "Numerator & Denominator", qText, ansVal, exp);
+}
+
+// 4. Dynamic Approximation Generator
+function genSpeedMathApproximation(idx, level = "medium", seenEquations = new Set()) {
+  let qText = "", ansVal = 0, exp = "";
+  let attempts = 0;
+
+  const sqPool = level === "easy" ? EASY_SQUARES : level === "medium" ? MEDIUM_SQUARES : HARD_SQUARES;
+
+  do {
+    attempts++;
+    const type = (idx + attempts) % 5;
+
+    if (level === "easy") {
+      if (type === 0) {
+        const s1 = pickRandom(sqPool);
+        const s2 = pickRandom(sqPool);
+        const offset1 = ((Math.random() * 0.4) - 0.2).toFixed(2);
+        const offset2 = ((Math.random() * 0.4) - 0.2).toFixed(2);
+        const dec1 = (s1.val + parseFloat(offset1)).toFixed(2);
+        const dec2 = (s2.val + parseFloat(offset2)).toFixed(2);
+        ansVal = s1.r + s2.r;
+        qText = `√${dec1} + √${dec2} ≈ ?`;
+        exp = `Approximating: √${s1.val} + √${s2.val} = ${s1.r} + ${s2.r} = ${ansVal}.`;
+      } else if (type === 1) {
+        const pct = pickRandom([20, 25, 30, 40, 50, 60, 75]);
+        const decPct = (pct - 0.02).toFixed(2);
+        const base = randInt(4, 30) * (100 / (pct === 75 ? 25 : pct === 25 ? 25 : 10));
+        const decBase = (base + 0.12).toFixed(2);
+        ansVal = Math.round((pct * base) / 100);
+        qText = `${decPct}% of ${decBase} ≈ ?`;
+        exp = `${pct}% of ${base} = ${ansVal}.`;
+      } else if (type === 2) {
+        const a = randInt(10, 25);
+        const b = randInt(5, 15);
+        const decA = (a + 0.03).toFixed(2);
+        const decB = (b - 0.02).toFixed(2);
+        ansVal = (a * a) - (b * b);
+        qText = `(${decA})² - (${decB})² ≈ ?`;
+        exp = `Approximating: ${a}² - ${b}² = ${a * a} - ${b * b} = ${ansVal}.`;
+      } else if (type === 3) {
+        const a = randInt(15, 60) * 10;
+        const b = randInt(12, 45) * 5;
+        const decA = (a + 0.98).toFixed(2);
+        const decB = (b + 0.05).toFixed(2);
+        const c = randInt(10, 50);
+        ansVal = a + b - c;
+        qText = `${decA} + ${decB} - ${c}.02 ≈ ?`;
+        exp = `Approximating: ${a} + ${b} - ${c} = ${ansVal}.`;
+      } else {
+        const cb = pickRandom(EASY_CUBES);
+        const dec = (cb.val + 0.08).toFixed(2);
+        const add = randInt(10, 50);
+        ansVal = cb.r + add;
+        qText = `∛${dec} + ${add}.01 ≈ ?`;
+        exp = `Approximating: ∛${cb.val} + ${add} = ${cb.r} + ${add} = ${ansVal}.`;
+      }
+    } else if (level === "medium") {
+      if (type === 0) {
+        const a = randInt(18, 38);
+        const b = randInt(8, 18);
+        const decA = (a + 0.02).toFixed(2);
+        const decB = (b - 0.02).toFixed(2);
+        ansVal = (a * a) - (b * b);
+        qText = `(${decA})² - (${decB})² ≈ ?`;
+        exp = `Approximating: ${a}² - ${b}² = ${a * a} - ${b * b} = ${ansVal}.`;
+      } else if (type === 1) {
+        const pct = pickRandom([15, 35, 45, 55, 65, 85]);
+        const base = randInt(12, 40) * 20;
+        const decPct = (pct - 0.05).toFixed(2);
+        const decBase = (base + 0.15).toFixed(2);
+        const plus = randInt(15, 60);
+        ansVal = Math.round((pct * base) / 100) + plus;
+        qText = `(${decPct}% of ${decBase}) + ${plus}.03 ≈ ?`;
+        exp = `Approximating: (${pct}% of ${base}) + ${plus} = ${Math.round((pct * base) / 100)} + ${plus} = ${ansVal}.`;
+      } else if (type === 2) {
+        const s1 = pickRandom(MEDIUM_SQUARES);
+        const s2 = pickRandom(EASY_SQUARES);
+        const dec1 = (s1.val + 0.04).toFixed(2);
+        const dec2 = (s2.val - 0.04).toFixed(2);
+        ansVal = s1.r + s2.r;
+        qText = `√${dec1} + √${dec2} ≈ ?`;
+        exp = `Approximating: √${s1.val} + √${s2.val} = ${s1.r} + ${s2.r} = ${ansVal}.`;
+      } else if (type === 3) {
+        const cb = pickRandom(MEDIUM_CUBES);
+        const dec = (cb.val + 0.12).toFixed(2);
+        const mult = randInt(3, 8);
+        ansVal = (cb.r * mult);
+        qText = `∛${dec} × ${mult}.02 ≈ ?`;
+        exp = `Approximating: ∛${cb.val} × ${mult} = ${cb.r} × ${mult} = ${ansVal}.`;
+      } else {
+        const a = randInt(25, 45);
+        const b = randInt(12, 24);
+        const decA = (a + 0.08).toFixed(2);
+        const decB = (b - 0.05).toFixed(2);
+        ansVal = (a * a) + (b * b);
+        qText = `(${decA})² + (${decB})² ≈ ?`;
+        exp = `Approximating: ${a}² + ${b}² = ${a * a} + ${b * b} = ${ansVal}.`;
+      }
+    } else {
+      if (type === 0) {
+        const s1 = pickRandom(HARD_SQUARES);
+        const s2 = pickRandom(MEDIUM_SQUARES);
+        const s3 = pickRandom(EASY_SQUARES);
+        const dec1 = (s1.val + 0.04).toFixed(2);
+        const dec2 = (s2.val - 0.03).toFixed(2);
+        const dec3 = (s3.val + 0.02).toFixed(2);
+        ansVal = s1.r + s2.r - s3.r;
+        qText = `√${dec1} + √${dec2} - √${dec3} ≈ ?`;
+        exp = `Approximating: √${s1.val} + √${s2.val} - √${s3.val} = ${s1.r} + ${s2.r} - ${s3.r} = ${ansVal}.`;
+      } else if (type === 1) {
+        const cb = pickRandom(HARD_CUBES);
+        const sq = pickRandom(MEDIUM_SQUARES);
+        const decCb = (cb.val + 0.15).toFixed(2);
+        const decSq = (sq.val - 0.12).toFixed(2);
+        ansVal = cb.r + sq.r;
+        qText = `∛${decCb} + √${decSq} ≈ ?`;
+        exp = `Approximating: ∛${cb.val} + √${sq.val} = ${cb.r} + ${sq.r} = ${ansVal}.`;
+      } else if (type === 2) {
+        const pct1 = 37.5;
+        const pct2 = 62.5;
+        const b1 = randInt(12, 35) * 8;
+        const b2 = randInt(10, 30) * 8;
+        ansVal = Math.round((pct1 * b1) / 100) + Math.round((pct2 * b2) / 100);
+        qText = `(37.49% of ${(b1 + 0.08).toFixed(2)}) + (62.52% of ${(b2 - 0.06).toFixed(2)}) ≈ ?`;
+        exp = `37.5% = 3/8 of ${b1} (${Math.round((pct1 * b1) / 100)}) + 62.5% = 5/8 of ${b2} (${Math.round((pct2 * b2) / 100)}) = ${ansVal}.`;
+      } else if (type === 3) {
+        const a = randInt(40, 75);
+        const b = randInt(25, 45);
+        const diff = (a * a) - (b * b);
+        const d = pickRandom([2, 3, 4, 5, 6, 8, 10]);
+        ansVal = Math.round(diff / d);
+        qText = `[(${(a + 0.04).toFixed(2)})² - (${(b - 0.05).toFixed(2)})²] ÷ ${d}.01 ≈ ?`;
+        exp = `Approximating: (${a}² - ${b}²) ÷ ${d} = ${diff} ÷ ${d} ≈ ${ansVal}.`;
+      } else {
+        const s1 = pickRandom(HARD_SQUARES);
+        const mult = randInt(4, 9);
+        const minus = randInt(50, 150);
+        ansVal = (s1.r * mult) - minus;
+        qText = `(√${(s1.val + 0.08).toFixed(2)} × ${mult}.02) - ${minus}.05 ≈ ?`;
+        exp = `Approximating: (${s1.r} × ${mult}) - ${minus} = ${s1.r * mult} - ${minus} = ${ansVal}.`;
+      }
+    }
+  } while (seenEquations.has(qText) && attempts < 50);
+
+  seenEquations.add(qText);
+  return makeQuestionObject("approx", idx, "Approximation", qText, ansVal, exp);
+}
+
+// 5. Tough Speed Math Simplification (Cycles across categories cleanly)
+function genSpeedMathToughSimplification(idx, level = "medium", seenEquations = new Set()) {
+  const cycle = idx % 4;
+  if (cycle === 0) return genSpeedMathSquaresCubes(idx, level, seenEquations);
+  if (cycle === 1) return genSpeedMathRoots(idx, level, seenEquations);
+  if (cycle === 2) return genSpeedMathFractions(idx, level, seenEquations);
+  return genSpeedMathSquaresCubes(idx + 13, level, seenEquations);
+}
+
+function genSpeedMathSimplification(idx, level = "medium", seenEquations = new Set()) {
+  return genSpeedMathToughSimplification(idx, level, seenEquations);
+}
+
+
+
+export async function generateAIMockTest({ category, subject, topic, level = "medium", questionsCount = 30, timeLimit = "15 min" }) {
   let questions = [];
   const catLower = (category || "").toLowerCase();
-  const isSpeedMath = catLower.includes("speed math") || catLower.includes("square") || catLower.includes("cube") || catLower.includes("root") || catLower.includes("fraction") || catLower.includes("numerator") || catLower.includes("denominator") || catLower.includes("simplification");
+  const isSpeedMath = catLower.includes("speed math") || catLower.includes("square") || catLower.includes("cube") || catLower.includes("root") || catLower.includes("fraction") || catLower.includes("numerator") || catLower.includes("denominator") || catLower.includes("simplification") || catLower.includes("approximation");
 
   if (isSpeedMath) {
+    const seenEquations = new Set();
+    const cleanLevel = ["easy", "medium", "hard"].includes(String(level).toLowerCase()) ? String(level).toLowerCase() : "medium";
+
     if (catLower.includes("square") || catLower.includes("cube")) {
-      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathSquaresCubes(i + 1));
+      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathSquaresCubes(i + 1, cleanLevel, seenEquations));
     } else if (catLower.includes("root") || catLower.includes("radical")) {
-      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathRoots(i + 1));
+      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathRoots(i + 1, cleanLevel, seenEquations));
     } else if (catLower.includes("fraction") || catLower.includes("numerator") || catLower.includes("denominator")) {
-      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathFractions(i + 1));
+      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathFractions(i + 1, cleanLevel, seenEquations));
     } else if (catLower.includes("approximation")) {
-      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathApproximation(i + 1));
+      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathApproximation(i + 1, cleanLevel, seenEquations));
     } else {
-      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathToughSimplification(i + 1));
+      for (let i = 0; i < questionsCount; i++) questions.push(genSpeedMathToughSimplification(i + 1, cleanLevel, seenEquations));
     }
 
+    const levelLabel = cleanLevel.charAt(0).toUpperCase() + cleanLevel.slice(1);
     return {
-      id: `mock_speed_${Date.now()}`,
-      title: `${category} Speed Test`,
+      id: `mock_speed_${cleanLevel}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: `${category} (${levelLabel} Level)`,
       category: "Speed Math",
+      difficulty: levelLabel,
       questions: questions.length,
       time: timeLimit,
       durationMinutes: parseInt(timeLimit) || 15,
@@ -560,6 +1192,7 @@ export async function generateAIMockTest({ category, subject, topic, questionsCo
       createdAt: new Date().toISOString(),
     };
   }
+
   const prompt = buildPrompt(category, subject, topic, questionsCount);
 
   const errors = [];
@@ -576,272 +1209,6 @@ export async function generateAIMockTest({ category, subject, topic, questionsCo
   if (!questions || questions.length === 0) {
     console.error("All AI providers failed. Reasons:\n- " + errors.join("\n- "));
     // Proceeding to fallback generator automatically...
-  }
-
-  function makeQuestionObject(idPrefix, idx, sectionName, qText, ansVal, explanationText) {
-    const distractors = new Set([ansVal]);
-    while (distractors.size < 4) {
-      const offset = pickRandom([-30, -25, -20, -15, -12, -10, -8, -5, -4, -2, -1, 1, 2, 4, 5, 8, 10, 12, 15, 20, 25, 30]);
-      const fake = ansVal + offset;
-      if (fake > 0) distractors.add(fake);
-    }
-    const optionsArr = shuffle(Array.from(distractors)).map(String);
-    const correctIdx = optionsArr.indexOf(String(ansVal));
-    return {
-      id: `${idPrefix}_${idx}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      section: sectionName,
-      question: qText,
-      options: optionsArr,
-      correctAnswerIndex: correctIdx >= 0 ? correctIdx : 0,
-      explanation: explanationText
-    };
-  }
-
-  // Tough Squares & Cubes Generator (15² to 99², 11³ to 35³)
-  function genSpeedMathSquaresCubes(idx) {
-    const type = idx % 5;
-    
-    if (type === 0) {
-      // Difference of squares with exact divisor + square
-      const diffSqPairs = [
-        { a: 43, b: 29, d: 16, c: 15, res: 288 },
-        { a: 54, b: 46, d: 25, c: 18, res: 356 },
-        { a: 62, b: 38, d: 48, c: 24, res: 626 },
-        { a: 38, b: 22, d: 32, c: 21, res: 471 },
-        { a: 48, b: 32, d: 40, c: 26, res: 708 },
-        { a: 67, b: 53, d: 28, c: 19, res: 421 },
-        { a: 73, b: 47, d: 65, c: 28, res: 832 },
-        { a: 84, b: 56, d: 70, c: 32, res: 1080 },
-        { a: 91, b: 69, d: 88, c: 25, res: 665 }
-      ];
-      const p = pickRandom(diffSqPairs);
-      const qText = `[(${p.a}² - ${p.b}²) ÷ ${p.d}] + ${p.c}² = ?`;
-      const exp = `${p.a}² - ${p.b}² = (${p.a} - ${p.b})(${p.a} + ${p.b}) = ${p.a - p.b} × ${p.a + p.b} = ${p.a*p.a - p.b*p.b}. ${p.a*p.a - p.b*p.b} ÷ ${p.d} = ${(p.a*p.a - p.b*p.b)/p.d}. Adding ${p.c}² (${p.c*p.c}): ${p.res}.`;
-      return makeQuestionObject("sqcb", idx, "Squares & Cubes", qText, p.res, exp);
-    } else if (type === 1) {
-      // Three large 2-digit squares addition/subtraction
-      const a = randInt(28, 68);
-      const b = randInt(18, 48);
-      const c = randInt(15, Math.min(a, b));
-      const ansVal = (a * a) + (b * b) - (c * c);
-      const qText = `${a}² + ${b}² - ${c}² = ?`;
-      const exp = `${a}² = ${a*a}, ${b}² = ${b*b}, ${c}² = ${c*c}. ${a*a} + ${b*b} - ${c*c} = ${ansVal}.`;
-      return makeQuestionObject("sqcb", idx, "Squares & Cubes", qText, ansVal, exp);
-    } else if (type === 2) {
-      // Cubes divided by factor + square
-      const cubeDivPool = [
-        { c: 12, cube: 1728, div: 36, res: 48, sq: 21, ans: 489 },
-        { c: 14, cube: 2744, div: 56, res: 49, sq: 18, ans: 373 },
-        { c: 15, cube: 3375, div: 45, res: 75, sq: 32, ans: 1099 },
-        { c: 16, cube: 4096, div: 64, res: 64, sq: 26, ans: 740 },
-        { c: 18, cube: 5832, div: 72, res: 81, sq: 25, ans: 706 },
-        { c: 21, cube: 9261, div: 63, res: 147, sq: 19, ans: 508 },
-        { c: 24, cube: 13824, div: 96, res: 144, sq: 28, ans: 928 },
-        { c: 25, cube: 15625, div: 125, res: 125, sq: 34, ans: 1281 }
-      ];
-      const p = pickRandom(cubeDivPool);
-      const qText = `${p.c}³ ÷ ${p.div} + ${p.sq}² = ?`;
-      const exp = `${p.c}³ = ${p.cube}. ${p.cube} ÷ ${p.div} = ${p.res}. ${p.sq}² = ${p.sq * p.sq}. ${p.res} + ${p.sq * p.sq} = ${p.ans}.`;
-      return makeQuestionObject("sqcb", idx, "Squares & Cubes", qText, p.ans, exp);
-    } else if (type === 3) {
-      // Tough Cube equations
-      const cubeEqPool = [
-        { a: 13, b: 11, sq: 18, cA: 2197, cB: 1331, sVal: 324, res: 1190 },
-        { a: 14, b: 12, sq: 15, cA: 2744, cB: 1728, sVal: 225, res: 1241 },
-        { a: 15, b: 13, sq: 22, cA: 3375, cB: 2197, sVal: 484, res: 1662 },
-        { a: 12, b: 9, sq: 24, cA: 1728, cB: 729, sVal: 576, res: 1881 }
-      ];
-      const p = pickRandom(cubeEqPool);
-      const qText = `${p.a}³ - ${p.b}³ + ${p.sq}² = ?`;
-      const exp = `${p.a}³ = ${p.cA}, ${p.b}³ = ${p.cB}, ${p.sq}² = ${p.sVal}. ${p.cA} - ${p.cB} + ${p.sVal} = ${p.res}.`;
-      return makeQuestionObject("sqcb", idx, "Squares & Cubes", qText, p.res, exp);
-    } else {
-      // Cube root with power differences
-      const crPool = [
-        { cRoot: 13824, crVal: 24, a: 19, b: 14, res: 189 },
-        { cRoot: 5832, crVal: 18, a: 22, b: 16, res: 246 },
-        { cRoot: 9261, crVal: 21, a: 25, b: 17, res: 357 },
-        { cRoot: 4096, crVal: 16, a: 28, b: 20, res: 400 },
-        { cRoot: 17576, crVal: 26, a: 24, b: 18, res: 278 }
-      ];
-      const p = pickRandom(crPool);
-      const qText = `∛${p.cRoot} + ${p.a}² - ${p.b}² = ?`;
-      const exp = `∛${p.cRoot} = ${p.crVal}. ${p.a}² = ${p.a*p.a}, ${p.b}² = ${p.b*p.b}. ${p.crVal} + ${p.a*p.a} - ${p.b*p.b} = ${p.res}.`;
-      return makeQuestionObject("sqcb", idx, "Squares & Cubes", qText, p.res, exp);
-    }
-  }
-
-  // Tough Roots & Radicals Generator (Square roots up to √9216 & Cube roots up to ∛24389)
-  function genSpeedMathRoots(idx) {
-    const type = idx % 3;
-
-    if (type === 0) {
-      // Three large 4-digit square roots
-      const tripleRoots = [
-        { r1: 5184, v1: 72, r2: 2704, v2: 52, r3: 1764, v3: 42, res: 82 },
-        { r1: 7056, v1: 84, r2: 3969, v2: 63, r3: 4624, v3: 68, res: 79 },
-        { r1: 9216, v1: 96, r2: 3136, v2: 56, r3: 6084, v3: 78, res: 74 },
-        { r1: 7744, v1: 88, r2: 1521, v2: 39, r3: 2304, v3: 48, res: 79 },
-        { r1: 8464, v1: 92, r2: 2025, v2: 45, r3: 3844, v3: 62, res: 75 }
-      ];
-      const p = pickRandom(tripleRoots);
-      const qText = `√${p.r1} + √${p.r2} - √${p.r3} = ?`;
-      const exp = `√${p.r1} = ${p.v1}, √${p.r2} = ${p.v2}, √${p.r3} = ${p.v3}. ${p.v1} + ${p.v2} - ${p.v3} = ${p.res}.`;
-      return makeQuestionObject("root", idx, "Roots & Radicals", qText, p.res, exp);
-    } else if (type === 1) {
-      // Square root and cube root mixed with division & operations
-      const mixedRoots = [
-        { q: "(√3136 × ∛2744) ÷ 28 + 15² = ?", res: 253, exp: "√3136 = 56, ∛2744 = 14. (56 × 14) ÷ 28 = 28. 15² = 225. 28 + 225 = 253." },
-        { q: "(√5184 ÷ 12) + ∛5832 × 4 - 35 = ?", res: 43, exp: "√5184 = 72, 72 ÷ 12 = 6. ∛5832 = 18, 18 × 4 = 72. 6 + 72 - 35 = 43." },
-        { q: "√7056 ÷ 7 + ∛9261 × 5 = ?", res: 117, exp: "√7056 = 84, 84 ÷ 7 = 12. ∛9261 = 21, 21 × 5 = 105. 12 + 105 = 117." },
-        { q: "(√9216 ÷ 8) + ∛13824 × 6 - √2704 = ?", res: 104, exp: "√9216 = 96, 96 ÷ 8 = 12. ∛13824 = 24, 24 × 6 = 144. √2704 = 52. 12 + 144 - 52 = 104." },
-        { q: "(√3969 ÷ 9) + ∛3375 × 8 + 24² = ?", res: 703, exp: "√3969 = 63, 63 ÷ 9 = 7. ∛3375 = 15, 15 × 8 = 120. 24² = 576. 7 + 120 + 576 = 703." }
-      ];
-      const p = pickRandom(mixedRoots);
-      return makeQuestionObject("root", idx, "Roots & Radicals", p.q, p.res, p.exp);
-    } else {
-      const crossRoots = [
-        { q: "(√6084 × ∛4096) ÷ 24 + 18² = ?", res: 376, exp: "√6084 = 78, ∛4096 = 16. (78 × 16) ÷ 24 = 52. 18² = 324. 52 + 324 = 376." },
-        { q: "(√4624 × ∛2197) ÷ 17 + 22² = ?", res: 536, exp: "√4624 = 68, ∛2197 = 13. (68 × 13) ÷ 17 = 52. 22² = 484. 52 + 484 = 536." },
-        { q: "(√8464 × ∛1728) ÷ 23 + 25² = ?", res: 673, exp: "√8464 = 92, ∛1728 = 12. (92 × 12) ÷ 23 = 48. 25² = 625. 48 + 625 = 673." }
-      ];
-      const p = pickRandom(crossRoots);
-      return makeQuestionObject("root", idx, "Roots & Radicals", p.q, p.res, p.exp);
-    }
-  }
-
-  // Tough Numerator & Denominator / Fractions Generator
-  function genSpeedMathFractions(idx) {
-    const type = idx % 5;
-
-    if (type === 0) {
-      // Fraction of large cubes/squares
-      const fracPool = [
-        { q: "(3/7) × 441 + (5/9) × 729 - (4/5) × 325 = ?", res: 334, exp: "(3/7) × 441 = 189. (5/9) × 729 = 405. (4/5) × 325 = 260. 189 + 405 - 260 = 334." },
-        { q: "(4/11) × 1331 + (5/13) × 2197 - (3/8) × 640 = ?", res: 1089, exp: "(4/11) × 1331 = 484. (5/13) × 2197 = 845. (3/8) × 640 = 240. 484 + 845 - 240 = 1089." },
-        { q: "(7/12) × 1728 - (5/14) × 2744 + 85 = ?", res: 113, exp: "(7/12) × 1728 = 1008. (5/14) × 2744 = 980. 1008 - 980 + 85 = 113." },
-        { q: "(5/8) × 960 + (3/16) × 1280 - (2/7) × 840 = ?", res: 600, exp: "(5/8) × 960 = 600. (3/16) × 1280 = 240. (2/7) × 840 = 240. 600 + 240 - 240 = 600." }
-      ];
-      const p = pickRandom(fracPool);
-      return makeQuestionObject("frac", idx, "Numerator & Denominator", p.q, p.res, p.exp);
-    } else if (type === 1) {
-      // Compound numerator over denominator
-      const compoundPool = [
-        { q: "[(38² - 22²) ÷ 32] + (480 ÷ 16) = ?", res: 60, exp: "38² - 22² = 16 × 60 = 960. 960 ÷ 32 = 30. 480 ÷ 16 = 30. 30 + 30 = 60." },
-        { q: "[(48² - 32²) ÷ 40] + (720 ÷ 18) = ?", res: 72, exp: "48² - 32² = 16 × 80 = 1280. 1280 ÷ 40 = 32. 720 ÷ 18 = 40. 32 + 40 = 72." },
-        { q: "[(54² - 46²) ÷ 25] + (600 ÷ 15) = ?", res: 72, exp: "54² - 46² = 8 × 100 = 800. 800 ÷ 25 = 32. 600 ÷ 15 = 40. 32 + 40 = 72." },
-        { q: "[(62² - 38²) ÷ 48] + (900 ÷ 25) = ?", res: 86, exp: "62² - 38² = 24 × 100 = 2400. 2400 ÷ 48 = 50. 900 ÷ 25 = 36. 50 + 36 = 86." }
-      ];
-      const p = pickRandom(compoundPool);
-      return makeQuestionObject("frac", idx, "Numerator & Denominator", p.q, p.res, p.exp);
-    } else if (type === 2) {
-      // Roots in Numerator and Denominator
-      const rootFracPool = [
-        { q: "(√3136 × 15) ÷ 14 + (√5184 × 25) ÷ 18 = ?", res: 160, exp: "√3136 = 56, (56 × 15) ÷ 14 = 60. √5184 = 72, (72 × 25) ÷ 18 = 100. 60 + 100 = 160." },
-        { q: "(√7056 × 12) ÷ 21 + (√3969 × 20) ÷ 15 = ?", res: 132, exp: "√7056 = 84, (84 × 12) ÷ 21 = 48. √3969 = 63, (63 × 20) ÷ 15 = 84. 48 + 84 = 132." },
-        { q: "(√9216 × 18) ÷ 24 + (√2704 × 30) ÷ 26 = ?", res: 132, exp: "√9216 = 96, (96 × 18) ÷ 24 = 72. √2704 = 52, (52 × 30) ÷ 26 = 60. 72 + 60 = 132." }
-      ];
-      const p = pickRandom(rootFracPool);
-      return makeQuestionObject("frac", idx, "Numerator & Denominator", p.q, p.res, p.exp);
-    } else if (type === 3) {
-      // Large sums in numerator divided by denominator
-      const numSumPool = [
-        { q: "[(28 × 45 + 35 × 24) ÷ 42] + 18² = ?", res: 374, exp: "28 × 45 = 1260, 35 × 24 = 840. Numerator = 2100. 2100 ÷ 42 = 50. 18² = 324. 50 + 324 = 374." },
-        { q: "[(36 × 65 + 45 × 52) ÷ 78] + 24² = ?", res: 636, exp: "36 × 65 = 2340, 45 × 52 = 2340. Numerator = 4680. 4680 ÷ 78 = 60. 24² = 576. 60 + 576 = 636." },
-        { q: "[(42 × 55 + 33 × 70) ÷ 66] + 22² = ?", res: 554, exp: "42 × 55 = 2310, 33 × 70 = 2310. Numerator = 4620. 4620 ÷ 66 = 70. 22² = 484. 70 + 484 = 554." }
-      ];
-      const p = pickRandom(numSumPool);
-      return makeQuestionObject("frac", idx, "Numerator & Denominator", p.q, p.res, p.exp);
-    } else {
-      // Tricky percentage fraction equivalents & mixed fractions
-      const pctFracPool = [
-        { q: "[(37.5% of 640) + (62.5% of 480)] ÷ 18 + 16² = ?", res: 286, exp: "37.5% = 3/8 → 240. 62.5% = 5/8 → 300. (240 + 300) ÷ 18 = 30. 16² = 256. 30 + 256 = 286." },
-        { q: "[(16⅔% of 720) + (14²⁄₇% of 560)] ÷ 25 + 23² = ?", res: 537, exp: "16⅔% = 1/6 → 120. 14²⁄₇% = 1/7 → 80. (120 + 80) ÷ 25 = 8. 23² = 529. 8 + 529 = 537." },
-        { q: "(3¾ + 2½) × (16/25) + 14 = ?", res: 18, exp: "3¾ + 2½ = 15/4 + 10/4 = 25/4. (25/4) × (16/25) = 4. 4 + 14 = 18." },
-        { q: "(4⅙ + 2⅓) × (18/39) + 24 = ?", res: 27, exp: "4⅙ + 2⅓ = 25/6 + 14/6 = 39/6. (39/6) × (18/39) = 3. 3 + 24 = 27." }
-      ];
-      const p = pickRandom(pctFracPool);
-      return makeQuestionObject("frac", idx, "Numerator & Denominator", p.q, p.res, p.exp);
-    }
-  }
-
-  // Tough Speed Math Simplification (Cycles through all hard categories)
-  function genSpeedMathToughSimplification(idx) {
-    const cycle = idx % 4;
-    if (cycle === 0) return genSpeedMathSquaresCubes(idx);
-    if (cycle === 1) return genSpeedMathRoots(idx);
-    if (cycle === 2) return genSpeedMathFractions(idx);
-    
-    // Cycle 3: Combined High-Difficulty Bank Exam BODMAS
-    const comboPool = [
-      { q: "[(43² - 29²) ÷ 16] + (√5184 ÷ 12) + (3/7) × 441 = ?", res: 258, exp: "(43² - 29²) ÷ 16 = 63. √5184 ÷ 12 = 6. (3/7) × 441 = 189. 63 + 6 + 189 = 258." },
-      { q: "(14³ ÷ 56) + (√7056 ÷ 7) + [(38² - 22²) ÷ 32] = ?", res: 91, exp: "14³ ÷ 56 = 49. √7056 ÷ 7 = 12. (38² - 22²) ÷ 32 = 30. 49 + 12 + 30 = 91." },
-      { q: "(√9216 × 18) ÷ 24 + 15³ ÷ 45 - 24² = ?", res: -441, exp: "72 + 75 - 576" }, // Skip negative
-      { q: "∛13824 + (√3136 × 15) ÷ 14 + 18² = ?", res: 408, exp: "∛13824 = 24. (56 × 15) ÷ 14 = 60. 18² = 324. 24 + 60 + 324 = 408." },
-      { q: "[(37.5% of 640) + (62.5% of 480)] ÷ 18 + √3969 - 14² = ?", res: -103 }
-    ];
-    return genSpeedMathSquaresCubes(idx);
-  }
-
-  // Backwards compatibility alias
-  function genSpeedMathSimplification(idx) {
-    return genSpeedMathToughSimplification(idx);
-  }
-
-  // Tough Decimal Approximation (Roots, decimal powers, fraction roundoffs)
-  function genSpeedMathApproximation(idx) {
-    const type = idx % 4;
-    let qText = "", ansVal = 0, explanationText = "";
-
-    if (type === 0) {
-      // Decimal large roots
-      const rootApprox = [
-        { sq1: 1520.89, r1: 39, sq2: 2703.95, r2: 52, sq3: 1763.92, r3: 42, ans: 49 },
-        { sq1: 5183.92, r1: 72, sq2: 3968.88, r2: 63, sq3: 3135.95, r3: 56, ans: 79 },
-        { sq1: 7055.91, r1: 84, sq2: 2303.98, r2: 48, sq3: 4623.94, r3: 68, ans: 64 },
-        { sq1: 9215.89, r1: 96, sq2: 1443.95, r2: 38, sq3: 6083.92, r3: 78, ans: 56 }
-      ];
-      const p = pickRandom(rootApprox);
-      qText = `√${p.sq1} + √${p.sq2} - √${p.sq3} ≈ ?`;
-      ansVal = p.ans;
-      explanationText = `Approximating to nearest whole square roots: √${Math.round(p.sq1)} + √${Math.round(p.sq2)} - √${Math.round(p.sq3)} = ${p.r1} + ${p.r2} - ${p.r3} = ${ansVal}.`;
-    } else if (type === 1) {
-      // Tricky percentage fraction approximations
-      const pctApprox = [
-        { p1: 37.52, b1: 639.95, p2: 62.48, b2: 480.05, div: 17.98, sq: 15.99, ans: 286 },
-        { p1: 16.68, b1: 719.92, p2: 14.29, b2: 559.98, div: 24.98, sq: 22.98, ans: 537 },
-        { p1: 83.31, b1: 359.96, p2: 66.68, b2: 449.95, div: 19.98, sq: 18.99, ans: 391 }
-      ];
-      const p = pickRandom(pctApprox);
-      qText = `[(${p.p1}% of ${p.b1}) + (${p.p2}% of ${p.b2})] ÷ ${p.div} + (${p.sq})² ≈ ?`;
-      ansVal = p.ans;
-      explanationText = `Approximating using percentage fractions: Numerator ≈ ${Math.round(p.p1)}% of ${Math.round(p.b1)} + ${Math.round(p.p2)}% of ${Math.round(p.b2)}. Result = ${ansVal}.`;
-    } else if (type === 2) {
-      // Difference of squares with decimal approximation
-      const diffSq = [
-        { a: 37.99, b: 21.98, d: 31.98, n2: 479.95, d2: 16.02, ans: 60 },
-        { a: 47.98, b: 31.99, d: 39.98, n2: 719.95, d2: 17.98, ans: 72 },
-        { a: 53.98, b: 45.99, d: 24.98, n2: 599.95, d2: 14.99, ans: 72 }
-      ];
-      const p = pickRandom(diffSq);
-      qText = `[(${p.a})² - (${p.b})²] ÷ ${p.d} + (${p.n2} ÷ ${p.d2}) ≈ ?`;
-      ansVal = p.ans;
-      explanationText = `Approximating: (${Math.round(p.a)}² - ${Math.round(p.b)}²) ÷ ${Math.round(p.d)} + (${Math.round(p.n2)} ÷ ${Math.round(p.d2)}) = ${ansVal}.`;
-    } else {
-      // Decimal cube division
-      const cubeDiv = [
-        { c: 13.98, div: 55.98, sq: 17.99, ans: 373 },
-        { c: 15.98, div: 63.99, sq: 26.01, ans: 740 },
-        { c: 17.98, div: 71.99, sq: 24.99, ans: 706 },
-        { c: 20.99, div: 62.98, sq: 18.99, ans: 508 }
-      ];
-      const p = pickRandom(cubeDiv);
-      qText = `(${p.c})³ ÷ ${p.div} + (${p.sq})² ≈ ?`;
-      ansVal = p.ans;
-      explanationText = `Approximating: ${Math.round(p.c)}³ ÷ ${Math.round(p.div)} + ${Math.round(p.sq)}² = ${ansVal}.`;
-    }
-
-    return makeQuestionObject("approx", idx, "Approximation", qText, ansVal, explanationText);
   }
 
   // 5. Fallback Category Generator
