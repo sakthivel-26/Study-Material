@@ -1709,13 +1709,26 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                         {/* Paragraph / Passage Context (Essential for Banking Exams!) */}
                         <div>
-                          <label className="text-xs font-bold text-ink-muted mb-1 flex items-center justify-between">
-                            <span>Directions / Passage Context (Crucial for Reading Comprehension, Cloze tests, DI sets &amp; Puzzles)</span>
-                            <span className="text-[10px] text-slate-400 font-normal">Optional</span>
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs font-bold text-ink-muted flex items-center gap-1.5">
+                              <span>Directions / Passage Context (Crucial for DI sets, Puzzles &amp; RC)</span>
+                              <span className="text-[10px] text-slate-400 font-normal">Optional</span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const tableTemplate = `Directions: Study the following table carefully and answer the questions:\n\n| Year | Company A | Company B | Company C |\n| --- | --- | --- | --- |\n| 2021 | 420 | 380 | 510 |\n| 2022 | 480 | 410 | 560 |\n| 2023 | 550 | 460 | 620 |\n`;
+                                const cur = q.passage || "";
+                                updateManualQuestion(qIdx, "passage", cur ? (cur.trim() + "\n\n" + tableTemplate) : tableTemplate);
+                              }}
+                              className="text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-0.5 rounded-lg flex items-center gap-1 transition-colors shadow-xs"
+                            >
+                              📊 + Insert DI Table Template
+                            </button>
+                          </div>
                           <textarea
-                            className="input text-xs min-h-[65px] bg-white border-black/10 focus:border-[#1B4F72]"
-                            placeholder="e.g. Directions: Read the following information carefully and answer the questions given below: India may appear to be __A__ on climate goals..."
+                            className="input text-xs min-h-[75px] font-mono bg-white border-black/10 focus:border-[#1B4F72]"
+                            placeholder="e.g. Directions: Study the following table and answer the questions:\n| Year | Company A | Company B |\n| --- | --- | --- |\n| 2021 | 450 | 380 |"
                             value={q.passage || ""}
                             onChange={(e) => updateManualQuestion(qIdx, "passage", formatMathText(e.target.value))}
                           />
@@ -1738,6 +1751,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                               { label: "×", insert: " × " },
                               { label: "÷", insert: " ÷ " },
                               { label: "√", insert: " √" },
+                              { label: "📊 DI Table", insert: "\n| Category | Metric 1 | Metric 2 |\n| --- | --- | --- |\n| Item A | 100 | 150 |\n| Item B | 200 | 250 |\n" },
                             ].map((sym, sIdx) => (
                               <button
                                 key={sIdx}
@@ -1971,12 +1985,25 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                       {/* Paragraph Context (Optional) */}
                       <div>
-                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">
-                          Paragraph / Passage Directions Context (Optional):
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[11px] font-bold text-ink-muted">
+                            Paragraph / Passage Directions Context (DI Table, RC):
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const tableTemplate = `Directions: Study the following table carefully and answer the questions:\n\n| Year | Company A | Company B | Company C |\n| --- | --- | --- | --- |\n| 2021 | 420 | 380 | 510 |\n| 2022 | 480 | 410 | 560 |\n| 2023 | 550 | 460 | 620 |\n`;
+                              const cur = approvedQuestions[idx]?.passage ?? (q.passage || "");
+                              editPassage(idx, cur ? (cur.trim() + "\n\n" + tableTemplate) : tableTemplate);
+                            }}
+                            className="text-[10px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-lg flex items-center gap-1 transition-colors"
+                          >
+                            📊 + Insert DI Table
+                          </button>
+                        </div>
                         <textarea
-                          className="input text-xs min-h-[60px] bg-white border border-black/10 mb-2"
-                          placeholder="Paragraph Context (Optional) - e.g. Read the following passage..."
+                          className="input text-xs min-h-[60px] font-mono bg-white border border-black/10 mb-2"
+                          placeholder="Paragraph Context (Optional) - e.g. | Year | Company A | Company B | ..."
                           value={approvedQuestions[idx]?.passage ?? (q.passage || "")}
                           onChange={(e) => editPassage(idx, e.target.value)}
                         />
@@ -2037,6 +2064,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             { label: "×", insert: " × " },
                             { label: "÷", insert: " ÷ " },
                             { label: "√", insert: " √" },
+                            { label: "📊 DI Table", insert: "\n| Category | Metric 1 | Metric 2 |\n| --- | --- | --- |\n| Item A | 100 | 150 |\n| Item B | 200 | 250 |\n" },
                           ].map((sym, sIdx) => (
                             <button
                               key={sIdx}
@@ -2333,12 +2361,25 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                     {/* Paragraph Context */}
                     <div>
-                      <label className="text-xs font-bold text-ink-muted mb-1 block">
-                        Paragraph / Passage Directions Context (Optional):
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-ink-muted">
+                          Paragraph / Passage Directions Context (DI Table, RC):
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const tableTemplate = `Directions: Study the following table carefully and answer the questions:\n\n| Year | Company A | Company B | Company C |\n| --- | --- | --- | --- |\n| 2021 | 420 | 380 | 510 |\n| 2022 | 480 | 410 | 560 |\n| 2023 | 550 | 460 | 620 |\n`;
+                            const cur = approvedQuestions[idx]?.passage ?? (q.passage || "");
+                            editPassage(idx, cur ? (cur.trim() + "\n\n" + tableTemplate) : tableTemplate);
+                          }}
+                          className="text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-0.5 rounded-lg flex items-center gap-1 transition-colors shadow-xs"
+                        >
+                          📊 + Insert DI Table Template
+                        </button>
+                      </div>
                       <textarea
-                        className="input text-xs min-h-[70px] bg-white border border-black/10 p-2.5 mb-3"
-                        placeholder="Paragraph Context (Optional) - e.g. Read the following passage..."
+                        className="input text-xs min-h-[70px] font-mono bg-white border border-black/10 p-2.5 mb-3"
+                        placeholder="Paragraph Context (Optional) - e.g. | Year | Company A | Company B | ..."
                         value={approvedQuestions[idx]?.passage ?? (q.passage || "")}
                         onChange={(e) => editPassage(idx, e.target.value)}
                       />
@@ -2361,6 +2402,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           { label: "×", insert: " × " },
                           { label: "÷", insert: " ÷ " },
                           { label: "√", insert: " √" },
+                          { label: "📊 DI Table", insert: "\n| Category | Metric 1 | Metric 2 |\n| --- | --- | --- |\n| Item A | 100 | 150 |\n| Item B | 200 | 250 |\n" },
                         ].map((sym, sIdx) => (
                           <button
                             key={sIdx}
