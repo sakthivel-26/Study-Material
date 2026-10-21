@@ -54,8 +54,27 @@ export default function MockTestsPage() {
   const [checkoutPkg, setCheckoutPkg] = useState(null);
   const [paid, setPaid] = useState(() => { try { return JSON.parse(localStorage.getItem("ken_paid_packages") || "{}"); } catch { return {}; } });
 
+  const testGroup = (test) => {
+    if (!test) return "Other";
+    const cat = String(test.category || "").toLowerCase();
+    if (cat.includes("bank") || cat.includes("ibps") || cat.includes("sbi")) return "Banking";
+    if (cat.includes("tnpsc")) return "TNPSC";
+    if (cat.includes("ssc")) return "SSC";
+    if (cat.includes("railway") || cat.includes("rrb") || cat.includes("ntpc")) return "Railway";
+    if (cat.includes("defence") || cat.includes("navy") || cat.includes("nda")) return "Navy";
+    return CATEGORIES.find(c => c.name.toLowerCase() === cat)?.group || "Other";
+  };
+
   const getPackageForTest = (test) => {
-    const group = CATEGORIES.find(c=>c.name===test.category)?.group || "Other";
+    if (!test) return null;
+    const cat = String(test.category || "").toLowerCase();
+    if (cat.includes("bank") || cat.includes("ibps") || cat.includes("sbi")) return { id: "banking", ...PACKAGES.banking };
+    if (cat.includes("tnpsc")) return { id: "tnpsc", ...PACKAGES.tnpsc };
+    if (cat.includes("ssc")) return { id: "ssc", ...PACKAGES.ssc };
+    if (cat.includes("railway") || cat.includes("rrb") || cat.includes("ntpc")) return { id: "railway", ...PACKAGES.railway };
+    if (cat.includes("defence") || cat.includes("navy") || cat.includes("nda")) return { id: "navy", ...PACKAGES.navy };
+
+    const group = CATEGORIES.find(c => c.name.toLowerCase() === cat)?.group || "Other";
     const entry = Object.entries(PACKAGES).find(([id, pkg]) => pkg.groups.includes(group));
     if (entry) return { id: entry[0], ...entry[1] };
     return null;
@@ -64,7 +83,7 @@ export default function MockTestsPage() {
   useEffect(() => {
     if (isAuthed && user?.id && useRealtimeBackend) {
       fsGetUserPurchases(user.id).then(purchases => {
-        if (Object.keys(purchases).length > 0) {
+        if (purchases && Object.keys(purchases).length > 0) {
           setPaid(prev => {
             const next = { ...prev, ...purchases };
             localStorage.setItem("ken_paid_packages", JSON.stringify(next));
@@ -75,7 +94,6 @@ export default function MockTestsPage() {
     }
   }, [isAuthed, user?.id]);
 
-  const testGroup = (test) => CATEGORIES.find(c=>c.name===test.category)?.group || "Other";
   const packageTests = selected ? mockTests.filter(t => selected.groups.includes(testGroup(t)) && !t.isFree) : mockTests.filter(t => !t.isFree);
   const visibleTests = exam ? packageTests.filter(t => t.category.toLowerCase().includes(exam.toLowerCase().split(" ")[0]) || t.title.toLowerCase().includes(exam.toLowerCase())) : packageTests;
   const firstForCategory = (test) => visibleTests.filter(t=>t.category===test.category).find(t=>t.id===test.id)?.id===test.id;
@@ -83,9 +101,38 @@ export default function MockTestsPage() {
   
   const hasAccessToPkg = (pkgId) => {
     if (!pkgId) return false;
-    if (paid[pkgId]) return true;
-    if (Array.isArray(user?.access)) return user.access.includes(pkgId);
-    return user?.access === "academy";
+    if (isAdmin || user?.role === "admin") return true;
+    if (user?.access === "academy" || user?.hasFullAccess === true) return true;
+    if (paid[pkgId] || paid.academy) return true;
+
+    const normalized = String(pkgId).toLowerCase();
+
+    // Check student category permissions array
+    if (Array.isArray(user?.access)) {
+      if (user.access.includes("academy")) return true;
+      if (user.access.some(a => String(a).toLowerCase() === normalized)) return true;
+      if (normalized === "banking" && user.access.some(a => String(a).toLowerCase().includes("bank"))) return true;
+    } else if (typeof user?.access === "string") {
+      if (user.access.toLowerCase() === normalized || user.access === "academy") return true;
+      if (normalized === "banking" && user.access.toLowerCase().includes("bank")) return true;
+    }
+
+    // Check Firestore user.paid_packages object if present
+    if (user?.paid_packages && (user.paid_packages[pkgId] || user.paid_packages.academy)) {
+      return true;
+    }
+
+    // Check local student data in case realtime sync is in-flight
+    try {
+      const localUsers = JSON.parse(localStorage.getItem("ken_users") || "[]");
+      const matched = localUsers.find(u => u.id === user?.id || (user?.email && u.email?.toLowerCase() === user.email.toLowerCase()));
+      if (matched) {
+        if (matched.access === "academy") return true;
+        if (Array.isArray(matched.access) && matched.access.some(a => String(a).toLowerCase() === normalized)) return true;
+      }
+    } catch (e) {}
+
+    return false;
   };
 
   const start = (test) => { 

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   ClipboardPlus, Users, Megaphone, TrendingUp, BookOpen, Plus, Search,
@@ -9,7 +10,7 @@ import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
 import { CATEGORIES, COURSE_PROGRESS } from "../../data.js";
 import { Badge, ProgressBar } from "../../components/ui.jsx";
-import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest } from "../../utils/aiTestGenerator.js";
+import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findBestMatchingChartPage, isDIQuestion } from "../../utils/aiTestGenerator.js";
 import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
 
@@ -26,9 +27,154 @@ const getAnswerIndex = (val) => {
   return 0;
 };
 
+// Helper to compress base64 images before publishing to avoid exceeding Firestore 1MB / localStorage limits
+export function compressBase64Image(dataUrl, maxDimension = 650, quality = 0.68) {
+  return new Promise((resolve) => {
+    if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:image")) {
+      return resolve(dataUrl || "");
+    }
+    if (dataUrl.length < 35000) return resolve(dataUrl);
+
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
+
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(10, width);
+      canvas.height = Math.max(10, height);
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+function getRelatedDIQuestionIndices(targetIdx, rawQuestions = [], approvedQuestions = {}) {
+  if (!rawQuestions || rawQuestions.length === 0) return [targetIdx];
+  const targetQ = rawQuestions[targetIdx] || {};
+  const targetPassage = (approvedQuestions[targetIdx]?.passage ?? targetQ.passage ?? "").trim().toLowerCase();
+  const targetImg = approvedQuestions[targetIdx]?.imageUrl ?? targetQ.imageUrl ?? targetQ.chartImageUrl ?? "";
+
+  // 1. Check for explicit question range in passage like "Directions (1-5)", "Questions 31 to 35", "Q. 1 - 5", "6-10"
+  const rangeMatch = targetPassage.match(/(?:q(?:uestion)?s?[\:\s\.]*|\(\s*)?(\d+)\s*(?:-|to|–|—)\s*(\d+)/i);
+  if (rangeMatch) {
+    const startNum = parseInt(rangeMatch[1], 10);
+    const endNum = parseInt(rangeMatch[2], 10);
+    if (!isNaN(startNum) && !isNaN(endNum) && endNum >= startNum && (endNum - startNum) <= 10) {
+      const rangeIndices = [];
+      for (let i = 0; i < rawQuestions.length; i++) {
+        const qNum = i + 1;
+        if (qNum >= startNum && qNum <= endNum) {
+          rangeIndices.push(i);
+        }
+      }
+      if (rangeIndices.includes(targetIdx) && rangeIndices.length > 1) {
+        return rangeIndices;
+      }
+    }
+  }
+
+  // 2. Check by matching passage text
+  if (targetPassage.length > 15) {
+    const matchedByPassage = [];
+    const targetPassageSnippet = targetPassage.slice(0, 40);
+    rawQuestions.forEach((q, i) => {
+      const qPassage = (approvedQuestions[i]?.passage ?? q.passage ?? "").trim().toLowerCase();
+      if (qPassage && (qPassage.includes(targetPassageSnippet) || targetPassage.includes(qPassage.slice(0, 40)))) {
+        matchedByPassage.push(i);
+      }
+    });
+    if (matchedByPassage.length > 1) return matchedByPassage;
+  }
+
+  // 3. Check by matching original image source
+  if (targetImg) {
+    const matchedByImg = [];
+    rawQuestions.forEach((q, i) => {
+      const qImg = approvedQuestions[i]?.imageUrl ?? q.imageUrl ?? q.chartImageUrl ?? "";
+      if (qImg && (qImg === targetImg || (qImg.length > 50 && targetImg.startsWith(qImg.slice(0, 50))))) {
+        matchedByImg.push(i);
+      }
+    });
+    if (matchedByImg.length > 1) return matchedByImg;
+  }
+
+  // 4. Fallback: contiguous 5-question block
+  const blockStart = Math.floor(targetIdx / 5) * 5;
+  const blockEnd = Math.min(rawQuestions.length, blockStart + 5);
+  const block = [];
+  for (let i = blockStart; i < blockEnd; i++) block.push(i);
+  return block.length > 0 ? block : [targetIdx];
+}
+
+// Helper to crop an image by percentages (top, bottom, left, right)
+function generateCroppedImage(src, cropTop, cropBottom, cropLeft, cropRight) {
+  return new Promise((resolve, reject) => {
+    if (!src) return resolve("");
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const topPx = Math.round(((cropTop || 0) / 100) * img.naturalHeight);
+      const bottomPx = Math.round(((cropBottom || 0) / 100) * img.naturalHeight);
+      const leftPx = Math.round(((cropLeft || 0) / 100) * img.naturalWidth);
+      const rightPx = Math.round(((cropRight || 0) / 100) * img.naturalWidth);
+
+      const cropW = Math.max(10, img.naturalWidth - leftPx - rightPx);
+      const cropH = Math.max(10, img.naturalHeight - topPx - bottomPx);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = cropW;
+      canvas.height = cropH;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cropW, cropH);
+      ctx.drawImage(img, leftPx, topPx, cropW, cropH, 0, 0, cropW, cropH);
+      resolve(canvas.toDataURL("image/jpeg", 0.90));
+    };
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+function CroppedPreviewImg({ src, cropTop, cropBottom, cropLeft, cropRight }) {
+  const [croppedUrl, setCroppedUrl] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    generateCroppedImage(src, cropTop, cropBottom, cropLeft, cropRight)
+      .then(url => {
+        if (active) setCroppedUrl(url);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [src, cropTop, cropBottom, cropLeft, cropRight]);
+
+  if (!croppedUrl) {
+    return <span className="text-[11px] text-ink-muted">Rendering preview...</span>;
+  }
+  return <img src={croppedUrl} alt="Cropped Preview" className="max-h-full max-w-full object-contain" />;
+}
 
 export function CreateMockTestPage({ isFreeByDefault = false }) {
   const { mockTests = [], addMockTest, updateMockTest, deleteMockTest, pushToast } = useApp();
+  const navigate = useNavigate();
+  const [publishedSuccess, setPublishedSuccess] = useState(null);
   const [mode, setMode] = useState("pdf"); // "manual" | "pdf"
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfStatus, setPdfStatus] = useState(""); // "extracting" | "analyzing" | "done" | ""
@@ -94,7 +240,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     pushToast(`Generated ${slots.length} question slots across ${sectionsConfig.length} sections!`);
   };
 
-  const [f, setF] = useState({ title: "", category: "Banking", subject: "Prelims Full Mock", topic: "All Sections", questions: 100, time: "60 min", isFree: isFreeByDefault, isSectionalTimed: true, sections: [...DEFAULT_SECTIONS] });
+  const [f, setF] = useState({ title: "", category: "Banking", subject: "", topic: "", questions: "", time: "", isFree: isFreeByDefault, isSectionalTimed: false, sections: [...DEFAULT_SECTIONS] });
   const [generating, setGenerating] = useState(false);
   const [generatedTest, setGeneratedTest] = useState(null);
   const [approvedQuestions, setApprovedQuestions] = useState({});
@@ -107,7 +253,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [openRouterModel, setOpenRouterModel] = useState(() => localStorage.getItem("VITE_OPENROUTER_MODEL") || "nvidia/nemotron-4-340b-instruct:free");
   const [keyType, setKeyType] = useState(() => localStorage.getItem("LLM_PROVIDER_TYPE") || "gemini");
   const [pdfExtractionMethod, setPdfExtractionMethod] = useState("ai"); // "ai" | "regex"
+  const [enableVisionAI, setEnableVisionAI] = useState(false);
   const [bulkAddCount, setBulkAddCount] = useState(1);
+  const [cropperModal, setCropperModal] = useState(null);
   const abortControllerRef = useRef(null);
 
   const cancelExtraction = () => {
@@ -491,6 +639,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
   const applyPDFUpdates = async () => {
     if (!generatedTest) return;
+    if (isPublishing) return;
 
     let finalQuestions = [];
 
@@ -525,10 +674,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
       finalQuestions.push({
         id: `pdf_q_${Date.now()}_${idx}`,
-        section: approvalStatus?.section || q.section || "General",
+        section: approvalStatus?.section || q.section || f.subject || "General",
         passage: approvalStatus?.passage ?? (q.passage || ""),
         imageUrl: approvalStatus?.chartImageUrl ?? approvalStatus?.imageUrl ?? (q.chartImageUrl || q.imageUrl || ""),
-        imageUrls: approvalStatus?.chartImageUrls || q.chartImageUrls || approvalStatus?.imageUrls || q.imageUrls || [],
         solutionImageUrl: approvalStatus?.solutionImageUrl ?? (q.solutionImageUrl || ""),
         question: approvalStatus?.questionText ?? (q.question_text || q.question || `Question ${idx + 1}`),
         options: optsArray,
@@ -542,45 +690,75 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       return;
     }
 
-    // Update the test metadata from the latest form state (f)
-    const testToPublish = { 
-       ...generatedTest, 
-       title: f.title.trim() || generatedTest.title,
-       category: f.category,
-       subject: f.subject,
-       topic: f.topic,
-       time: f.time,
-       durationMinutes: Math.max(1, parseInt(f.time) || 30),
-       isSectionalTimed: !!f.isSectionalTimed,
-       questionsList: finalQuestions, 
-       questions: finalQuestions.length
-    };
-    
     setIsPublishing(true);
+    pushToast("⏳ Compressing diagrams & publishing mock test to Cloud...");
+
     try {
-      if (testToPublish.id && testToPublish.id.startsWith("draft_")) {
+      // Compress all base64 diagrams to ensure lightweight, fast payload (< 200 KB)
+      const compressedQuestions = await Promise.all(
+        finalQuestions.map(async (q) => {
+          let compressedImg = q.imageUrl;
+          if (compressedImg && compressedImg.startsWith("data:image")) {
+            compressedImg = await compressBase64Image(compressedImg, 650, 0.68);
+          }
+          let compressedSolImg = q.solutionImageUrl;
+          if (compressedSolImg && compressedSolImg.startsWith("data:image")) {
+            compressedSolImg = await compressBase64Image(compressedSolImg, 650, 0.68);
+          }
+          return {
+            ...q,
+            imageUrl: compressedImg || "",
+            solutionImageUrl: compressedSolImg || ""
+          };
+        })
+      );
+
+      // Strip rawExtractedQuestions to avoid duplicate storage bloat
+      const { rawExtractedQuestions, ...cleanTestMeta } = generatedTest;
+      const testToPublish = { 
+        ...cleanTestMeta, 
+        title: f.title.trim() || generatedTest.title || `${f.category || 'Banking'} Mock Test`,
+        category: f.category || generatedTest.category || "Banking",
+        subject: f.subject || generatedTest.subject || "",
+        topic: f.topic || generatedTest.topic || "",
+        time: f.time || generatedTest.time || "30 min",
+        durationMinutes: Math.max(1, parseInt(f.time || generatedTest.time) || 30),
+        isFree: !!f.isFree,
+        isSectionalTimed: !!f.isSectionalTimed,
+        questionsList: compressedQuestions, 
+        questions: compressedQuestions.length,
+        createdAt: new Date().toISOString()
+      };
+
+      let publishedResult;
+      if (testToPublish.id && String(testToPublish.id).startsWith("draft_")) {
         delete testToPublish.id;
-        await addMockTest(testToPublish);
+        publishedResult = await addMockTest(testToPublish);
+      } else if (generatedTest.id && !String(generatedTest.id).startsWith("draft_")) {
+        publishedResult = await updateMockTest(generatedTest.id, testToPublish);
       } else {
-        await updateMockTest(generatedTest.id, { 
-          questionsList: finalQuestions, 
-          questions: finalQuestions.length,
-          title: testToPublish.title,
-          category: testToPublish.category,
-          subject: testToPublish.subject,
-          topic: testToPublish.topic,
-          time: testToPublish.time,
-          durationMinutes: testToPublish.durationMinutes
-        });
+        publishedResult = await addMockTest(testToPublish);
       }
+
+      const publishedId = publishedResult?.id || testToPublish.id || "test_" + Date.now();
+      setPublishedSuccess({
+        id: publishedId,
+        title: testToPublish.title,
+        category: testToPublish.category,
+        questions: testToPublish.questions,
+        isFree: testToPublish.isFree,
+        time: testToPublish.time
+      });
+
       setGeneratedTest(null);
       setPdfFile(null);
+      setIsFullPreview(false);
       setApprovedQuestions({});
-      setF({ title: "", category: CATEGORIES[0].name, subject: "", topic: "", questions: 10, time: "30 min", isFree: isFreeByDefault, isSectionalTimed: false, sections: [...DEFAULT_SECTIONS] });
-      pushToast(`🎉 Test published successfully with ${finalQuestions.length} questions!`);
+      setF({ title: "", category: testToPublish.category || CATEGORIES[0].name, subject: "", topic: "", questions: "", time: "", isFree: isFreeByDefault, isSectionalTimed: false, sections: [...DEFAULT_SECTIONS] });
+      pushToast(`🎉 "${testToPublish.title}" published successfully to ${testToPublish.category}!`);
     } catch (err) {
       console.error("Publishing error:", err);
-      pushToast("Error publishing test. Please try again.");
+      pushToast("Error publishing test: " + (err.message || "Please try again."));
     } finally {
       setIsPublishing(false);
     }
@@ -871,27 +1049,158 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
         }
         const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        const pageImagesArr = [];
-        for (let i = 1; i <= pdf.numPages; i++) {
+        const pageIndices = Array.from({ length: pdf.numPages }, (_, i) => i + 1);
+        const pagesData = await Promise.all(pageIndices.map(async (i) => {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
-          fullText += textContent.items.map(item => item.str).join(" ") + "\n";
-          // Render page to image for Gemini Vision AI (reads charts, tables, graphs)
-          try {
-            const viewport = page.getViewport({ scale: 1.5 });
-            const canvas = document.createElement("canvas");
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            const ctx = canvas.getContext("2d");
-            await page.render({ canvasContext: ctx, viewport }).promise;
-            const base64 = canvas.toDataURL("image/png").split(",")[1];
-            pageImagesArr.push({ base64, mimeType: "image/png", pageNum: i });
-          } catch (renderErr) {
-            console.warn(`[Vision] Page ${i} render failed:`, renderErr.message);
+          const pageText = textContent.items.map(item => item.str).join(" ");
+          return { pageNum: i, text: pageText, page };
+        }));
+        pagesData.sort((a, b) => a.pageNum - b.pageNum);
+        fullText = pagesData.map(p => p.text).join("\n");
+
+        const diRegex = /(?:directions?\s*\(?\s*q?\.?\s*\d+|study the following|refer to the|pie[\s-]?chart|bar[\s-]?graph|bar[\s-]?chart|line[\s-]?graph|table|tabular|data interpretation|histogram|given below|graph)/i;
+        const qRegex = /(?:\b[1-9]\d*[\.\)]|\b(?:Q(?:uestion)?[\s\.\d]+)|(?:[A-Ea-e][\.\)]\s*[\w\d]+))/i;
+        const promoRegex = /(?:1\s*lakh\+|aspirants|achievers|download app|join us|smartkeeda|testzone|test series|toppers|subscribe|install app|coupon|selected aspirants)/i;
+        const isScannedOnly = fullText.trim().length < 300;
+        const pageImagesArr = [];
+
+        // Render pages with DI charts & tables for smart cropping (or all pages if scanned / vision enabled)
+        setPdfPageInfo(`Scanning ${pdf.numPages} pages for questions, DI charts, and tables...`);
+        for (let i = 0; i < pagesData.length; i++) {
+          const p = pagesData[i];
+          const hasDI = diRegex.test(p.text);
+          const hasQ = qRegex.test(p.text);
+          const isPromo = !isScannedOnly && (
+            (p.text.trim().length < 60 && !hasDI && !hasQ) ||
+            (promoRegex.test(p.text) && !hasDI && !hasQ)
+          );
+
+          // Skip pure ad cover posters
+          if (isPromo && !isScannedOnly) continue;
+
+          // Render canvas if page has DI charts/tables, or if vision requested, or if scanned PDF
+          if (hasDI || (!isPromo && (enableVisionAI || isScannedOnly))) {
+            try {
+              const viewport = p.page.getViewport({ scale: 1.5 });
+              const canvas = document.createElement("canvas");
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              const ctx = canvas.getContext("2d");
+              await p.page.render({ canvasContext: ctx, viewport }).promise;
+
+              // Automatic smart diagram cropper:
+              // Isolates the chart/diagram area between the directions header and bottom questions
+              let finalCanvas = canvas;
+              if (hasDI) {
+                try {
+                  const textContent = await p.page.getTextContent();
+                  let headerBottomY = 0;
+                  let questionTopY = viewport.height;
+
+                  for (const item of textContent.items) {
+                    if (!item.str || !item.str.trim()) continue;
+                    const str = item.str.trim();
+                    const txt = str.toLowerCase();
+                    const [_, vy] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
+
+                    // Detect directions or context description header
+                    if (/(?:directions?|study the following|given below|shows the|quiz|breakup of|pie[\s-]?chart|bar[\s-]?graph|bar[\s-]?chart|line[\s-]?graph|tabular|table)/i.test(txt)) {
+                      if (vy < viewport.height * 0.60 && vy > headerBottomY) {
+                        headerBottomY = vy + 28;
+                      }
+                    }
+
+                    // Detect question 1 or question numbers / options at bottom
+                    const isQStart = /^(?:Q(?:uestion)?\s*)?[1-9]\d*[\.\:\)]/i.test(str) ||
+                                     /^\([1-9]\d*\)/.test(str) ||
+                                     str.startsWith("1.") || str.startsWith("1)") || str.startsWith("Q1") ||
+                                     /^(?:\[?[A-Ea-e]\]?[\.\:\)]|\([A-Ea-e]\))\s*\S+/.test(str);
+
+                    if (isQStart && vy > viewport.height * 0.32 && vy < questionTopY) {
+                      questionTopY = vy - 12;
+                    }
+                  }
+
+                  if (questionTopY >= viewport.height || questionTopY <= headerBottomY) {
+                    questionTopY = viewport.height * 0.92;
+                  }
+                  if (headerBottomY <= 0) {
+                    headerBottomY = viewport.height * 0.22;
+                  }
+
+                  const searchTop = Math.max(0, Math.floor(headerBottomY));
+                  const searchBottom = Math.min(canvas.height, Math.ceil(questionTopY));
+                  const searchH = searchBottom - searchTop;
+
+                  if (searchH > 50) {
+                    const imgData = ctx.getImageData(0, searchTop, canvas.width, searchH);
+                    const pixels = imgData.data;
+                    let minX = canvas.width, maxX = 0, minY = searchH, maxY = 0;
+                    let hasContent = false;
+
+                    // Skip outer 5% margin to avoid page border lines
+                    const minScanX = Math.floor(canvas.width * 0.05);
+                    const maxScanX = Math.floor(canvas.width * 0.95);
+
+                    for (let py = 0; py < searchH; py += 2) {
+                      for (let px = minScanX; px < maxScanX; px += 2) {
+                        const idx = (py * canvas.width + px) * 4;
+                        if (pixels[idx + 3] > 60 && (pixels[idx] < 230 || pixels[idx + 1] < 230 || pixels[idx + 2] < 230)) {
+                          if (px < minX) minX = px;
+                          if (px > maxX) maxX = px;
+                          if (py < minY) minY = py;
+                          if (py > maxY) maxY = py;
+                          hasContent = true;
+                        }
+                      }
+                    }
+
+                    if (hasContent && (maxX - minX > 80) && (maxY - minY > 50)) {
+                      const pad = 16;
+                      const cropX = Math.max(0, minX - pad);
+                      const cropY = Math.max(0, searchTop + minY - pad);
+                      const cropW = Math.min(canvas.width - cropX, (maxX - minX) + pad * 2);
+                      const cropH = Math.min(canvas.height - cropY, (maxY - minY) + pad * 2);
+
+                      const cropCanvas = document.createElement("canvas");
+                      cropCanvas.width = cropW;
+                      cropCanvas.height = cropH;
+                      const cropCtx = cropCanvas.getContext("2d");
+                      cropCtx.fillStyle = "#ffffff";
+                      cropCtx.fillRect(0, 0, cropW, cropH);
+                      cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                      finalCanvas = cropCanvas;
+                    }
+                  }
+                } catch (cropErr) {
+                  console.warn("[Chart AutoCrop] Error during diagram cropping:", cropErr);
+                }
+              }
+
+              const base64 = finalCanvas.toDataURL("image/jpeg", 0.90).split(",")[1];
+              const fullPageBase64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+
+              pageImagesArr.push({
+                pageNum: p.pageNum,
+                text: p.text,
+                base64,
+                fullBase64: fullPageBase64,
+                mimeType: "image/jpeg",
+                isPromo: isPromo
+              });
+            } catch (renderErr) {
+              console.warn(`[DI Extract] Page ${p.pageNum} image capture failed:`, renderErr.message);
+            }
           }
         }
+
         window.__pdfPageImages__ = pageImagesArr;
-        setExtractionProgress(`${pdf.numPages} pages scanned · ${fullText.length.toLocaleString()} chars · ${pageImagesArr.length} pages ready for Vision AI`);
+        if (pageImagesArr.length > 0) {
+          setExtractionProgress(`${pdf.numPages} pages scanned · ${fullText.length.toLocaleString()} chars · ${pageImagesArr.length} pages captured for DI charts & tables`);
+        } else {
+          setExtractionProgress(`${pdf.numPages} pages scanned · ${fullText.length.toLocaleString()} characters extracted (Instant Text Mode)`);
+        }
       } else if (isDocx) {
         if (!window.mammoth) {
           await new Promise((resolve, reject) => {
@@ -921,13 +1230,18 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               category: f.category,
               timeLimit: f.time,
               title: f.title,
-              onProgress: (done, total) => setPdfPageInfo(`🖼️ Vision+LLM extracting (Step ${done}/${total})...`),
+              onProgress: (done, total) => {
+                if (window.__pdfPageImages__ && window.__pdfPageImages__.length > 0 && done < window.__pdfPageImages__.length) {
+                  setPdfPageInfo(`🖼️ Vision AI scanning charts/tables (Page ${done}/${total})...`);
+                } else {
+                  setPdfPageInfo(`🤖 AI Model extracting questions (Chunk ${done}/${total})...`);
+                }
+              },
               signal: abortControllerRef.current.signal,
               pageImages: isPDF ? (window.__pdfPageImages__ || []) : [],
             });
             if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
-              const maxQ = parseInt(f.questions) || 100;
-              extractedQuestions = aiResult.rawExtractedQuestions.slice(0, maxQ);
+              extractedQuestions = aiResult.rawExtractedQuestions;
               llmSuccess = true;
             }
           } catch (aiErr) {
@@ -936,11 +1250,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             }
             console.warn("AI LLM Extraction warning, using local regex parser fallback...", aiErr);
             pushToast(`⚠️ AI LLM Notice: ${aiErr.message || "Model response fallback"}`);
-            extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", f.questions || 100);
+            extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 100);
           }
         } else {
           // Fast instant extraction using local parser
-          extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", f.questions || 100);
+          extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 100);
         }
       } catch (err) {
         if (err.message.includes("cancelled")) throw err;
@@ -964,8 +1278,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         category: f.category,
         subject: f.subject,
         topic: f.topic,
-        time: f.time,
-        durationMinutes: Math.max(1, parseInt(f.time) || 30),
+        time: f.time || (extractedQuestions.length <= 40 ? "20 min" : "60 min"),
+        durationMinutes: Math.max(1, parseInt(f.time) || (extractedQuestions.length <= 40 ? 20 : 60)),
         questions: extractedQuestions.length,
         rawExtractedQuestions: extractedQuestions,
       };
@@ -983,6 +1297,18 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             ? optKeys.map(k => q.options[k]) 
             : ["Option A", "Option B", "Option C", "Option D"];
 
+          let chartImg = "";
+          // Attach diagram ONLY if this is genuinely a Quantitative Aptitude DI chart, NEVER on puzzles!
+          if (isDIQuestion(q)) {
+            chartImg = q.chartImageUrl || q.imageUrl || "";
+            if (!chartImg && window.__pdfPageImages__ && window.__pdfPageImages__.length > 0) {
+              const matched = findBestMatchingChartPage(q, window.__pdfPageImages__);
+              if (matched) {
+                chartImg = "data:" + (matched.mimeType || "image/jpeg") + ";base64," + matched.base64;
+              }
+            }
+          }
+
           finalQuestions.push({
             id: `pdf_q_${Date.now()}_${idx}`,
             section: q.subject || "General",
@@ -991,8 +1317,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             options: optionsArray,
             correctAnswerIndex: ansIndex < optionsArray.length ? ansIndex : 0,
             explanation: q.explanation || "Verification pending.",
-            imageUrl: q.chartImageUrl || q.imageUrl || "",
-            chartImageUrl: q.chartImageUrl || "",
+            imageUrl: chartImg,
+            chartImageUrl: chartImg,
           });
       });
       const draftTest = { ...result, questionsList: finalQuestions, id: "draft_" + Date.now() };
@@ -1084,6 +1410,54 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           chartImageUrl: newUrls.length > 0 ? newUrls[0] : null
         }
       };
+    });
+  };
+
+  const replaceChartImage = (idx, imgIndex, newBase64DataUrl) => {
+    if (!newBase64DataUrl) return;
+    setApprovedQuestions(prev => {
+      const q = prev[idx] || {};
+      const fallbackUrls = (generatedTest?.rawExtractedQuestions?.[idx]?.chartImageUrl ? [generatedTest.rawExtractedQuestions[idx].chartImageUrl] : []);
+      const currentUrls = q.chartImageUrls && q.chartImageUrls.length > 0 
+        ? q.chartImageUrls 
+        : (q.chartImageUrl ? [q.chartImageUrl] : fallbackUrls);
+
+      const updatedUrls = [...currentUrls];
+      if (imgIndex >= 0 && imgIndex < updatedUrls.length) {
+        updatedUrls[imgIndex] = newBase64DataUrl;
+      } else {
+        updatedUrls.push(newBase64DataUrl);
+      }
+      return {
+        ...prev,
+        [idx]: { 
+          ...q, 
+          chartImageUrls: updatedUrls, 
+          chartImageUrl: updatedUrls[0] || newBase64DataUrl 
+        }
+      };
+    });
+  };
+
+  const openImageCropper = (qIdx, imgIdx, currentUrl) => {
+    let fullSrc = currentUrl;
+    if (window.__pdfPageImages__ && window.__pdfPageImages__.length > 0) {
+      const q = (generatedTest?.rawExtractedQuestions || [])[qIdx] || {};
+      const matched = findBestMatchingChartPage(q, window.__pdfPageImages__);
+      if (matched && matched.fullBase64) {
+        fullSrc = "data:" + (matched.mimeType || "image/jpeg") + ";base64," + matched.fullBase64;
+      }
+    }
+
+    setCropperModal({
+      qIdx,
+      imgIdx,
+      src: fullSrc,
+      currentUrl: currentUrl,
+      cropTop: 20,
+      cropBottom: 25,
+      cropLeft: 0,
+      cropRight: 0,
     });
   };
 
@@ -1233,6 +1607,42 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     <>
       <PageHeader icon={<ClipboardPlus size={22} />} title={isFreeByDefault ? "Create Free Mock Test" : "Create Mock Test"} subtitle="Design a test manually or generate automatically using AI (Past 5-Yr PYQs)" />
 
+      {/* Published Success Alert Banner */}
+      {publishedSuccess && (
+        <div className="mb-6 p-5 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-emerald-500/5 border-2 border-emerald-400 shadow-md flex items-center justify-between flex-wrap gap-4 animate-in fade-in duration-200">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-black text-lg shadow-sm">
+              ✓
+            </div>
+            <div>
+              <h4 className="font-extrabold text-emerald-950 text-base">
+                Mock Test Successfully Published &amp; Live!
+              </h4>
+              <p className="text-xs text-emerald-800 font-medium mt-0.5">
+                “{publishedSuccess.title}” is now live in <b>{publishedSuccess.category}</b> with <b>{publishedSuccess.questions} questions</b> ({publishedSuccess.time || "Timed"}). {publishedSuccess.isFree ? "Visible in Free Mocks section." : "Available in Student Mock Tests section."}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate(publishedSuccess.isFree ? "/free-mocks" : `/mock-tests?exam=${encodeURIComponent(publishedSuccess.category)}`)}
+              className="btn-primary text-xs px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer"
+            >
+              <Eye size={14} /> View in Student Mock Tests List →
+            </button>
+            <button
+              type="button"
+              onClick={() => setPublishedSuccess(null)}
+              className="p-2 text-emerald-800 hover:bg-emerald-100 rounded-xl transition-colors cursor-pointer"
+              title="Dismiss"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Mode Selector Tabs */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="inline-flex p-1 rounded-2xl bg-black/[0.05]">
@@ -1265,13 +1675,46 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             <input className="input" placeholder="e.g. IBPS PO Prelims 2024 Full Mock" value={f.title} onChange={(e) => set("title", e.target.value)} />
           </div>
 
+          {/* Quick Presets Bar */}
+          <div className="flex flex-wrap items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <span className="text-xs font-bold text-slate-700">⚡ Quick Presets:</span>
+            <button
+              type="button"
+              onClick={() => setF(prev => ({ ...prev, category: "Banking", subject: "Quantitative Aptitude", topic: "Full Quants & DI", questions: "35", time: "20 min", isSectionalTimed: false }))}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-colors cursor-pointer"
+            >
+              📊 Quants Sectional (35 Qs · 20m)
+            </button>
+            <button
+              type="button"
+              onClick={() => setF(prev => ({ ...prev, category: "Banking", subject: "Reasoning Ability", topic: "Puzzles & Seating", questions: "35", time: "20 min", isSectionalTimed: false }))}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg border border-purple-200 bg-purple-50 text-purple-800 hover:bg-purple-100 transition-colors cursor-pointer"
+            >
+              🧩 Reasoning Sectional (35 Qs · 20m)
+            </button>
+            <button
+              type="button"
+              onClick={() => setF(prev => ({ ...prev, category: "Banking", subject: "Prelims Full Mock", topic: "All Sections", questions: "100", time: "60 min", isSectionalTimed: true }))}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg border border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 transition-colors cursor-pointer"
+            >
+              📝 Full Mock (100 Qs · 60m)
+            </button>
+            <button
+              type="button"
+              onClick={() => setF(prev => ({ ...prev, category: "", subject: "", topic: "", questions: "", time: "", isSectionalTimed: false }))}
+              className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              🧹 Clear All
+            </button>
+          </div>
+
           <div className="grid sm:grid-cols-3 gap-4">
             <div>
               <label className="text-sm font-medium text-ink-soft mb-1.5 block">Category / Exam</label>
               <input 
                 list="category-options"
                 className="input" 
-                placeholder="Select or type category..." 
+                placeholder="e.g. Banking, SSC, TNPSC..." 
                 value={f.category} 
                 onChange={(e) => set("category", e.target.value)} 
               />
@@ -1281,24 +1724,24 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             </div>
             <div>
               <label className="text-sm font-medium text-ink-soft mb-1.5 block">Subject</label>
-              <input type="text" className="input" placeholder="e.g. Quant" value={f.subject} onChange={(e) => set("subject", e.target.value)} />
+              <input type="text" className="input" placeholder="e.g. Quantitative Aptitude / Full Mock" value={f.subject} onChange={(e) => set("subject", e.target.value)} />
             </div>
             <div>
               <label className="text-sm font-medium text-ink-soft mb-1.5 block">Topic</label>
-              <input type="text" className="input" placeholder="e.g. Simplification" value={f.topic} onChange={(e) => set("topic", e.target.value)} />
+              <input type="text" className="input" placeholder="e.g. Data Interpretation / Speed Math" value={f.topic} onChange={(e) => set("topic", e.target.value)} />
             </div>
           </div>
           
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <label className="text-sm font-medium text-ink-soft mb-1.5 block">Questions</label>
-              <input className="input" type="number" min="1" max="200" value={f.questions} onChange={(e) => set("questions", e.target.value)} />
-              <p className="text-[11px] text-ink-faint mt-1">Set any number from 1 to 200.</p>
+              <input className="input" type="number" min="1" max="200" placeholder="e.g. 35 (leave empty to extract all from PDF)" value={f.questions} onChange={(e) => set("questions", e.target.value)} />
+              <p className="text-[11px] text-ink-faint mt-1">Leave empty to auto-extract all questions, or set a limit (1–200).</p>
             </div>
             <div>
               <label className="text-sm font-medium text-ink-soft mb-1.5 block">Duration (minutes)</label>
-              <input className="input" type="number" min="1" max="300" value={String(f.time).replace(/\D/g, "")} onChange={(e) => set("time", `${e.target.value} min`)} />
-              <p className="text-[11px] text-ink-faint mt-1">Set any duration from 1 to 300 minutes.</p>
+              <input className="input" type="number" min="1" max="300" placeholder="e.g. 20 (minutes)" value={f.time ? String(f.time).replace(/\D/g, "") : ""} onChange={(e) => set("time", e.target.value ? `${e.target.value} min` : "")} />
+              <p className="text-[11px] text-ink-faint mt-1">Set duration in minutes (e.g. 20 for sectional, 60 for full mock).</p>
             </div>
           </div>
           
@@ -1420,15 +1863,28 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         {pdfFile.name}
                       </div>
                     )}
-                    <div className="mt-4 flex items-center justify-center gap-4 bg-white p-2 rounded-xl border border-black/5" onClick={(e) => e.stopPropagation()}>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="extractionMethod" value="ai" checked={pdfExtractionMethod === "ai"} onChange={() => setPdfExtractionMethod("ai")} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
-                        <span className="text-xs font-bold text-ink">High Accuracy AI (Slower)</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="extractionMethod" value="regex" checked={pdfExtractionMethod === "regex"} onChange={() => setPdfExtractionMethod("regex")} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
-                        <span className="text-xs font-bold text-ink">Fast Offline (Instant)</span>
-                      </label>
+                    <div className="mt-4 flex flex-col items-center justify-center gap-2 bg-white p-2.5 rounded-xl border border-black/5" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="radio" name="extractionMethod" value="ai" checked={pdfExtractionMethod === "ai"} onChange={() => setPdfExtractionMethod("ai")} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
+                          <span className="text-xs font-bold text-ink">High Accuracy AI (Fast Text, ~5s)</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="radio" name="extractionMethod" value="regex" checked={pdfExtractionMethod === "regex"} onChange={() => setPdfExtractionMethod("regex")} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
+                          <span className="text-xs font-bold text-ink">Fast Offline (Instant, &lt;1s)</span>
+                        </label>
+                      </div>
+                      {pdfExtractionMethod === "ai" && (
+                        <label className="flex items-center gap-2 cursor-pointer text-xs text-ink-muted hover:text-ink pt-1.5 border-t border-black/5 w-full justify-center">
+                          <input
+                            type="checkbox"
+                            checked={enableVisionAI}
+                            onChange={(e) => setEnableVisionAI(e.target.checked)}
+                            className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
+                          />
+                          <span>🖼️ Deep Vision AI (Scan charts &amp; DI tables from images - takes longer)</span>
+                        </label>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1897,17 +2353,30 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             </div>
           )}
 
-          <div className="pt-2 flex gap-3">
+          <div className="pt-2 flex flex-wrap gap-3">
             {mode === "ai" ? (
               <button onClick={handleGenerateAI} disabled={generating} className="btn-primary px-6 py-2.5 bg-gradient-to-r from-amber-500 to-purple-600 border-0 text-white font-bold">
                 {generating ? <><Loader2 size={16} className="animate-spin" /> Generating PYQ Test...</> : <><Sparkles size={16} /> Generate AI Mock Test</>}
               </button>
             ) : mode === "manual" ? (
               <button onClick={publish} disabled={isPublishing} className="btn-primary px-6 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold"><Plus size={16} /> Save & Publish Test</button>
+            ) : mode === "pdf" && generatedTest ? (
+              <button
+                type="button"
+                onClick={applyPDFUpdates}
+                disabled={isPublishing}
+                className="btn-primary px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold flex items-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95 transition-all text-sm"
+              >
+                {isPublishing ? (
+                  <><Loader2 size={16} className="animate-spin" /> Publishing Mock Test...</>
+                ) : (
+                  <><CheckCircle2 size={16} /> Save &amp; Publish Mock Test ({generatedTest.rawExtractedQuestions?.length || generatedTest.questions} Qs)</>
+                )}
+              </button>
             ) : null}
 
             {generatedTest && mode === "ai" && (
-              <button onClick={publish} disabled={isPublishing} className="btn-primary px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white">
+              <button onClick={publish} disabled={isPublishing} className="btn-primary px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold">
                 <CheckCircle2 size={16} /> Publish Test
               </button>
             )}
@@ -1934,13 +2403,27 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
           {(mode === "pdf" && generatedTest) ? (
             <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between flex-wrap gap-2">
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between flex-wrap gap-3">
                 <div>
                   <p className="font-bold text-emerald-900 text-sm">{generatedTest.title}</p>
                   <p className="text-xs text-emerald-700 mt-1">
                     {generatedTest.rawExtractedQuestions?.length || generatedTest.questions} Questions extracted from PDF · {generatedTest.time} · {generatedTest.category}
                   </p>
                   {pdfFile && <p className="text-[11px] text-emerald-600 mt-1 font-medium">📎 Source: {pdfFile.name}</p>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={applyPDFUpdates}
+                    disabled={isPublishing}
+                    className="btn-primary px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/30 cursor-pointer active:scale-95 transition-all"
+                  >
+                    {isPublishing ? (
+                      <><Loader2 size={14} className="animate-spin" /> Publishing...</>
+                    ) : (
+                      <><CheckCircle2 size={14} /> Save &amp; Publish Test</>
+                    )}
+                  </button>
                 </div>
                 <button
                   type="button"
@@ -2009,25 +2492,63 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         />
                       </div>
 
-                      {/* Chart / Table Image Attachment */}
-                      <div>
-                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">
-                          📊 Attach Chart / Table / Graph Image (Optional):
-                        </label>
+                      {/* Chart / Table Image Attachment - Only for Quants DI questions or if user has attached an image */}
+                      {(isDIQuestion(q) || Boolean(approvedQuestions[idx]?.chartImageUrl || approvedQuestions[idx]?.imageUrl || q.chartImageUrl || q.imageUrl)) ? (
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] font-bold text-ink-muted block">
+                              📊 DI Chart / Table / Graph Diagram:
+                            </label>
+                            <span className="text-[10px] bg-brand-50 text-brand-700 font-bold px-2 py-0.5 rounded border border-brand-200">
+                              Data Interpretation
+                            </span>
+                          </div>
                         
                           <div className="flex flex-wrap gap-2 mb-2">
                             {(approvedQuestions[idx]?.chartImageUrls || (approvedQuestions[idx]?.chartImageUrl ? [approvedQuestions[idx].chartImageUrl] : (q.chartImageUrls || (q.chartImageUrl ? [q.chartImageUrl] : [])))).map((url, imgIdx) => (
-                              <div key={imgIdx} className="relative w-full max-w-sm">
-                                <img src={url} alt="Chart" className="max-h-48 rounded-lg border border-black/10 object-contain bg-white w-full" />
-                                <button
-                                  type="button"
-                                  onClick={() => removeChartImage(idx, imgIdx)}
-                                  className="absolute top-1 right-1 bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold hover:bg-rose-600 shadow"
-                                >✕</button>
+                              <div key={imgIdx} className="relative w-full max-w-sm group">
+                                <img src={url} alt="Chart" className="max-h-52 rounded-lg border border-black/10 object-contain bg-white w-full" />
+                                <div className="absolute top-1.5 right-1.5 flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => openImageCropper(idx, imgIdx, url)}
+                                    className="bg-brand-600 hover:bg-brand-700 text-white text-[10px] px-2.5 py-1 rounded-lg font-bold shadow-md flex items-center gap-1 transition-colors"
+                                    title="Crop only the diagram/chart area"
+                                  >
+                                    <span>✂️ Crop Diagram</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeChartImage(idx, imgIdx)}
+                                    className="bg-rose-500 hover:bg-rose-600 text-white text-[10px] px-2 py-1 rounded-lg font-bold shadow-md transition-colors"
+                                    title="Remove image"
+                                  >✕</button>
+                                </div>
                               </div>
                             ))}
                           </div>
                           
+                          {window.__pdfPageImages__ && window.__pdfPageImages__.length > 0 && (
+                            <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                              <span className="text-[10px] text-ink-muted font-bold">📄 PDF Pages:</span>
+                              {window.__pdfPageImages__.map((pImg, pIdx) => (
+                                <button
+                                  key={pIdx}
+                                  type="button"
+                                  onClick={() => {
+                                    const dataUrl = "data:" + (pImg.mimeType || "image/jpeg") + ";base64," + pImg.base64;
+                                    replaceChartImage(idx, 0, dataUrl);
+                                    pushToast(`Attached Page ${pImg.pageNum} diagram to Question ${idx + 1}`);
+                                  }}
+                                  className="text-[10px] bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 px-2 py-0.5 rounded font-semibold transition-colors flex items-center gap-1 shadow-sm"
+                                  title={`Attach Page ${pImg.pageNum} diagram to Question ${idx + 1}`}
+                                >
+                                  <span>Page {pImg.pageNum}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
                           <label className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border-2 border-dashed border-brand-300 bg-brand-50/50 hover:bg-brand-100/50 text-brand-700 text-[11px] font-semibold mb-2 transition-colors w-fit">
                             <span>📎 Add Chart / Graph Image</span>
                             <input
@@ -2046,6 +2567,26 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                         <p className="text-[10px] text-ink-muted mb-2">The image will be shown to students alongside this question during the mock test.</p>
                       </div>
+                      ) : (
+                        <div className="flex items-center justify-between py-1 text-[11px] text-ink-muted bg-black/[0.02] px-3 py-1.5 rounded-lg border border-black/5">
+                          <span className="text-slate-500 font-medium">🧩 Puzzle / Text-Based Question (No chart required)</span>
+                          <label className="text-[10px] font-bold text-brand-600 hover:text-brand-700 cursor-pointer flex items-center gap-1 hover:underline">
+                            + Attach Diagram (Optional)
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = (ev) => editChartImage(idx, ev.target.result);
+                                reader.readAsDataURL(file);
+                              }}
+                            />
+                          </label>
+                        </div>
+                      )}
 
                       {/* Question Statement */}
                       <div>
@@ -2493,26 +3034,47 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
 
 
-                    {/* Image Preview & Attachment */}
-                    {approvedQuestions[idx]?.imageUrl && (
-                      <div className="mt-2 relative max-w-md rounded-xl overflow-hidden border border-black/10 bg-white">
-                        <img src={approvedQuestions[idx].imageUrl} alt="Chart/Data" className="w-full h-auto object-contain max-h-60" />
-                        <button 
-                          type="button"
-                          className="absolute top-2 right-2 bg-rose-600 text-white rounded-lg p-1.5 shadow-md"
-                          onClick={() => attachImageToQuestion(idx, null)}
-                        >
-                          <X size={14} />
-                        </button>
+                    {/* Image Preview & Attachment - Only for Quants DI questions or if user has attached an image */}
+                    {(isDIQuestion(q) || Boolean(approvedQuestions[idx]?.imageUrl || q.imageUrl)) ? (
+                      <div>
+                        {approvedQuestions[idx]?.imageUrl && (
+                          <div className="mt-2 relative max-w-md rounded-xl overflow-hidden border border-black/10 bg-white">
+                            <img src={approvedQuestions[idx].imageUrl} alt="Chart/Data" className="w-full h-auto object-contain max-h-60" />
+                            <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => openImageCropper(idx, 0, approvedQuestions[idx].imageUrl)}
+                                className="bg-brand-600 hover:bg-brand-700 text-white text-xs px-2.5 py-1 rounded-lg font-bold shadow-md flex items-center gap-1 transition-colors"
+                              >
+                                ✂️ Crop Diagram
+                              </button>
+                              <button 
+                                type="button"
+                                className="bg-rose-600 hover:bg-rose-700 text-white rounded-lg p-1.5 shadow-md font-bold text-xs"
+                                onClick={() => attachImageToQuestion(idx, null)}
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <label className="btn-soft px-3.5 py-2 text-xs bg-slate-100 hover:bg-slate-200 cursor-pointer flex items-center gap-1.5 font-bold rounded-xl border border-slate-200">
+                            <Upload size={14} /> {approvedQuestions[idx]?.imageUrl ? "Change Chart/Image" : "Attach Chart/Image"}
+                            <input type="file" accept="image/*" className="hidden" onChange={(e) => attachImageToQuestion(idx, e.target.files[0])} />
+                          </label>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between py-1 text-xs text-ink-muted bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+                        <span className="text-slate-600 font-medium">🧩 Puzzle / Text-Based Question (No chart needed)</span>
+                        <label className="text-xs font-bold text-brand-600 hover:text-brand-700 cursor-pointer flex items-center gap-1 hover:underline">
+                          + Attach Diagram (Optional)
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => attachImageToQuestion(idx, e.target.files[0])} />
+                        </label>
                       </div>
                     )}
-
-                    <div className="flex items-center gap-2 pt-1">
-                      <label className="btn-soft px-3.5 py-2 text-xs bg-slate-100 hover:bg-slate-200 cursor-pointer flex items-center gap-1.5 font-bold rounded-xl border border-slate-200">
-                        <Upload size={14} /> {approvedQuestions[idx]?.imageUrl ? "Change Chart/Image" : "Attach Chart/Image"}
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => attachImageToQuestion(idx, e.target.files[0])} />
-                      </label>
-                    </div>
 
                     {/* Solution Image Attachment */}
                     {approvedQuestions[idx]?.solutionImageUrl && (
@@ -2578,6 +3140,327 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           </div>
         </div>
       )}
+
+      {/* Chart / Diagram Cropper Modal */}
+      {cropperModal && (() => {
+        const relatedIndices = getRelatedDIQuestionIndices(
+          cropperModal.qIdx,
+          generatedTest?.rawExtractedQuestions,
+          approvedQuestions
+        );
+        const hasSet = relatedIndices.length > 1;
+        const setRangeLabel = hasSet 
+          ? `Q${relatedIndices[0] + 1} – Q${relatedIndices[relatedIndices.length - 1] + 1}` 
+          : `Q${cropperModal.qIdx + 1}`;
+
+        const handleSaveCropped = async (applyToAllInSet = false) => {
+          try {
+            const croppedDataUrl = await generateCroppedImage(
+              cropperModal.src,
+              cropperModal.cropTop,
+              cropperModal.cropBottom,
+              cropperModal.cropLeft,
+              cropperModal.cropRight
+            );
+
+            if (applyToAllInSet && hasSet) {
+              relatedIndices.forEach(targetIdx => {
+                replaceChartImage(targetIdx, cropperModal.imgIdx || 0, croppedDataUrl);
+              });
+              pushToast(`✅ Cropped diagram applied to all ${relatedIndices.length} related questions in this DI set (${setRangeLabel})!`);
+            } else {
+              replaceChartImage(cropperModal.qIdx, cropperModal.imgIdx || 0, croppedDataUrl);
+              pushToast(`✅ Cropped diagram saved for Question ${cropperModal.qIdx + 1}!`);
+            }
+            setCropperModal(null);
+          } catch (err) {
+            console.error("Failed to crop image:", err);
+            pushToast("Failed to crop image: " + err.message);
+          }
+        };
+
+        return (
+        <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5" onClick={() => setCropperModal(null)}>
+          <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-black/10 overflow-hidden animate-in fade-in duration-150" onClick={(e) => e.stopPropagation()}>
+            
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-black/10 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-base shadow-xs">
+                  ✂️
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-extrabold text-ink">Crop DI Chart &amp; Diagram Only</h3>
+                    {hasSet && (
+                      <span className="text-[11px] bg-emerald-100 text-emerald-800 font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-300">
+                        DI Set: {setRangeLabel} ({relatedIndices.length} Questions)
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-ink-muted">Trim out top copyright notices, page headers, and bottom questions to keep ONLY the clean diagram.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCropperModal(null)}
+                className="p-1.5 rounded-xl text-ink-muted hover:text-ink hover:bg-black/5 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* Left: Original with Visual Crop Frame */}
+              <div className="flex flex-col">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-ink">Source Image &amp; Crop Frame:</span>
+                  <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    Highlighted area = Saved
+                  </span>
+                </div>
+
+                <div className="relative border border-black/15 rounded-2xl overflow-hidden bg-slate-900/5 flex items-center justify-center min-h-[300px] max-h-[380px] p-2">
+                  <div className="relative inline-block max-w-full max-h-[360px]">
+                    <img
+                      src={cropperModal.src}
+                      alt="Source Page"
+                      className="max-h-[360px] w-auto object-contain block mx-auto select-none pointer-events-none rounded-lg"
+                    />
+                    
+                    {/* Shaded Top */}
+                    <div 
+                      className="absolute top-0 left-0 right-0 bg-black/60 backdrop-blur-[1px] transition-all"
+                      style={{ height: `${cropperModal.cropTop}%` }}
+                    />
+                    {/* Shaded Bottom */}
+                    <div 
+                      className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-[1px] transition-all"
+                      style={{ height: `${cropperModal.cropBottom}%` }}
+                    />
+                    {/* Shaded Left */}
+                    <div 
+                      className="absolute left-0 bg-black/60 backdrop-blur-[1px] transition-all"
+                      style={{ 
+                        top: `${cropperModal.cropTop}%`, 
+                        bottom: `${cropperModal.cropBottom}%`,
+                        width: `${cropperModal.cropLeft}%` 
+                      }}
+                    />
+                    {/* Shaded Right */}
+                    <div 
+                      className="absolute right-0 bg-black/60 backdrop-blur-[1px] transition-all"
+                      style={{ 
+                        top: `${cropperModal.cropTop}%`, 
+                        bottom: `${cropperModal.cropBottom}%`,
+                        width: `${cropperModal.cropRight}%` 
+                      }}
+                    />
+
+                    {/* Clear Highlighted Bounding Box */}
+                    <div
+                      className="absolute border-2 border-emerald-400 shadow-[0_0_0_1px_rgba(0,0,0,0.5)] pointer-events-none flex items-center justify-center transition-all rounded-xs"
+                      style={{
+                        top: `${cropperModal.cropTop}%`,
+                        bottom: `${cropperModal.cropBottom}%`,
+                        left: `${cropperModal.cropLeft}%`,
+                        right: `${cropperModal.cropRight}%`,
+                      }}
+                    >
+                      <span className="text-[10px] font-extrabold text-emerald-950 bg-emerald-400/95 px-2.5 py-0.5 rounded shadow">
+                        Cropped Diagram
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right: Trimming Sliders, Presets & Live Preview */}
+              <div className="flex flex-col space-y-4">
+                
+                {/* Quick Presets */}
+                <div>
+                  <label className="text-xs font-bold text-ink mb-1.5 block">Quick Presets:</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCropperModal(prev => ({ ...prev, cropTop: 22, cropBottom: 28, cropLeft: 0, cropRight: 0 }))}
+                      className="text-xs font-bold py-2 px-3 rounded-xl border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 transition-colors text-left flex items-center justify-between shadow-xs"
+                    >
+                      <span>📊 Center Diagram</span>
+                      <span className="text-[10px] text-brand-500 font-normal">Mid 50%</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCropperModal(prev => ({ ...prev, cropTop: 15, cropBottom: 42, cropLeft: 0, cropRight: 0 }))}
+                      className="text-xs font-bold py-2 px-3 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors text-left flex items-center justify-between shadow-xs"
+                    >
+                      <span>📈 Upper Diagram</span>
+                      <span className="text-[10px] text-purple-500 font-normal">Top 43%</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCropperModal(prev => ({ ...prev, cropTop: 32, cropBottom: 15, cropLeft: 0, cropRight: 0 }))}
+                      className="text-xs font-bold py-2 px-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors text-left flex items-center justify-between shadow-xs"
+                    >
+                      <span>📉 Lower Diagram</span>
+                      <span className="text-[10px] text-blue-500 font-normal">Bottom 53%</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCropperModal(prev => ({ ...prev, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0 }))}
+                      className="text-xs font-bold py-2 px-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors text-left flex items-center justify-between shadow-xs"
+                    >
+                      <span>🔄 Reset Full</span>
+                      <span className="text-[10px] text-slate-500 font-normal">100%</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Precision Sliders */}
+                <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-black/5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-ink">Trim Sliders:</span>
+                    <span className="text-[10px] text-ink-muted">Adjust edges in real-time</span>
+                  </div>
+
+                  {/* Top Cut */}
+                  <div>
+                    <div className="flex justify-between text-[11px] font-semibold text-ink-muted mb-1">
+                      <span>Cut Top (Header / Warnings):</span>
+                      <span className="text-brand-600 font-bold">{cropperModal.cropTop}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="70"
+                      value={cropperModal.cropTop}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        setCropperModal(prev => ({ ...prev, cropTop: Math.min(val, 90 - prev.cropBottom) }));
+                      }}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                    />
+                  </div>
+
+                  {/* Bottom Cut */}
+                  <div>
+                    <div className="flex justify-between text-[11px] font-semibold text-ink-muted mb-1">
+                      <span>Cut Bottom (Questions / Footer):</span>
+                      <span className="text-brand-600 font-bold">{cropperModal.cropBottom}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="70"
+                      value={cropperModal.cropBottom}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        setCropperModal(prev => ({ ...prev, cropBottom: Math.min(val, 90 - prev.cropTop) }));
+                      }}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                    />
+                  </div>
+
+                  {/* Left & Right in row */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="flex justify-between text-[11px] font-semibold text-ink-muted mb-1">
+                        <span>Cut Left:</span>
+                        <span className="text-brand-600 font-bold">{cropperModal.cropLeft}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="40"
+                        value={cropperModal.cropLeft}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) || 0;
+                          setCropperModal(prev => ({ ...prev, cropLeft: val }));
+                        }}
+                        className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-[11px] font-semibold text-ink-muted mb-1">
+                        <span>Cut Right:</span>
+                        <span className="text-brand-600 font-bold">{cropperModal.cropRight}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="40"
+                        value={cropperModal.cropRight}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) || 0;
+                          setCropperModal(prev => ({ ...prev, cropRight: val }));
+                        }}
+                        className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Preview of Cropped Result */}
+                <div>
+                  <label className="text-xs font-bold text-ink mb-1 block">Live Student Preview:</label>
+                  <div className="h-32 border border-black/15 rounded-2xl bg-white p-2.5 flex items-center justify-center overflow-hidden shadow-inner">
+                    <CroppedPreviewImg
+                      src={cropperModal.src}
+                      cropTop={cropperModal.cropTop}
+                      cropBottom={cropperModal.cropBottom}
+                      cropLeft={cropperModal.cropLeft}
+                      cropRight={cropperModal.cropRight}
+                    />
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-black/10 bg-slate-50 flex items-center justify-between flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setCropperModal(null)}
+                className="btn-soft text-xs px-4 py-2 text-ink-muted hover:text-ink font-bold rounded-xl"
+              >
+                Cancel
+              </button>
+
+              <div className="flex items-center gap-2">
+                {hasSet && (
+                  <button
+                    type="button"
+                    onClick={() => handleSaveCropped(false)}
+                    className="btn-soft text-xs px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-xl border border-slate-300 shadow-xs cursor-pointer"
+                    title={`Save cropped diagram only for Question ${cropperModal.qIdx + 1}`}
+                  >
+                    Save for Q{cropperModal.qIdx + 1} Only
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => handleSaveCropped(true)}
+                  className="btn-primary text-xs px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95 transition-all"
+                >
+                  <CheckCircle2 size={16} />
+                  {hasSet 
+                    ? `🔥 Save & Apply to Entire DI Set (${setRangeLabel})` 
+                    : `Save Cropped Diagram`}
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+        );
+      })()}
 
       {/* LLM Key Settings Modal */}
       {showKeyModal && (

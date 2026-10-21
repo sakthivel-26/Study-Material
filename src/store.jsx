@@ -230,16 +230,38 @@ export function AppProvider({ children }) {
     return () => window.removeEventListener("shakthi_users_updated", handleUpdate);
   }, []);
 
+  // Safe helper to persist mock tests to localStorage without quota crashes
+  const safePersistMockTests = (tests) => {
+    try {
+      localStorage.setItem("ken_ias_mocktests", JSON.stringify(tests));
+    } catch (e) {
+      console.warn("localStorage quota exceeded, saving lightweight mockTests...", e);
+      try {
+        const lightTests = (tests || []).map(t => ({
+          ...t,
+          questionsList: (t.questionsList || []).map(q => {
+            const { imageUrl, imageUrls, chartImageUrl, chartImageUrls, solutionImageUrl, ...rest } = q;
+            return {
+              ...rest,
+              imageUrl: (imageUrl && imageUrl.startsWith("http")) ? imageUrl : undefined
+            };
+          })
+        }));
+        localStorage.setItem("ken_ias_mocktests", JSON.stringify(lightTests));
+      } catch (err) {
+        console.warn("Failed to save even lightweight mockTests to localStorage", err);
+      }
+    }
+  };
+
   // Save data to localStorage in demo mode
   useEffect(() => {
-    if (!useRealtimeBackend) {
-      try {
-        localStorage.setItem("ken_ias_uploads", JSON.stringify(uploads));
-        localStorage.setItem("ken_ias_notifications", JSON.stringify(notifications));
-        localStorage.setItem("ken_ias_mocktests", JSON.stringify(mockTests));
-      } catch (err) {
-        console.warn("Could not save to localStorage", err);
-      }
+    try {
+      localStorage.setItem("ken_ias_uploads", JSON.stringify(uploads));
+      localStorage.setItem("ken_ias_notifications", JSON.stringify(notifications));
+      safePersistMockTests(mockTests);
+    } catch (err) {
+      console.warn("Could not save to localStorage", err);
     }
   }, [uploads, notifications, mockTests]);
 
@@ -348,7 +370,7 @@ export function AppProvider({ children }) {
     if (isFirebaseConfigured) {
       try {
         const timeout = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Firestore write timeout")), 2500)
+          setTimeout(() => reject(new Error("Firestore write timeout")), 15000)
         );
         const full = await Promise.race([fsAddUpload(payloadWithTime), timeout]);
         fsNotify(
@@ -391,7 +413,11 @@ export function AppProvider({ children }) {
       }
     }
     const full = { ...test, id: test.id || Date.now() };
-    setMockTests((prev) => [full, ...prev]);
+    setMockTests((prev) => {
+      const next = [full, ...prev.filter(t => t.id !== full.id)];
+      safePersistMockTests(next);
+      return next;
+    });
     pushNotification("mock", title, `“${test.title}” is live now.`);
     pushToast("Mock test created & students notified 📝");
     return full;

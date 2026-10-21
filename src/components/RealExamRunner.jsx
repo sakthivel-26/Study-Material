@@ -8,6 +8,7 @@ import {
 import { useApp } from "../store.jsx";
 import { useAuth } from "../auth.jsx";
 import TestAnalysisView from "./TestAnalysisView.jsx";
+import FormattedPassage from "./FormattedPassage.jsx";
 
 export default function RealExamRunner({ test, onClose }) {
   const { pushToast, saveTestAttempt } = useApp();
@@ -130,6 +131,8 @@ export default function RealExamRunner({ test, onClose }) {
   // UI customization
   const [fontSizeLevel, setFontSizeLevel] = useState(1); // 0 = Small, 1 = Normal, 2 = Large
   const [isPaletteCollapsed, setIsPaletteCollapsed] = useState(false);
+  const [isDirectionsCollapsed, setIsDirectionsCollapsed] = useState(false);
+  const [zoomedDiagramUrl, setZoomedDiagramUrl] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Test Results
@@ -783,29 +786,52 @@ export default function RealExamRunner({ test, onClose }) {
         {/* 4. Main Exam Layout: 3 Columns (Left: Directions & Context / Middle: Question & Options / Right: Palette) */}
         <div className="flex-1 flex overflow-hidden relative">
           {/* Left Column: Directions & Context (Passage text + Charts/Tables/Diagrams) */}
-          {hasContext && (
-            <div className="w-1/2 border-r border-slate-300 p-5 overflow-y-auto bg-slate-50/40 space-y-4 leading-relaxed">
-              <div className="font-bold text-xs text-slate-800 uppercase tracking-wide border-b border-slate-200 pb-1.5 flex items-center gap-2">
-                <BookOpen size={14} className="text-[#1B4F72]" />
-                <span>Directions &amp; Context</span>
+          {hasContext && !isDirectionsCollapsed && (
+            <div className="w-[36%] lg:w-[33%] xl:w-[32%] shrink-0 border-r border-slate-300 p-4 md:p-5 overflow-y-auto bg-slate-50/70 space-y-3.5 leading-relaxed transition-all">
+              <div className="font-bold text-xs text-slate-800 uppercase tracking-wide border-b border-slate-200 pb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <BookOpen size={14} className="text-[#1B4F72]" />
+                  <span>Directions &amp; Context</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDirectionsCollapsed(true)}
+                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 px-2 py-0.5 rounded bg-white hover:bg-slate-200 border border-slate-200 flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Collapse Directions panel"
+                >
+                  <span>Hide</span>
+                  <span>◀</span>
+                </button>
               </div>
 
               {activeQuestion?.passage && (
-                <div className={`${contentFontSizeClass} text-slate-800 font-serif leading-relaxed whitespace-pre-line`}>
-                  {activeQuestion.passage}
-                </div>
+                <FormattedPassage
+                  passage={activeQuestion.passage}
+                  className={`${contentFontSizeClass} text-slate-800 font-serif leading-relaxed text-xs sm:text-sm`}
+                />
               )}
 
-              {/* All Charts, Tables, Bar Charts, and Diagrams are strictly rendered here under Directions & Context */}
+              {/* All Charts, Tables, Bar Charts, and Diagrams are rendered cleanly with controlled max height */}
               {contextImages.length > 0 && (
-                <div className="space-y-3 pt-2">
+                <div className="space-y-2.5 pt-1">
                   {contextImages.map((imgUrl, imgIdx) => (
-                    <div key={imgIdx} className="rounded-xl border border-slate-200 p-3 bg-white shadow-xs max-w-full">
+                    <div key={imgIdx} className="rounded-xl border border-slate-200 p-2.5 bg-white shadow-2xs max-w-full group relative">
                       <img
                         src={imgUrl}
                         alt={`Directions Context Diagram ${imgIdx + 1}`}
-                        className="w-full h-auto object-contain max-h-[440px] mx-auto rounded"
+                        onClick={() => setZoomedDiagramUrl(imgUrl)}
+                        className="w-full h-auto object-contain max-h-[220px] md:max-h-[250px] mx-auto rounded cursor-zoom-in hover:opacity-95 transition-all"
+                        title="Click to view enlarged diagram"
                       />
+                      <div className="text-center pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setZoomedDiagramUrl(imgUrl)}
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-bold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          🔍 Click to Enlarge Diagram
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -813,8 +839,22 @@ export default function RealExamRunner({ test, onClose }) {
             </div>
           )}
 
-          {/* Middle Column: Question Prompt & Options Radio List ONLY (No charts/images on question side) */}
-          <div className={`flex-1 p-5 md:p-6 overflow-y-auto space-y-5 ${hasContext ? "w-1/2" : "w-full"}`}>
+          {/* Collapsed Directions Tab button */}
+          {hasContext && isDirectionsCollapsed && (
+            <button
+              type="button"
+              onClick={() => setIsDirectionsCollapsed(false)}
+              className="w-7 bg-blue-50 hover:bg-blue-100 border-r border-blue-200 text-[#1B4F72] flex flex-col items-center justify-center py-4 text-xs font-bold gap-2 cursor-pointer shadow-2xs transition-colors shrink-0"
+              title="Expand Directions & Context"
+            >
+              <BookOpen size={13} />
+              <span className="[writing-mode:vertical-rl] tracking-wider text-[10px] font-extrabold uppercase">Directions</span>
+              <span className="text-[10px]">▶</span>
+            </button>
+          )}
+
+          {/* Middle Column: Question Prompt & Options Radio List ONLY */}
+          <div className="flex-1 p-5 md:p-6 overflow-y-auto space-y-5">
             {/* Question Header */}
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <h2 className="font-bold text-sm md:text-base text-slate-900">
@@ -1139,6 +1179,39 @@ export default function RealExamRunner({ test, onClose }) {
                 >
                   Back to Exam
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ----------------------------------------------------- */}
+        {/* MODAL: Zoomed Diagram / Chart Viewer */}
+        {/* ----------------------------------------------------- */}
+        {zoomedDiagramUrl && (
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
+            onClick={() => setZoomedDiagramUrl(null)}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-300"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="bg-[#1B4F72] text-white px-5 py-3 flex items-center justify-between font-bold text-xs">
+                <span>Enlarged Context Diagram / Chart</span>
+                <button
+                  type="button"
+                  onClick={() => setZoomedDiagramUrl(null)}
+                  className="hover:text-slate-300 text-xs font-bold px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 cursor-pointer"
+                >
+                  ✕ Close
+                </button>
+              </div>
+              <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-100/50">
+                <img
+                  src={zoomedDiagramUrl}
+                  alt="Enlarged Diagram Preview"
+                  className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-sm"
+                />
               </div>
             </div>
           </div>

@@ -47,9 +47,6 @@ export async function subscribeBackend(user, { onUploads, onTests, onNotificatio
   );
 
   let testsQuery = query(collection(db, COLLECTIONS.mockTests), orderBy("createdAt", "desc"));
-  if (!isAdmin && !isPremium) {
-    testsQuery = query(collection(db, COLLECTIONS.mockTests), where("isFree", "==", true), orderBy("createdAt", "desc"));
-  }
   unsubs.push(
     onSnapshot(testsQuery, (snap) => onTests(snap.docs.map(mapDoc)))
   );
@@ -90,6 +87,21 @@ export async function subscribeBackend(user, { onUploads, onTests, onNotificatio
 }
 
 /* ------------------------------- WRITERS --------------------------------- */
+function sanitizeFirestoreObject(val) {
+  if (val === undefined) return null;
+  if (val === null || typeof val !== "object") return val;
+  if (Array.isArray(val)) {
+    return val.map(item => sanitizeFirestoreObject(item));
+  }
+  const clean = {};
+  for (const [k, v] of Object.entries(val)) {
+    if (v !== undefined) {
+      clean[k] = sanitizeFirestoreObject(v);
+    }
+  }
+  return clean;
+}
+
 export async function fsAddUpload(item) {
   const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
   const db = await getFirebaseDb();
@@ -123,11 +135,12 @@ export async function fsDeleteAdmission(id) {
 export async function fsAddMockTest(test) {
   const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
   const db = await getFirebaseDb();
+  const cleanTest = sanitizeFirestoreObject(test);
   const ref = await addDoc(collection(db, COLLECTIONS.mockTests), {
-    ...test,
+    ...cleanTest,
     createdAt: serverTimestamp(),
   });
-  return { ...test, id: ref.id };
+  return { ...cleanTest, id: ref.id };
 }
 
 export async function fsDeleteMockTest(id) {
@@ -139,7 +152,8 @@ export async function fsDeleteMockTest(id) {
 export async function fsUpdateMockTest(id, data) {
   const { doc, updateDoc } = await import("firebase/firestore");
   const db = await getFirebaseDb();
-  await updateDoc(doc(db, COLLECTIONS.mockTests, id), data);
+  const cleanData = sanitizeFirestoreObject(data);
+  await updateDoc(doc(db, COLLECTIONS.mockTests, id), cleanData);
 }
 
 export async function fsDeleteUpload(id) {

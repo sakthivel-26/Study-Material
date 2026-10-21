@@ -193,27 +193,39 @@ async function callGemini(apiKey, prompt) {
 
   const cleanKey = apiKey.trim();
 
-  const candidateEndpoints = [
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${cleanKey}`,
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${cleanKey}`,
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${cleanKey}`,
+  const candidateModels = [
+    { name: "gemini-3.5-flash-lite", isThinking: false },
+    { name: "gemini-flash-lite-latest", isThinking: false },
+    { name: "gemini-3.6-flash", isThinking: true },
+    { name: "gemini-3.7-flash", isThinking: true },
+    { name: "gemini-3.8-flash", isThinking: true },
+    { name: "gemini-3.5-flash", isThinking: true },
   ];
 
   let lastErr = null;
 
-  for (const url of candidateEndpoints) {
+  for (const m of candidateModels) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${m.name}:generateContent?key=${cleanKey}`;
     try {
+      const genConfig = {
+        responseMimeType: "application/json",
+        temperature: 0.1,
+      };
+      if (m.isThinking) {
+        genConfig.thinkingConfig = { thinkingBudget: 0 };
+      }
+
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+          generationConfig: genConfig,
         }),
       });
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
-        throw new Error(`Gemini API error (${response.status}): ${errText || response.statusText}`);
+        throw new Error(`Gemini ${m.name} error (${response.status}): ${errText || response.statusText}`);
       }
       const data = await response.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
@@ -226,7 +238,7 @@ async function callGemini(apiKey, prompt) {
       const parsed = JSON.parse(cleaned);
       return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
     } catch (err) {
-      console.warn(`Gemini endpoint ${url} failed, trying next...`, err);
+      console.warn(`Gemini model ${m.name} failed, trying next...`, err.message);
       lastErr = err;
     }
   }
@@ -234,10 +246,10 @@ async function callGemini(apiKey, prompt) {
 }
 
 // 2b. Google Gemini Vision — reads charts, tables, bar graphs from a page image
-export async function callGeminiVisionPage(apiKey, base64Image, mimeType = "image/png") {
+export async function callGeminiVisionPage(apiKey, base64Image, mimeType = "image/jpeg") {
   if (!apiKey || typeof apiKey !== "string") return null;
   const cleanKey = apiKey.trim();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${cleanKey}`;
+  const candidateModels = ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"];
 
   const prompt = `You are an expert at reading Indian competitive exam question papers (IBPS, SBI, SSC, TNPSC etc.).
 Look at this PDF page image carefully.
@@ -262,28 +274,41 @@ Output format:
 
 If no charts/tables/graphs are present, just output the text content of the page.`;
 
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { inline_data: { mime_type: mimeType, data: base64Image } },
-            { text: prompt }
-          ]
-        }],
-        generationConfig: { temperature: 0.1 },
-      }),
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    return text.trim() || null;
-  } catch (err) {
-    console.warn("[AI Vision] Gemini Vision page extraction failed:", err.message);
-    return null;
+  for (const model of candidateModels) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout max
+      const response = await fetch(url, {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { inline_data: { mime_type: mimeType, data: base64Image } },
+              { text: prompt }
+            ]
+          }],
+          generationConfig: {
+            temperature: 0.1,
+            thinkingConfig: { thinkingBudget: 0 }
+          },
+        }),
+      });
+      clearTimeout(timeoutId);
+      if (!response.ok) {
+        console.warn(`[AI Vision] Model ${model} returned status ${response.status}`);
+        continue;
+      }
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      if (text.trim()) return text.trim();
+    } catch (err) {
+      console.warn(`[AI Vision] Model ${model} failed: ${err.message}`);
+    }
   }
+  return null;
 }
 
 // 3. OpenAI API Provider
@@ -1289,22 +1314,30 @@ FORMAT:
       "question": "Only the specific question being asked (e.g. 'Who sits immediate left of E?'). Do NOT put the puzzle/passage text here.",
       "options": ["option text A", "option text B", "option text C", "option text D"],
       "correctAnswerIndex": 0,
-      "explanation": "Step-by-step explanation for the correct answer.",
+      "explanation": "Provide beginner-friendly step-by-step explanation. For PUZZLE/SEATING ARRANGEMENTS: You MUST include the final solved arrangement as a Markdown table (e.g. | Person | Department | Sport |) followed by Step 1, Step 2 logical deductions.",
       "chart_page_number": null
     }
   ]
 }
 
-!!! EXTREMELY IMPORTANT: THE PASSAGE / PUZZLE RULE !!!
-1. ANY question that belongs to a set (Puzzle, Seating Arrangement, Reading Comprehension, DI) MUST have the full problem description/paragraph placed in the "passage" field. 
-2. Do NOT lump the paragraph into the "question" field. The "question" field is strictly for the single question being asked.
-3. Every single question in a group MUST have the exact same "passage" text included in its JSON object.
-4. If you fail to include the paragraph in the "passage" field for a puzzle, the user will be unable to solve it. This is a critical failure.
+!!! PUZZLE & SEATING ARRANGEMENT MANDATORY RULE (MANDATORY) !!!
+For any Reasoning Puzzle (Floor puzzle, Day/Month scheduling, Box puzzle, Departments & Sports, Circular/Square/Linear Seating Arrangement, Blood Relations):
+In the "explanation" field, you MUST generate the complete FINAL SOLVED MATRIX / ARRANGEMENT AS A CLEAN MARKDOWN TABLE (| Person | Department | Sport | or | Floor | Person | Item | etc.) with all entities completely solved!
+Followed by:
+Step 1: Given Conditions: ...
+Step 2: Step-by-Step Logical Working & Elimination: ...
+Step 3: Final Answer & Conclusion: ...
+DO NOT provide plain words only without the solved table grid! Students require the solved table column to understand the puzzle!
 
-!!! VISUAL CHARTS & TABLES !!!
-1. If this question is based on a visual chart, graph, or table, you will see a marker in the text like "=== [Page 3 Vision Extract] ===".
-2. If this question relies on that chart data, you MUST set "chart_page_number" to that specific integer (e.g. 3).
-3. If the question does NOT rely on a visual chart, leave "chart_page_number" as null.
+!!! DATA INTERPRETATION (DI), CHARTS, & TABLES RULE (MANDATORY) !!!
+1. ANY question that belongs to a set (Puzzle, Seating Arrangement, Reading Comprehension, Data Interpretation DI):
+   - You MUST copy the entire problem description, directions, and shared context into the "passage" field for EVERY question in that set.
+   - For TABULAR DATA: You MUST format the table as a clean Markdown table with column headers and rows:
+     | Header 1 | Header 2 | Header 3 |
+     | Value 1  | Value 2  | Value 3  |
+   - For PIE CHARTS, BAR CHARTS, LINE GRAPHS: If numerical values or percentages are mentioned in the directions or in "=== [Page X Vision Extract] ===", list the full breakdown in the "passage" field.
+   - Set "chart_page_number" to the integer page number (e.g. 1, 2, 3) where the chart/table appears in the PDF.
+   - Do NOT omit table/chart data! Without it, students cannot answer the questions.
 
 OTHER RULES:
 - options must be EXACTLY 4 or 5 strings (no labels like 'A)', '(a)', '1.' prefix in the option text itself).
@@ -1343,7 +1376,7 @@ ${JSON.stringify(questionJson, null, 2)}
 """`;
 
 async function callGroq(apiKey, prompt) {
-  const models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"];
+  const models = ["qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
   let lastErr = null;
   for (const model of models) {
     try {
@@ -1357,7 +1390,7 @@ async function callGroq(apiKey, prompt) {
           model: model,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.1,
-          max_tokens: 4000,
+          max_tokens: 1000,
         }),
       });
 
@@ -1417,8 +1450,8 @@ async function callLLMChain(prompt) {
   const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
   
   const providers = [];
-  if (groqKey)   providers.push({ name: "Groq",   fn: () => callGroq(groqKey, prompt) });
   if (geminiKey) providers.push({ name: "Gemini", fn: () => callGemini(geminiKey, prompt) });
+  if (groqKey)   providers.push({ name: "Groq",   fn: () => callGroq(groqKey, prompt) });
   if (nvidiaKey) providers.push({ name: "NVIDIA", fn: () => callNvidia(nvidiaKey, prompt) });
 
   if (providers.length === 0) {
@@ -1516,6 +1549,109 @@ function regexExtractQuestions(pdfText, category) {
   return uniqueQuestions;
 }
 
+export function isDIQuestion(q) {
+  if (!q) return false;
+  const passage = (q.passage || "").toLowerCase();
+  const qText = (q.question || q.question_text || "").toLowerCase();
+  const section = (q.section || q.subject || "").toLowerCase();
+  const fullText = `${section} ${passage} ${qText}`;
+
+  // 1. Strict Exclusions: Reasoning & Puzzle questions MUST NEVER be marked as DI or have diagrams attached!
+  const isPuzzleOrReasoning = /(?:puzzle|sitting around|seated around|circular table|linear row|facing north|facing south|facing inside|facing outside|facing the centre|facing center|parallel rows|floor puzzle|box puzzle|blood relation|syllogism|statement and conclusion|direction sense|coding[\s-]?decoding|order and ranking|reasoning ability|logical reasoning)/i.test(fullText);
+  if (isPuzzleOrReasoning) {
+    return false;
+  }
+
+  // 2. Strict Inclusions: Must be actual Quantitative Aptitude Data Interpretation (chart/graph/tabular DI)
+  const hasDIIndicators = /(?:pie[\s-]?chart|bar[\s-]?graph|bar[\s-]?chart|line[\s-]?graph|line[\s-]?chart|histogram|radar[\s-]?graph|tabular[\s-]?di|given below shows the (?:number|percentage|production|sales|distribution|ratio)|data interpretation|production of|sales of|study the following (?:bar|pie|line|table|chart|graph))/i.test(fullText);
+
+  const isQuants = /(?:quantitative|quants|math|aptitude)/i.test(section) || (!section.includes("reasoning") && !section.includes("english"));
+
+  return isQuants && hasDIIndicators;
+}
+
+export function findBestMatchingChartPage(q, pageImages) {
+  if (!pageImages || pageImages.length === 0) return null;
+
+  // Strict check: ONLY attach charts to Quantitative Aptitude DI questions, NEVER to puzzles or reasoning!
+  if (!isDIQuestion(q)) return null;
+
+  // 1. Direct chart_page_number check if provided and valid
+  if (q.chart_page_number) {
+    const found = pageImages.find(p => p.pageNum === q.chart_page_number) || pageImages[q.chart_page_number - 1];
+    if (found && !found.isPromo) return found;
+  }
+
+  const passage = (q.passage || "").trim();
+  const qText = (q.question || q.question_text || "").trim();
+  const fullQ = `${passage} ${qText}`.trim();
+
+  const normalizeText = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+  const normPassage = normalizeText(passage);
+  const normQ = normalizeText(qText);
+  const normFull = `${normPassage} ${normQ}`.trim();
+
+  const stopWords = new Set([
+    'the', 'and', 'for', 'are', 'is', 'in', 'of', 'to', 'from', 'with', 'that', 'this',
+    'below', 'given', 'study', 'following', 'carefully', 'answer', 'questions', 'beside',
+    'each', 'which', 'what', 'find', 'calculate', 'then', 'when', 'will', 'have', 'has', 'were', 'was'
+  ]);
+
+  const promoRegex = /(?:1\s*lakh\+|aspirants|achievers|download app|join us|testzone|smartkeeda|toppers|subscribe now|install app|coupon|discount|50%\s*off|test series|selected aspirants)/i;
+
+  let bestPage = null;
+  let highestScore = 0;
+
+  for (const page of pageImages) {
+    const pageText = page.text || "";
+    const normPage = normalizeText(pageText);
+
+    // Skip advertisement cover pages
+    if (page.isPromo || (promoRegex.test(pageText) && !normPage.includes("expenditure") && !normPage.includes("question") && !normPage.includes("options"))) {
+      continue;
+    }
+
+    let score = 0;
+
+    // Check sliding window substring matches of the passage
+    if (normPassage.length >= 25) {
+      for (let offset = 0; offset <= Math.min(normPassage.length - 25, 120); offset += 20) {
+        const windowSlice = normPassage.slice(offset, offset + 35);
+        if (normPage.includes(windowSlice)) {
+          score += 500;
+          break;
+        }
+      }
+    }
+
+    // Token overlap of meaningful domain words
+    const words = normFull.split(" ").filter(w => w.length >= 4 && !stopWords.has(w));
+    if (words.length > 0) {
+      let matched = 0;
+      for (const w of words) {
+        if (normPage.includes(w)) matched++;
+      }
+      score += (matched / words.length) * 100;
+    }
+
+    // Bonus for explicit chart indicators on page
+    if (/(?:pie[\s-]?chart|bar[\s-]?graph|bar[\s-]?chart|line[\s-]?graph|tabular|table)/i.test(pageText)) {
+      score += 25;
+    }
+
+    if (score > highestScore) {
+      highestScore = score;
+      bestPage = page;
+    }
+  }
+
+  if (highestScore >= 35) {
+    return bestPage;
+  }
+
+  return null;
+}
+
 export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "60 min", title, onProgress, signal, pageImages = [] }) {
   if (!pdfText || pdfText.trim().length < 50) {
     throw new Error("PDF text content is too short or empty. Please upload a valid question paper PDF.");
@@ -1526,30 +1662,45 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   let enrichedText = pdfText;
 
   if (pageImages.length > 0 && geminiKey) {
-    console.log(`[AI Vision] 🖼️ Enriching ${pageImages.length} page image(s) with Gemini Vision...`);
-    if (onProgress) onProgress(0, pageImages.length + 1);
-    const visionResults = [];
-    for (let i = 0; i < pageImages.length; i++) {
-      if (signal?.aborted) throw new Error("Extraction cancelled by user.");
-      try {
-        console.log(`[AI Vision] Scanning page ${i + 1} for charts/tables/graphs...`);
-        const visionText = await callGeminiVisionPage(geminiKey, pageImages[i].base64, pageImages[i].mimeType || "image/png");
-        if (visionText && visionText.length > 50) {
-          visionResults.push(`\n\n=== [Page ${i + 1} Vision Extract] ===\n${visionText}`);
-          console.log(`[AI Vision] ✅ Page ${i + 1}: Extracted ${visionText.length} chars (charts/tables detected)`);
-        }
-      } catch (err) {
-        console.warn(`[AI Vision] Page ${i + 1} vision failed:`, err.message);
+    // Selectively enrich only DI chart / table pages (max 4) rather than bombarding all 19 pages
+    const diPages = pageImages.filter(p => !p.isPromo && (p.hasDI || /(?:directions?|chart|graph|table|breakup|ratio|sold by|percentage)/i.test(p.text || ""))).slice(0, 4);
+    if (diPages.length > 0) {
+      console.log(`[AI Vision] 🖼️ Enriching ${diPages.length} DI chart page(s) with Gemini Vision...`);
+      if (onProgress) onProgress(0, diPages.length);
+      const visionResults = [];
+      const BATCH_SIZE = 2;
+      for (let i = 0; i < diPages.length; i += BATCH_SIZE) {
+        if (signal?.aborted) throw new Error("Extraction cancelled by user.");
+        const batch = diPages.slice(i, i + BATCH_SIZE);
+        const batchPromises = batch.map(async (pageImg, bIdx) => {
+          const pageNum = pageImg.pageNum || (i + bIdx + 1);
+          try {
+            console.log(`[AI Vision] Scanning page ${pageNum} for charts/tables/graphs...`);
+            const visionText = await callGeminiVisionPage(geminiKey, pageImg.base64, pageImg.mimeType || "image/jpeg");
+            if (visionText && visionText.length > 50) {
+              console.log(`[AI Vision] ✅ Page ${pageNum}: Extracted ${visionText.length} chars (charts/tables detected)`);
+              return `\n\n=== [Page ${pageNum} Vision Extract] ===\n${visionText}`;
+            }
+          } catch (err) {
+            console.warn(`[AI Vision] Page ${pageNum} vision skipped:`, err.message);
+          }
+          return null;
+        });
+        const batchResults = await Promise.all(batchPromises);
+        batchResults.filter(Boolean).forEach(res => visionResults.push(res));
+        if (onProgress) onProgress(Math.min(i + BATCH_SIZE, diPages.length), diPages.length);
       }
-      if (onProgress) onProgress(i + 1, pageImages.length + 1);
-    }
-    if (visionResults.length > 0) {
-      enrichedText = pdfText + "\n\n" + visionResults.join("\n");
-      console.log(`[AI Vision] 📊 Enriched text: ${enrichedText.length} chars (added ${enrichedText.length - pdfText.length} chars of chart/table data)`);
+      if (visionResults.length > 0) {
+        enrichedText = pdfText + "\n\n" + visionResults.join("\n");
+        console.log(`[AI Vision] 📊 Enriched text: ${enrichedText.length} chars (added ${enrichedText.length - pdfText.length} chars of chart/table data)`);
+      }
     }
   }
 
-  const chunks = chunkText(enrichedText, 5000);
+  // Adaptive chunk size: Gemini 3.6 Flash handles large context with thinkingBudget: 0 in < 3s!
+  // Use 22,000 characters so typical 5-15 page exam papers process in a SINGLE lightning-fast call.
+  const chunkSize = geminiKey ? 22000 : 8000;
+  const chunks = chunkText(enrichedText, chunkSize);
   let allQuestions = [];
   let completedChunks = 0;
 
@@ -1572,13 +1723,13 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
   // Create an array of available provider callers
   const providerCallers = [];
-  if (groqKey)   providerCallers.push({ name: "Groq",   call: (prompt) => callGroq(groqKey, prompt) });
   if (geminiKey) providerCallers.push({ name: "Gemini", call: (prompt) => callGemini(geminiKey, prompt) });
+  if (groqKey)   providerCallers.push({ name: "Groq",   call: (prompt) => callGroq(groqKey, prompt) });
   if (nvidiaKey) providerCallers.push({ name: "NVIDIA", call: (prompt) => callNvidia(nvidiaKey, prompt) });
 
   // How many parallel workers = min(number of providers, 3)
   const CONCURRENCY = Math.min(providerCallers.length, 3) || 1;
-  console.log(`[AI] 🚀 Parallel extraction with ${CONCURRENCY} workers (${providerCallers.map(p => p.name).join(" + ")})`);
+  console.log(`[AI] 🚀 Fast extraction active with ${CONCURRENCY} worker(s) (${providerCallers.map(p => p.name).join(" + ") || "Fallback Chain"})`);
 
   // Each worker gets a preferred provider, with the full chain as fallback
   async function callWithPreferredProvider(prompt, workerIndex) {
@@ -1587,7 +1738,6 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
       return await preferred.call(prompt);
     } catch (err) {
       console.warn(`[AI] Worker ${workerIndex} preferred (${preferred.name}) failed: ${err.message}. Trying fallback chain...`);
-      // Try other providers as fallback
       for (const provider of providerCallers) {
         if (provider.name === preferred.name) continue;
         try {
@@ -1604,14 +1754,24 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
   async function processChunk(chunk, index, workerIndex) {
     if (signal?.aborted) throw new Error("Extraction cancelled by user.");
+
+    // Fast-skip non-question chunks (promo, instruction pages, copyright notices) in 0ms
+    const hasQMarkers = /(?:[1-9]\d*[\.\)]|\b(?:Q|Question)[\s\.]*\d+|[A-Ea-e][\.\)]\s*\w+)/i.test(chunk);
+    if (!hasQMarkers && chunk.length < 2500) {
+      console.log(`[AI] ⚡ Chunk ${index + 1}: Skipping non-question segment instantly (0ms)`);
+      completedChunks++;
+      if (onProgress) onProgress(completedChunks, chunks.length);
+      return;
+    }
+
     let chunkQuestions = [];
-    const limits = [20, 15, 10];
+    const limits = chunkSize >= 15000 ? [35, 15] : [12, 8];
     let currentLimitIndex = 0;
 
     while (currentLimitIndex < limits.length) {
       const limit = limits[currentLimitIndex];
       try {
-        console.log(`[AI] Chunk ${index + 1}: Requesting ${limit} questions (Worker ${workerIndex})...`);
+        console.log(`[AI] Chunk ${index + 1}: Requesting up to ${limit} questions (Worker ${workerIndex})...`);
         const prompt = buildExtractionPrompt(chunk, limit);
         let response = await callWithPreferredProvider(prompt, workerIndex);
         
@@ -1634,7 +1794,9 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
           chunkQuestions = parsedQuestions;
           break;
         } else {
-          console.log(`[AI] Chunk ${index + 1}: No valid questions parsed. Reducing limit...`);
+          // LLM legitimately parsed the segment and found 0 questions; do not waste time retrying
+          console.log(`[AI] Chunk ${index + 1}: Model parsed clean output with 0 questions in this segment.`);
+          break;
         }
       } catch (err) {
         if (err.message.includes("max_tokens reached") || err.message.includes("json_validate_failed") || err.message.includes("Failed to validate JSON")) {
@@ -1653,7 +1815,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     if (chunkQuestions.length > 0) {
       allQuestions.push(...chunkQuestions);
     } else {
-       console.error(`[AI] Chunk ${index + 1} permanently failed.`);
+      console.log(`[AI] Chunk ${index + 1} produced 0 questions.`);
     }
 
     completedChunks++;
@@ -1662,7 +1824,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
   let extractionError = null;
 
-  // Parallel worker pool — each worker uses a different preferred LLM provider
+  // Parallel worker pool
   let currentIndex = 0;
   async function worker(workerIndex) {
     while (currentIndex < chunks.length) {
@@ -1678,17 +1840,9 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         extractionError = err;
         break;
       }
-      // Short 3-second gap between chunks (down from 22s since we have multi-provider)
+      // Minimal yield to let UI re-render smoothly without artificial delay
       if (currentIndex < chunks.length && !extractionError) {
-        let waitTime = 0;
-        while (waitTime < 3000) {
-          if (signal?.aborted) {
-            extractionError = new Error("Extraction cancelled by user.");
-            break;
-          }
-          await new Promise(r => setTimeout(r, 1000));
-          waitTime += 1000;
-        }
+        await new Promise(r => setTimeout(r, 100));
       }
     }
   }
@@ -1706,9 +1860,20 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   for (const q of allQuestions) {
     const qText = q.question || q.question_text || "";
     const cleanQ = qText.trim().toLowerCase();
-    if (cleanQ && !seen.has(cleanQ)) {
-      seen.add(cleanQ);
+    const optSignature = Array.isArray(q.options) ? q.options.slice(0, 3).join("|").toLowerCase() : "";
+    const dedupeKey = `${cleanQ}:::${optSignature}`;
+    if (cleanQ && !seen.has(dedupeKey)) {
+      seen.add(dedupeKey);
       
+      // Automatically detect and attach chart / table images for Quantitative Aptitude DI questions ONLY
+      let attachedChartImg = "";
+      if (isDIQuestion(q)) {
+        const matchedPage = findBestMatchingChartPage(q, pageImages);
+        if (matchedPage) {
+          attachedChartImg = "data:" + (matchedPage.mimeType || "image/jpeg") + ";base64," + matchedPage.base64;
+        }
+      }
+
       uniqueQuestions.push({
         id: q.id || `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
         question: qText,
@@ -1719,10 +1884,9 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         passage: q.passage || "",
         section: category || "General",
         explanation: q.explanation || "",
-        imageUrl: "",
-        chartImageUrl: q.chart_page_number && pageImages && pageImages[q.chart_page_number - 1] 
-            ? "data:" + (pageImages[q.chart_page_number - 1].mimeType || "image/png") + ";base64," + pageImages[q.chart_page_number - 1].base64 
-            : ""
+        imageUrl: attachedChartImg || "",
+        chartImageUrl: attachedChartImg || "",
+        chartImageUrls: attachedChartImg ? [attachedChartImg] : []
       });
     }
   }

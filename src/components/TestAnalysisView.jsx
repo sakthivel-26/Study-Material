@@ -8,6 +8,8 @@ import {
 } from "lucide-react";
 import { useApp } from "../store.jsx";
 import { useAuth } from "../auth.jsx";
+import BeginnerSolutionView from "./BeginnerSolutionView.jsx";
+import FormattedPassage from "./FormattedPassage.jsx";
 
 export default function TestAnalysisView({ attempt, onRetake, onClose, initialTab = "overview" }) {
   const { pushToast } = useApp();
@@ -738,11 +740,11 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
 
                     {/* Passage Context (if any) */}
                     {activeSolutionQ?.passage && (
-                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 font-serif leading-relaxed whitespace-pre-line">
+                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 font-serif leading-relaxed">
                         <p className="font-bold font-sans text-slate-800 mb-1 flex items-center gap-1.5">
                           <BookOpen size={14} className="text-[#1B4F72]" /> Directions &amp; Context:
                         </p>
-                        {activeSolutionQ.passage}
+                        <FormattedPassage passage={activeSolutionQ.passage} />
                       </div>
                     )}
 
@@ -795,14 +797,13 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
                       })}
                     </div>
 
-                    {/* Detailed Explanation Box */}
-                    <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-200 space-y-1.5 mt-4">
-                      <p className="font-bold text-xs text-[#1B4F72] flex items-center gap-1.5">
-                        <BookOpen size={14} /> Solution &amp; Step-by-Step Explanation:
-                      </p>
-                      <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-line">
-                        {activeSolutionQ?.explanation || "The correct answer has been verified by Ken IAS Academy subject experts."}
-                      </p>
+                    {/* Detailed Beginner Step-by-Step Explanation Box */}
+                    <div className="mt-4">
+                      <BeginnerSolutionView
+                        explanation={activeSolutionQ?.explanation || "The correct answer has been verified by Ken IAS Academy subject experts."}
+                        correctAnswerIndex={activeSolutionQ?.correctAnswerIndex}
+                        options={activeSolutionQ?.options}
+                      />
                     </div>
 
                     {/* Bottom Nav */}

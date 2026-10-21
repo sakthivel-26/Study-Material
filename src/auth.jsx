@@ -98,6 +98,15 @@ export const getRegisteredStudents = () => {
 export const setStudentAccess = (id, access) => {
   const users = loadUsers().map((u) => u.id === id ? { ...u, access } : u);
   persistUsers(users);
+  try {
+    const curSession = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (curSession && curSession.id === id) {
+      const isPaid = access !== "payment_required";
+      const updatedSession = { ...curSession, access, paid: isPaid, premium: isPaid, hasFullAccess: access === "academy" };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSession));
+      window.dispatchEvent(new Event("storage"));
+    }
+  } catch (e) {}
   return getRegisteredStudents();
 };
 

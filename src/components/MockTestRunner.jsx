@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Clock, HelpCircle, CheckCircle2, XCircle, AlertCircle, Bookmark, Award, RotateCcw, ChevronLeft, ChevronRight, Send, X, Eye, Menu, ChevronDown, ChevronUp } from "lucide-react";
 import { useApp } from "../store.jsx";
+import BeginnerSolutionView from "./BeginnerSolutionView.jsx";
 import { Logo } from "./ui.jsx";
 import TestAnalysisView from "./TestAnalysisView.jsx";
 
@@ -692,12 +693,15 @@ export default function MockTestRunner({ test, onClose }) {
                       </button>
                       
                       {showSolutionAccordion && (
-                        <div className="mt-4 p-4 rounded-xl bg-amber-50/50 dark:bg-slate-900/90 border border-amber-200/50 dark:border-slate-800 text-xs text-ink-soft dark:text-slate-300 space-y-3">
-                          <div className="leading-relaxed text-ink-soft dark:text-slate-200 whitespace-pre-line">
-                            {renderFormattedText(currentQ.explanation) || `Correct Option is (${String.fromCharCode(65 + (currentQ.correctAnswerIndex || 0))})`}
-                          </div>
+                        <div className="mt-4 space-y-3">
+                          <BeginnerSolutionView
+                            explanation={currentQ.explanation || `Correct Option is (${String.fromCharCode(65 + (currentQ.correctAnswerIndex || 0))})`}
+                            correctAnswerIndex={currentQ.correctAnswerIndex}
+                            options={currentQ.options}
+                            compact={true}
+                          />
                           {currentQ.solutionImageUrl && (
-                            <div className="mt-4 border border-black/10 dark:border-slate-700/80 p-2 rounded-lg bg-white dark:bg-slate-950">
+                            <div className="mt-3 border border-black/10 dark:border-slate-700/80 p-2 rounded-lg bg-white dark:bg-slate-950">
                                <img src={currentQ.solutionImageUrl} alt="Solution" className="max-w-full rounded-md" />
                             </div>
                           )}
