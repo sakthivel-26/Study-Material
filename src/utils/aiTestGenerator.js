@@ -1310,11 +1310,11 @@ FORMAT:
 {
   "questions": [
     {
-      "passage": "If the question is part of a Reading Comprehension, Puzzle, Seating Arrangement, Data Interpretation (DI), or any group of questions sharing a common paragraph/directions, you MUST copy the ENTIRE shared paragraph verbatim here. Do NOT leave this empty for such questions. For standalone questions, leave as empty string.",
+      "passage": "If the question is part of a Reading Comprehension, Caselet DI, Puzzle, Seating Arrangement, or group of questions sharing a common paragraph/directions, you MUST copy the ENTIRE shared paragraph verbatim here. IMPORTANT FOR CASELET / PARAGRAPH DI: Copy ONLY the original text paragraph verbatim into 'passage'. DO NOT generate or solve a table into 'passage'! The student must read and solve the paragraph themselves during the exam. Put the complete solved table in 'explanation'!",
       "question": "Only the specific question being asked (e.g. 'Who sits immediate left of E?'). Do NOT put the puzzle/passage text here.",
       "options": ["option text A", "option text B", "option text C", "option text D"],
       "correctAnswerIndex": 0,
-      "explanation": "Provide beginner-friendly step-by-step explanation. For PUZZLE/SEATING ARRANGEMENTS: You MUST include the final solved arrangement as a Markdown table (e.g. | Person | Department | Sport |) followed by Step 1, Step 2 logical deductions.",
+      "explanation": "Provide beginner-friendly step-by-step explanation. For PUZZLE/SEATING ARRANGEMENTS & CASELET DI: You MUST include the final solved arrangement/data table as a Markdown table (e.g. | Person | Department | Sport | or | Category | Boys | Girls | Total |) followed by Step 1, Step 2 logical deductions.",
       "chart_page_number": null
     }
   ]
@@ -1338,13 +1338,21 @@ Step 1: Movement & Coordinate Mapping: ...
 Step 2: Distance & Direction Calculations (apply Pythagoras theorem if required): ...
 Step 3: Final Answer & Conclusion: ...
 
-!!! DATA INTERPRETATION (DI), CHARTS, & TABLES RULE (MANDATORY) !!!
-1. ANY question that belongs to a set (Puzzle, Seating Arrangement, Reading Comprehension, Data Interpretation DI):
-   - You MUST copy the entire problem description, directions, and shared context into the "passage" field for EVERY question in that set.
-   - For TABULAR DATA: You MUST format the table as a clean Markdown table with column headers and rows:
-     | Header 1 | Header 2 | Header 3 |
-     | Value 1  | Value 2  | Value 3  |
-   - For PIE CHARTS, BAR CHARTS, LINE GRAPHS: If numerical values or percentages are mentioned in the directions or in "=== [Page X Vision Extract] ===", list the full breakdown in the "passage" field.
+!!! DATA INTERPRETATION (DI), CASELET, CHARTS, & TABLES RULE (CRITICAL & STRICT) !!!
+1. CASELET / PARAGRAPH-BASED DI (STRICT MANDATE):
+   - When a DI question is presented as a text paragraph or story (e.g. "Read the following information: In a college of 1200 students... 40% are boys..."):
+   - IN THE "passage" FIELD: You MUST extract ONLY the original paragraph / text directions VERBATIM as given in the paper.
+     DO NOT SOLVE the paragraph into a table inside the "passage" field!
+     NEVER put a solved table, answer breakdown, or deduced matrix inside "passage"!
+     The student must read the raw paragraph and solve it themselves during the mock test.
+   - IN THE "explanation" FIELD (SOLUTION SECTION): THAT is where you MUST generate the complete FINAL SOLVED DATA TABLE / MATRIX (| Category | Boys | Girls | Total |) followed by step-by-step calculations and working!
+   - REMEMBER: For Caselet DI, the table belongs in "explanation" ONLY, NOT in "passage"!
+
+2. PRINTED RAW TABLES (SOURCE TABULAR DI):
+   - ONLY if the original source exam question paper itself had an explicit raw data table printed directly as the question (and not a story paragraph to be solved):
+     reproduce that raw question table in the "passage" field.
+
+3. PIE CHARTS, BAR CHARTS, LINE GRAPHS:
    - Set "chart_page_number" to the integer page number (e.g. 1, 2, 3) where the chart/table appears in the PDF.
    - Do NOT omit table/chart data! Without it, students cannot answer the questions.
 
@@ -1556,6 +1564,80 @@ function regexExtractQuestions(pdfText, category) {
     }
   }
   return uniqueQuestions;
+}
+
+/**
+ * Ensures that for Caselet / Paragraph-based DI questions, the original text
+ * story / paragraph remains in `passage` for students to solve, while any
+ * generated solved table/matrix is moved to `explanation` (Solution section).
+ */
+export function sanitizeDIPassageAndExplanation(passage, explanation, question = "") {
+  if (!passage || typeof passage !== "string") {
+    return { 
+      passage: passage || "", 
+      cleanPassage: passage || "", 
+      explanation: explanation || "", 
+      cleanExplanation: explanation || "" 
+    };
+  }
+
+  const lines = passage.split(/\r?\n/);
+  const tableLines = [];
+  const textLines = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.includes("|", 1)) {
+      tableLines.push(trimmed);
+    } else {
+      textLines.push(line);
+    }
+  }
+
+  // If there's no table in passage, return as is
+  if (tableLines.length === 0) {
+    const trimmedPassage = passage.trim();
+    return { 
+      passage: trimmedPassage, 
+      cleanPassage: trimmedPassage, 
+      explanation: explanation || "", 
+      cleanExplanation: explanation || "" 
+    };
+  }
+
+  const tableMarkdown = tableLines.join("\n");
+  const pureParagraph = textLines
+    .join("\n")
+    .replace(/###\s*(?:Table|Data|Solved|Arrangement|Matrix)[^\n]*/gi, "")
+    .trim();
+
+  // If there is any non-table text alongside the table (e.g. story, caselet, directions, sentences),
+  // the paragraph belongs to the question passage so the student can solve it,
+  // while the solved table/matrix belongs strictly in the solution explanation!
+  if (pureParagraph.length >= 20) {
+    const cleanPassage = pureParagraph;
+
+    // Move the solved table into the explanation (solution section)
+    let cleanExplanation = (explanation || "").trim();
+    if (!cleanExplanation.includes(tableLines[0])) {
+      cleanExplanation = `### Solved Data Matrix / Table\n${tableMarkdown}\n\n${cleanExplanation}`.trim();
+    }
+
+    return {
+      passage: cleanPassage,
+      cleanPassage,
+      explanation: cleanExplanation,
+      cleanExplanation
+    };
+  }
+
+  const trimmedPassage = passage.trim();
+  return { 
+    passage: trimmedPassage, 
+    cleanPassage: trimmedPassage, 
+    explanation: explanation || "", 
+    cleanExplanation: explanation || "" 
+  };
 }
 
 export function isDIQuestion(q) {
@@ -1883,6 +1965,9 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         }
       }
 
+      // Ensure paragraph-based DI has only the raw text paragraph in passage, and solved table in explanation
+      const sanitized = sanitizeDIPassageAndExplanation(q.passage, q.explanation, qText);
+
       uniqueQuestions.push({
         id: q.id || `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
         question: qText,
@@ -1890,9 +1975,9 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         options: q.options,
         correctAnswerIndex: q.correctAnswerIndex,
         source_answer: String.fromCharCode(65 + q.correctAnswerIndex),
-        passage: q.passage || "",
+        passage: sanitized.passage || "",
         section: category || "General",
-        explanation: q.explanation || "",
+        explanation: sanitized.explanation || "",
         imageUrl: attachedChartImg || "",
         chartImageUrl: attachedChartImg || "",
         chartImageUrls: attachedChartImg ? [attachedChartImg] : []

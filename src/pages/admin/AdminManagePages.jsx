@@ -11,7 +11,7 @@ import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
 import { CATEGORIES, COURSE_PROGRESS } from "../../data.js";
 import { Badge, ProgressBar } from "../../components/ui.jsx";
-import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findBestMatchingChartPage, isDIQuestion } from "../../utils/aiTestGenerator.js";
+import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findBestMatchingChartPage, isDIQuestion, sanitizeDIPassageAndExplanation } from "../../utils/aiTestGenerator.js";
 import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
 import { formatStudentJoinDate } from "../../utils/studentDate.js";
@@ -412,11 +412,19 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     if (!editingTest) return;
     setIsSavingEdit(true);
     try {
+      const sanitizedQuestions = (editingTest.questionsList || []).map(q => {
+        const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(q.passage || "", q.explanation || "", q);
+        return {
+          ...q,
+          passage: cleanPassage,
+          explanation: cleanExplanation
+        };
+      });
       const finalObject = {
         ...editingTest,
         title: editingTest.title.trim() || "Untitled Mock Test",
-        questionsList: editingTest.questionsList,
-        questions: editingTest.questionsList.length
+        questionsList: sanitizedQuestions,
+        questions: sanitizedQuestions.length
       };
       await updateMockTest(editingTest.id, finalObject);
       setEditingTest(null);
@@ -676,16 +684,20 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         optsArray = ["Option A", "Option B", "Option C", "Option D"];
       }
 
+      const rawPassage = approvalStatus?.passage ?? (q.passage || "");
+      const rawExplanation = approvalStatus?.solutionText ?? (q.solutionText || q.explanation || q.verification_explanation || "Verified by teacher.");
+      const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(rawPassage, rawExplanation, q);
+
       finalQuestions.push({
         id: `pdf_q_${Date.now()}_${idx}`,
         section: approvalStatus?.section || q.section || f.subject || "General",
-        passage: approvalStatus?.passage ?? (q.passage || ""),
+        passage: cleanPassage,
         imageUrl: approvalStatus?.chartImageUrl ?? approvalStatus?.imageUrl ?? (q.chartImageUrl || q.imageUrl || ""),
         solutionImageUrl: approvalStatus?.solutionImageUrl ?? (q.solutionImageUrl || ""),
         question: approvalStatus?.questionText ?? (q.question_text || q.question || `Question ${idx + 1}`),
         options: optsArray,
         correctAnswerIndex: ansIndex < optsArray.length ? ansIndex : 0,
-        explanation: approvalStatus?.solutionText ?? (q.solutionText || q.explanation || q.verification_explanation || "Verified by teacher.")
+        explanation: cleanExplanation
       });
     });
 
@@ -794,17 +806,20 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
       if (mode === "manual" || !testToPublish) {
         // Validate manual questions
-        const validQuestions = manualQuestions.map((q, i) => ({
-          id: `q_manual_${Date.now()}_${i + 1}`,
-          section: q.section || "General",
-          question: q.question.trim() || `Question ${i + 1}`,
-          options: q.options.map((o, oi) => o.trim() || `Option ${String.fromCharCode(65 + oi)}`),
-          correctAnswerIndex: +q.correctAnswerIndex || 0,
-          explanation: q.explanation.trim() || "No explanation provided.",
-          ...(q.imageUrl && { imageUrl: q.imageUrl }),
-          ...(q.solutionImageUrl && { solutionImageUrl: q.solutionImageUrl }),
-          ...(q.passage && { passage: q.passage })
-        })).filter((q, idx) => q.question !== `Question ${idx + 1}`);
+        const validQuestions = manualQuestions.map((q, i) => {
+          const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(q.passage || "", q.explanation || "", q);
+          return {
+            id: `q_manual_${Date.now()}_${i + 1}`,
+            section: q.section || "General",
+            question: q.question.trim() || `Question ${i + 1}`,
+            options: q.options.map((o, oi) => o.trim() || `Option ${String.fromCharCode(65 + oi)}`),
+            correctAnswerIndex: +q.correctAnswerIndex || 0,
+            explanation: cleanExplanation || "No explanation provided.",
+            ...(q.imageUrl && { imageUrl: q.imageUrl }),
+            ...(q.solutionImageUrl && { solutionImageUrl: q.solutionImageUrl }),
+            ...(cleanPassage && { passage: cleanPassage })
+          };
+        }).filter((q, idx) => q.question !== `Question ${idx + 1}`);
 
         if (validQuestions.length === 0) {
           setIsPublishing(false);
@@ -1313,14 +1328,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             }
           }
 
+          const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(q.passage || "", q.explanation || "Verification pending.", q);
+
           finalQuestions.push({
             id: `pdf_q_${Date.now()}_${idx}`,
             section: q.subject || "General",
-            passage: q.passage || "",
+            passage: cleanPassage,
             question: q.question_text || `Question ${idx + 1}`,
             options: optionsArray,
             correctAnswerIndex: ansIndex < optionsArray.length ? ansIndex : 0,
-            explanation: q.explanation || "Verification pending.",
+            explanation: cleanExplanation,
             imageUrl: chartImg,
             chartImageUrl: chartImg,
           });
@@ -2474,19 +2491,37 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       <div>
                         <div className="flex items-center justify-between mb-1">
                           <label className="text-[11px] font-bold text-ink-muted">
-                            Paragraph / Passage Directions Context (DI Table, RC):
+                            Paragraph / Passage Directions Context (DI Caselet, RC):
                           </label>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const tableTemplate = `Directions: Study the following table carefully and answer the questions:\n\n| Year | Company A | Company B | Company C |\n| --- | --- | --- | --- |\n| 2021 | 420 | 380 | 510 |\n| 2022 | 480 | 410 | 560 |\n| 2023 | 550 | 460 | 620 |\n`;
-                              const cur = approvedQuestions[idx]?.passage ?? (q.passage || "");
-                              editPassage(idx, cur ? (cur.trim() + "\n\n" + tableTemplate) : tableTemplate);
-                            }}
-                            className="text-[10px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-lg flex items-center gap-1 transition-colors"
-                          >
-                            📊 + Insert DI Table
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            {/\|.*\|/.test(approvedQuestions[idx]?.passage ?? (q.passage || "")) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const curPassage = approvedQuestions[idx]?.passage ?? (q.passage || "");
+                                  const curExplanation = approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "");
+                                  const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(curPassage, curExplanation, q);
+                                  editPassage(idx, cleanPassage);
+                                  editSolutionText(idx, cleanExplanation);
+                                  pushToast("Cleaned passage: Solved table moved to Solution!");
+                                }}
+                                className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-lg flex items-center gap-1 transition-colors"
+                              >
+                                ⚡ Move Solved Table to Solution
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const tableTemplate = `Directions: Study the following table carefully and answer the questions:\n\n| Year | Company A | Company B | Company C |\n| --- | --- | --- | --- |\n| 2021 | 420 | 380 | 510 |\n| 2022 | 480 | 410 | 560 |\n| 2023 | 550 | 460 | 620 |\n`;
+                                const cur = approvedQuestions[idx]?.passage ?? (q.passage || "");
+                                editPassage(idx, cur ? (cur.trim() + "\n\n" + tableTemplate) : tableTemplate);
+                              }}
+                              className="text-[10px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-lg flex items-center gap-1 transition-colors"
+                            >
+                              📊 + Insert DI Table
+                            </button>
+                          </div>
                         </div>
                         <textarea
                           className="input text-xs min-h-[60px] font-mono bg-white border border-black/10 mb-2"
@@ -2906,21 +2941,39 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                     {/* Paragraph Context */}
                     <div>
-                      <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center justify-between mb-1.5">
                         <label className="text-xs font-bold text-ink-muted">
-                          Paragraph / Passage Directions Context (DI Table, RC):
+                          Paragraph / Passage Directions Context (DI Caselet, RC):
                         </label>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const tableTemplate = `Directions: Study the following table carefully and answer the questions:\n\n| Year | Company A | Company B | Company C |\n| --- | --- | --- | --- |\n| 2021 | 420 | 380 | 510 |\n| 2022 | 480 | 410 | 560 |\n| 2023 | 550 | 460 | 620 |\n`;
-                            const cur = approvedQuestions[idx]?.passage ?? (q.passage || "");
-                            editPassage(idx, cur ? (cur.trim() + "\n\n" + tableTemplate) : tableTemplate);
-                          }}
-                          className="text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-0.5 rounded-lg flex items-center gap-1 transition-colors shadow-xs"
-                        >
-                          📊 + Insert DI Table Template
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {/\|.*\|/.test(approvedQuestions[idx]?.passage ?? (q.passage || "")) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const curPassage = approvedQuestions[idx]?.passage ?? (q.passage || "");
+                                const curExplanation = approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "");
+                                const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(curPassage, curExplanation, q);
+                                editPassage(idx, cleanPassage);
+                                editSolutionText(idx, cleanExplanation);
+                                pushToast("Cleaned passage: Solved table moved to Solution!");
+                              }}
+                              className="text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-0.5 rounded-lg flex items-center gap-1 transition-colors shadow-xs"
+                            >
+                              ⚡ Move Solved Table to Solution
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const tableTemplate = `Directions: Study the following table carefully and answer the questions:\n\n| Year | Company A | Company B | Company C |\n| --- | --- | --- | --- |\n| 2021 | 420 | 380 | 510 |\n| 2022 | 480 | 410 | 560 |\n| 2023 | 550 | 460 | 620 |\n`;
+                              const cur = approvedQuestions[idx]?.passage ?? (q.passage || "");
+                              editPassage(idx, cur ? (cur.trim() + "\n\n" + tableTemplate) : tableTemplate);
+                            }}
+                            className="text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-0.5 rounded-lg flex items-center gap-1 transition-colors shadow-xs"
+                          >
+                            📊 + Insert DI Table Template
+                          </button>
+                        </div>
                       </div>
                       <textarea
                         className="input text-xs min-h-[70px] font-mono bg-white border border-black/10 p-2.5 mb-3"
@@ -3794,7 +3847,23 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                       {/* Paragraph Context (Optional) */}
                       <div>
-                        <label className="text-[11px] font-bold text-ink-muted mb-1 block">Paragraph / Passage Directions Context (Optional):</label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[11px] font-bold text-ink-muted block">Paragraph / Passage Directions Context (DI Caselet, RC):</label>
+                          {/\|.*\|/.test(q.passage || "") && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(q.passage || "", q.explanation || "", q);
+                                updateEditingQuestion(qIdx, "passage", cleanPassage);
+                                updateEditingQuestion(qIdx, "explanation", cleanExplanation);
+                                pushToast("Cleaned passage: Solved table moved to Solution!");
+                              }}
+                              className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                            >
+                              ⚡ Move Table to Solution (Keep Paragraph Only)
+                            </button>
+                          )}
+                        </div>
                         <textarea
                           className="input text-xs bg-white min-h-[50px]"
                           placeholder="Read the following passage and answer the questions..."

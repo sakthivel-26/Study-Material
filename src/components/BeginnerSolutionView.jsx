@@ -31,11 +31,11 @@ export function parseExplanationSteps(rawText) {
 
   const steps = [];
 
-  // If a puzzle matrix / table was found, make it Step 1
+  // If a puzzle matrix / DI table was found, make it Step 1
   if (tableBlock) {
     steps.push({
       stepNum: 1,
-      title: "Step 1: Solved Arrangement / Matrix",
+      title: "Step 1: Solved Data Table / Matrix",
       content: tableBlock,
       isTable: true,
     });
