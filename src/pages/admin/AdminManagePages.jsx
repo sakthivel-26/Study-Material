@@ -15,6 +15,8 @@ import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest,
 import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
 import { formatStudentJoinDate } from "../../utils/studentDate.js";
+import { sortTestsByRecent } from "../../utils/testSorting.js";
+import DirectionDiagramView from "../../components/DirectionDiagramView.jsx";
 
 /* ---------------------------- Create Mock Test ---------------------------- */
 import CategoryGrid from "../../components/CategoryGrid.jsx";
@@ -3553,8 +3555,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           {mockTests.filter(t => !!t.isFree === isFreeByDefault).length === 0 ? (
             <p className="text-sm text-ink-muted text-center py-4">No tests found.</p>
           ) : (
-            mockTests
-              .filter(t => !!t.isFree === isFreeByDefault)
+            sortTestsByRecent(mockTests.filter(t => !!t.isFree === isFreeByDefault))
               .map((test) => (
                 <div key={test.id} className="flex items-center justify-between p-4 rounded-xl border border-black/5 bg-black/[0.02]">
                   <div>
@@ -3854,6 +3855,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           value={q.explanation || ""}
                           onChange={(e) => updateEditingQuestion(qIdx, "explanation", e.target.value)}
                         />
+
+                        {/* Direction Sense Visual Drawing Preview */}
+                        <DirectionDiagramView text={`${q.explanation || ""} ${q.question || ""} ${q.passage || ""}`} compact={true} />
                         
                         {/* Solution Image Upload */}
                         <div className="mt-4 flex items-center gap-2">

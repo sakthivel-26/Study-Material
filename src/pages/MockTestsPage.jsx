@@ -14,6 +14,7 @@ import { packageForEnrollment } from "../components/CourseCatalog.jsx";
 import { useAuth } from "../auth.jsx";
 import { useNavigate, useLocation } from "react-router-dom";
 import { fsUpdateUserPurchases, fsGetUserPurchases, useRealtimeBackend } from "../backend.js";
+import { sortTestsByRecent } from "../utils/testSorting.js";
 
 const claimedKey = "ken_academy_free_mock_claimed";
 const readClaimed = () => { try { return JSON.parse(localStorage.getItem(claimedKey) || "{}"); } catch { return {}; } };
@@ -94,7 +95,9 @@ export default function MockTestsPage() {
     }
   }, [isAuthed, user?.id]);
 
-  const packageTests = selected ? mockTests.filter(t => selected.groups.includes(testGroup(t)) && !t.isFree) : mockTests.filter(t => !t.isFree);
+  const packageTests = sortTestsByRecent(
+    selected ? mockTests.filter(t => selected.groups.includes(testGroup(t)) && !t.isFree) : mockTests.filter(t => !t.isFree)
+  );
   const visibleTests = exam ? packageTests.filter(t => t.category.toLowerCase().includes(exam.toLowerCase().split(" ")[0]) || t.title.toLowerCase().includes(exam.toLowerCase())) : packageTests;
   const firstForCategory = (test) => visibleTests.filter(t=>t.category===test.category).find(t=>t.id===test.id)?.id===test.id;
   const amount = selected ? planAmount(packageId, selected.amount) : "—";

@@ -10,11 +10,12 @@ import { MapPin, Phone, Mail } from "lucide-react";
 import MockTestRunner from "../components/MockTestRunner.jsx";
 import SpeedMathLevelModal from "../components/SpeedMathLevelModal.jsx";
 import { generateAIMockTest } from "../utils/aiTestGenerator.js";
+import { sortTestsByRecent } from "../utils/testSorting.js";
 
 function FeaturedFreeMocks() {
   const { mockTests } = useApp();
   const navigate = useNavigate();
-  const freeTests = mockTests.filter(t => t.isFree === true).slice(0, 3);
+  const freeTests = sortTestsByRecent(mockTests.filter(t => t.isFree === true)).slice(0, 3);
 
   if (freeTests.length === 0) return null;
 

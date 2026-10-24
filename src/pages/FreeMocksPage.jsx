@@ -11,6 +11,7 @@ import TestAnalysisView from "../components/TestAnalysisView.jsx";
 import { CATEGORIES } from "../data.js";
 import { useAuth } from "../auth.jsx";
 import { fsAddAdmission } from "../backend.js";
+import { sortTestsByRecent } from "../utils/testSorting.js";
 
 // Map groups to a nice label and filter condition
 const FREE_CATEGORIES = [
@@ -40,8 +41,8 @@ export default function FreeMocksPage() {
   const [leadError, setLeadError] = useState("");
   const [leadLoading, setLeadLoading] = useState(false);
 
-  // Filter for explicitly marked free mock tests
-  const freeTests = mockTests.filter(t => t.isFree === true);
+  // Filter for explicitly marked free mock tests (sorted with recent upload on top)
+  const freeTests = sortTestsByRecent(mockTests.filter(t => t.isFree === true));
   
   // Filter by active tab (Level 1: Exam Category)
   let visibleTests = freeTests.filter(t => {

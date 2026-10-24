@@ -1,6 +1,7 @@
 import React from "react";
 import { BookOpen, CheckCircle2, Lightbulb } from "lucide-react";
 import FormattedPassage from "./FormattedPassage.jsx";
+import DirectionDiagramView from "./DirectionDiagramView.jsx";
 
 export function parseExplanationSteps(rawText) {
   if (!rawText || typeof rawText !== "string") return [];
@@ -21,7 +22,12 @@ export function parseExplanationSteps(rawText) {
   }
 
   const tableBlock = tableLines.length > 0 ? tableLines.join("\n") : null;
-  const remainingText = nonTableLines.join("\n").replace(/###\s*(?:Solved\s*(?:Table|Matrix|Arrangement)|Reference\/Inference|Explanation)[^\n]*/gi, "").trim();
+  const remainingText = nonTableLines
+    .join("\n")
+    .replace(/###\s*(?:Solved\s*(?:Table|Matrix|Arrangement)|Reference\/Inference|Explanation)[^\n]*/gi, "")
+    .replace(/\[Direction Path:[^\]]+\]/gi, "")
+    .replace(/Direction Path:[^\n\r]+/gi, "")
+    .trim();
 
   const steps = [];
 
@@ -127,7 +133,9 @@ export default function BeginnerSolutionView({
   explanation,
   correctAnswerIndex,
   options = [],
-  compact = false
+  compact = false,
+  question = "",
+  passage = ""
 }) {
   const steps = parseExplanationSteps(explanation);
   const correctOptLetter = correctAnswerIndex != null && correctAnswerIndex >= 0
@@ -136,6 +144,9 @@ export default function BeginnerSolutionView({
   const correctOptText = correctOptLetter && options[correctAnswerIndex]
     ? options[correctAnswerIndex]
     : null;
+
+  // Combine explanation, question, and passage to detect and render direction diagrams
+  const fullDirectionSource = `${explanation || ""} ${question || ""} ${passage || ""}`;
 
   return (
     <div className={`rounded-2xl border border-blue-200/90 bg-gradient-to-b from-blue-50/80 to-indigo-50/50 p-4 sm:p-5 space-y-3.5 shadow-xs ${compact ? "text-xs" : "text-sm"}`}>
@@ -153,6 +164,9 @@ export default function BeginnerSolutionView({
           <Lightbulb size={11} className="text-amber-500" /> Beginner Friendly
         </span>
       </div>
+
+      {/* Visual Direction Drawing / Diagram for Direction Sense Questions */}
+      <DirectionDiagramView text={fullDirectionSource} compact={compact} />
 
       {/* Structured Steps for Beginners */}
       <div className="space-y-2.5">

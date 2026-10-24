@@ -803,6 +803,8 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
                         explanation={activeSolutionQ?.explanation || "The correct answer has been verified by Ken IAS Academy subject experts."}
                         correctAnswerIndex={activeSolutionQ?.correctAnswerIndex}
                         options={activeSolutionQ?.options}
+                        question={activeSolutionQ?.question}
+                        passage={activeSolutionQ?.passage}
                       />
                     </div>
 

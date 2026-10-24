@@ -3,6 +3,7 @@ import { UPLOADS, NOTIFICATIONS, MOCK_TESTS, MOCK_TESTS_HISTORY, CATEGORIES } fr
 import { useAuth, getRegisteredStudents, removeStudentById } from "./auth.jsx";
 import { isFirebaseConfigured } from "./firebase.js";
 import { parseStudentJoinDate, formatStudentJoinDate } from "./utils/studentDate.js";
+import { sortTestsByRecent } from "./utils/testSorting.js";
 import {
   subscribeBackend,
   fsAddUpload,
@@ -54,13 +55,13 @@ export function AppProvider({ children }) {
     if (useRealtimeBackend) return [];
     try {
       const saved = localStorage.getItem("ken_ias_mocktests");
-      if (!saved) return MOCK_TESTS;
+      if (!saved) return sortTestsByRecent(MOCK_TESTS);
       const parsed = JSON.parse(saved);
       const existingIds = new Set(parsed.map(t => t.id));
       const missingDefaults = MOCK_TESTS.filter(t => !existingIds.has(t.id));
-      return [...missingDefaults, ...parsed];
+      return sortTestsByRecent([...parsed, ...missingDefaults]);
     } catch {
-      return MOCK_TESTS;
+      return sortTestsByRecent(MOCK_TESTS);
     }
   });
   const [testHistory, setTestHistory] = useState(MOCK_TESTS_HISTORY);
@@ -292,7 +293,7 @@ export function AppProvider({ children }) {
     (async () => {
       unsub = await subscribeBackend(user, {
         onUploads: setUploads,
-        onTests: setMockTests,
+        onTests: (tests) => setMockTests(sortTestsByRecent(tests)),
         onNotifications: setNotifications,
         onStudents: (users) => {
           // Keep only student role and filter out deleted users
@@ -415,22 +416,36 @@ export function AppProvider({ children }) {
 
   const addMockTest = async (test) => {
     const title = test.isFree ? "New Free Mock Test Available" : "New Mock Test Available";
+    const nowTime = Date.now();
+    const testWithTime = {
+      ...test,
+      id: test.id || nowTime,
+      createdAt: test.createdAt || nowTime,
+      uploadedAt: test.uploadedAt || nowTime,
+      timestamp: test.timestamp || nowTime,
+    };
+
     if (isFirebaseConfigured) {
       try {
         const timeout = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Firestore write timeout")), 2500)
+          setTimeout(() => reject(new Error("Firestore write timeout")), 3500)
         );
-        const full = await Promise.race([fsAddMockTest(test), timeout]);
+        const full = await Promise.race([fsAddMockTest(testWithTime), timeout]);
         fsNotify("mock", title, `“${test.title}” is live now.`).catch(() => {});
         pushToast("Mock test created & students notified 📝");
+        setMockTests((prev) => {
+          const next = sortTestsByRecent([full, ...prev.filter(t => t.id !== full.id && t.id !== testWithTime.id)]);
+          safePersistMockTests(next);
+          return next;
+        });
         return full;
       } catch (err) {
         console.warn("Firestore save timed out or unconfigured. Saving locally.", err);
       }
     }
-    const full = { ...test, id: test.id || Date.now() };
+    const full = testWithTime;
     setMockTests((prev) => {
-      const next = [full, ...prev.filter(t => t.id !== full.id)];
+      const next = sortTestsByRecent([full, ...prev.filter(t => t.id !== full.id)]);
       safePersistMockTests(next);
       return next;
     });
@@ -447,7 +462,7 @@ export function AppProvider({ children }) {
         console.warn("Firestore update failed", err);
       }
     }
-    setMockTests((prev) => prev.map(t => t.id === id ? { ...t, ...updatedTest } : t));
+    setMockTests((prev) => sortTestsByRecent(prev.map(t => t.id === id ? { ...t, ...updatedTest } : t)));
     pushToast("Mock test updated successfully ✅");
     return updatedTest;
   };

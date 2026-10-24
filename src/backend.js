@@ -46,10 +46,20 @@ export async function subscribeBackend(user, { onUploads, onTests, onNotificatio
     onSnapshot(uploadsQuery, (snap) => onUploads(snap.docs.map(mapDoc)))
   );
 
-  let testsQuery = query(collection(db, COLLECTIONS.mockTests), orderBy("createdAt", "desc"));
-  unsubs.push(
-    onSnapshot(testsQuery, (snap) => onTests(snap.docs.map(mapDoc)))
-  );
+  const handleTestsSnap = (snap) => {
+    onTests(snap.docs.map(mapDoc));
+  };
+  try {
+    const testsQuery = query(collection(db, COLLECTIONS.mockTests), orderBy("createdAt", "desc"));
+    unsubs.push(
+      onSnapshot(testsQuery, handleTestsSnap, (err) => {
+        console.warn("Firestore ordered mockTests subscription fallback:", err);
+        unsubs.push(onSnapshot(collection(db, COLLECTIONS.mockTests), handleTestsSnap));
+      })
+    );
+  } catch {
+    unsubs.push(onSnapshot(collection(db, COLLECTIONS.mockTests), handleTestsSnap));
+  }
   unsubs.push(
     onSnapshot(query(collection(db, COLLECTIONS.notifications), orderBy("createdAt", "desc")), (snap) =>
       onNotifications(snap.docs.map(mapDoc))
@@ -136,11 +146,14 @@ export async function fsAddMockTest(test) {
   const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
   const db = await getFirebaseDb();
   const cleanTest = sanitizeFirestoreObject(test);
+  const nowMs = Date.now();
   const ref = await addDoc(collection(db, COLLECTIONS.mockTests), {
     ...cleanTest,
+    uploadedAt: cleanTest.uploadedAt || nowMs,
+    timestamp: cleanTest.timestamp || nowMs,
     createdAt: serverTimestamp(),
   });
-  return { ...cleanTest, id: ref.id };
+  return { ...cleanTest, id: ref.id, uploadedAt: nowMs, timestamp: nowMs, createdAt: nowMs };
 }
 
 export async function fsDeleteMockTest(id) {

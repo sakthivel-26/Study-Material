@@ -698,6 +698,8 @@ export default function MockTestRunner({ test, onClose }) {
                             explanation={currentQ.explanation || `Correct Option is (${String.fromCharCode(65 + (currentQ.correctAnswerIndex || 0))})`}
                             correctAnswerIndex={currentQ.correctAnswerIndex}
                             options={currentQ.options}
+                            question={currentQ.question}
+                            passage={currentQ.passage}
                             compact={true}
                           />
                           {currentQ.solutionImageUrl && (
