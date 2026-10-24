@@ -1,9 +1,11 @@
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Bell, BookOpen, PlaySquare, ClipboardList, TrendingUp, ArrowRight } from "lucide-react";
 import { useApp } from "../store.jsx";
-import { USER } from "../data.js";
+import { useAuth } from "../auth.jsx";
 import { ProgressBar } from "./ui.jsx";
 import { useNavigate } from "react-router-dom";
+import { getStudentStats } from "../utils/studentActivity.js";
 
 export function NotificationsCard() {
   const { notifications } = useApp();
@@ -56,29 +58,66 @@ export function NotificationsCard() {
 
 export function ProgressCard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { testAttempts } = useApp();
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const handleUpdate = () => setTick((t) => t + 1);
+    window.addEventListener("ken_video_watched", handleUpdate);
+    window.addEventListener("ken_purchase_updated", handleUpdate);
+    window.addEventListener("storage", handleUpdate);
+    return () => {
+      window.removeEventListener("ken_video_watched", handleUpdate);
+      window.removeEventListener("ken_purchase_updated", handleUpdate);
+      window.removeEventListener("storage", handleUpdate);
+    };
+  }, []);
+
+  const data = getStudentStats(user, testAttempts);
+
   const stats = [
-    { label: "Courses Enrolled", value: USER.enrolled, icon: BookOpen, color: "#1B4F72" },
-    { label: "Videos Watched", value: USER.videosWatched, icon: PlaySquare, color: "#0EA5E9" },
-    { label: "Mock Tests Completed", value: USER.testsCompleted, icon: ClipboardList, color: "#10B981" },
+    { label: "Courses Enrolled", value: data.enrolledCount, icon: BookOpen, color: "#1B4F72", link: "/courses" },
+    { label: "Videos Watched", value: data.videosWatched, icon: PlaySquare, color: "#0EA5E9", link: "/materials" },
+    { label: "Mock Tests Completed", value: data.testsCompleted, icon: ClipboardList, color: "#10B981", link: "/mock-tests" },
   ];
-  const overall = 0;
+  const overall = data.learningProgress;
+
   return (
     <div className="card p-4">
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2.5">
-          <span className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="w-9 h-9 shrink-0 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
             <TrendingUp size={17} />
           </span>
-          <h3 className="font-bold text-[15px]">Your Progress</h3>
+          <div className="min-w-0">
+            <h3 className="font-bold text-[15px] leading-tight">Your Progress</h3>
+            {data.isEnrolled && (
+              <p className="text-[11px] text-brand-700 font-medium truncate max-w-[170px]" title={data.enrolledCourse}>
+                {data.enrolledCourse}
+              </p>
+            )}
+          </div>
         </div>
+        {data.isEnrolled && (
+          <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold text-[10px] tracking-wide uppercase border border-emerald-200">
+            Enrolled
+          </span>
+        )}
       </div>
       <div className="grid grid-cols-3 gap-2 mb-4">
         {stats.map((s) => (
-          <div key={s.label} className="rounded-xl bg-black/[0.03] p-2.5 text-center">
+          <button
+            key={s.label}
+            type="button"
+            onClick={() => s.link && navigate(s.link)}
+            className="rounded-xl bg-black/[0.03] p-2.5 text-center hover:bg-black/[0.06] transition-colors cursor-pointer"
+            title={`View ${s.label}`}
+          >
             <s.icon size={18} className="mx-auto mb-1.5" style={{ color: s.color }} />
             <p className="text-lg font-extrabold text-ink leading-none">{s.value}</p>
             <p className="text-[10px] text-ink-muted mt-1 leading-tight">{s.label}</p>
-          </div>
+          </button>
         ))}
       </div>
       <div className="flex items-center justify-between text-xs mb-1.5">

@@ -1,12 +1,20 @@
+import { useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, FileText, Play, Download, BookmarkPlus, Bookmark, Clock } from "lucide-react";
 import { Badge } from "./ui.jsx";
 import { useApp } from "../store.jsx";
+import { recordVideoWatch } from "../utils/studentActivity.js";
 
 // Renders either an embedded YouTube player or an inline PDF-style preview.
 export default function MediaModal({ item, onClose }) {
   const { toggleBookmark, bookmarks, pushToast, addDownloadRecord } = useApp();
   const isBookmarked = item && bookmarks.includes(item.id);
+
+  useEffect(() => {
+    if (item && item.type === "video") {
+      recordVideoWatch(item.id);
+    }
+  }, [item]);
 
   if (!item) return null;
   const isVideo = item.type === "video";
