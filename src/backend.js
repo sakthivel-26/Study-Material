@@ -253,14 +253,22 @@ export async function fsRemoveUserPurchase(uid, packageId) {
 }
 
 export async function fsSyncUser(user) {
-  const { doc, setDoc, serverTimestamp } = await import("firebase/firestore");
+  const { doc, setDoc, getDoc, serverTimestamp } = await import("firebase/firestore");
   const db = await getFirebaseDb();
   const userRef = doc(db, "users", user.id);
+  const snap = await getDoc(userRef).catch(() => null);
+  const existing = snap?.exists() ? snap.data() : null;
+
+  // Preserve original join date and never overwrite with a later date
+  const originalCreated = existing?.createdAt || existing?.joinedAt || user.createdAt || serverTimestamp();
+
   await setDoc(userRef, {
     name: user.name,
     email: user.email,
     phone: user.phone || "",
     role: user.role || "student",
+    createdAt: originalCreated,
+    joinedAt: originalCreated,
     lastLogin: serverTimestamp(),
   }, { merge: true });
 }

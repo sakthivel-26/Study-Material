@@ -16,6 +16,7 @@ import UploadPage from "./pages/admin/UploadPage.jsx";
 import { CreateMockTestPage, ManageStudentsPage, AnnouncementsPage, PlansPage, AdmissionsPage } from "./pages/admin/AdminManagePages.jsx";
 import AdminAccountPage from "./pages/admin/AdminAccountPage.jsx";
 import { AdmissionModal } from "./components/AdmissionModal.jsx";
+import AdmissionPage from "./pages/AdmissionPage.jsx";
 
 import { NotFoundPage } from "./pages/ErrorPages.jsx";
 
@@ -37,6 +38,7 @@ export default function App() {
       {/* Student (Publicly accessible dashboard) */}
       <Route element={<Layout />}>
         <Route path="/" element={<StudentDashboard />} />
+        <Route path="/admission" element={<AdmissionPage />} />
         <Route path="/courses" element={<CoursesPage />} />
         <Route path="/videos" element={<VideosPage />} />
         <Route path="/materials" element={<MaterialsPage />} />

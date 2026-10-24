@@ -4,7 +4,8 @@ import { motion } from "framer-motion";
 import {
   ClipboardPlus, Users, Megaphone, TrendingUp, BookOpen, Plus, Search,
   Trash2, Send, Bell, Sparkles, Loader2, CheckCircle2, Eye, HelpCircle, X,
-  FileUp, FileText, Upload, Download, ShieldCheck, Image as ImageIcon, Edit3, Maximize2, Minimize2
+  FileUp, FileText, Upload, Download, ShieldCheck, Image as ImageIcon, Edit3, Maximize2, Minimize2,
+  Calendar
 } from "lucide-react";
 import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
@@ -13,6 +14,7 @@ import { Badge, ProgressBar } from "../../components/ui.jsx";
 import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findBestMatchingChartPage, isDIQuestion } from "../../utils/aiTestGenerator.js";
 import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
+import { formatStudentJoinDate } from "../../utils/studentDate.js";
 
 /* ---------------------------- Create Mock Test ---------------------------- */
 import CategoryGrid from "../../components/CategoryGrid.jsx";
@@ -3941,7 +3943,37 @@ export function ManageStudentsPage() {
   const { students = [], deleteStudent, pushToast, refreshStudents } = useApp();
   const [q, setQ] = useState("");
   const [selectedStudents, setSelectedStudents] = useState([]);
+  const [editingStudentId, setEditingStudentId] = useState(null);
+  const [customDates, setCustomDates] = useState({});
   const [, refresh] = useState(0);
+
+  const updateStudentJoinDate = async (student, newDateStr) => {
+    if (!newDateStr) return;
+    const d = new Date(newDateStr);
+    if (isNaN(d.getTime())) return;
+
+    setCustomDates(prev => ({ ...prev, [student.id]: formatStudentJoinDate(d) }));
+    try {
+      localStorage.setItem("ken_student_joined_" + student.id, d.toISOString());
+    } catch (e) {}
+
+    if (useRealtimeBackend && student.id) {
+      try {
+        const { doc, setDoc } = await import("firebase/firestore");
+        const { getFirebaseDb } = await import("../../firebase.js");
+        const db = await getFirebaseDb();
+        await setDoc(doc(db, "users", student.id), {
+          createdAt: d.toISOString(),
+          joinedAt: d.toISOString()
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Failed to update student join date in Firebase", err);
+      }
+    }
+    setEditingStudentId(null);
+    pushToast(`Updated joining date for ${student.name || "Student"}`);
+    if (refreshStudents) refreshStudents();
+  };
   
   const EXAMS = [
     { id: "banking", label: "Banking" },
@@ -4057,7 +4089,7 @@ export function ManageStudentsPage() {
       const isAll = s.access === "academy";
       const accessArr = Array.isArray(s.access) ? s.access : (isAll ? EXAMS.map(e => e.id) : []);
       
-      return <tr key={s.id||s.phone} className="hover:bg-black/[0.02]"><td className="px-5 py-3"><input type="checkbox" checked={selectedStudents.includes(s.id)} onChange={(e) => { if (e.target.checked) setSelectedStudents([...selectedStudents, s.id]); else setSelectedStudents(selectedStudents.filter(id => id !== s.id)); }} className="cursor-pointer" /></td><td className="px-5 py-3 font-semibold text-ink">{s.name||"Student"} <span className="block text-xs font-normal text-ink-muted mt-0.5">{s.joined}</span></td><td className="px-5 py-3 text-ink-soft">{s.phone||"Not provided"}</td><td className="px-5 py-3">
+      return <tr key={s.id||s.phone} className="hover:bg-black/[0.02]"><td className="px-5 py-3"><input type="checkbox" checked={selectedStudents.includes(s.id)} onChange={(e) => { if (e.target.checked) setSelectedStudents([...selectedStudents, s.id]); else setSelectedStudents(selectedStudents.filter(id => id !== s.id)); }} className="cursor-pointer" /></td><td className="px-5 py-3 font-semibold text-ink"><div>{s.name||"Student"}</div>{editingStudentId === s.id ? (<div className="flex items-center gap-1.5 mt-1"><input type="date" className="text-xs px-2 py-0.5 rounded border border-slate-300 bg-white" defaultValue={s.rawDate ? s.rawDate.slice(0, 10) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)} onChange={(e) => updateStudentJoinDate(s, e.target.value)} /><button type="button" onClick={() => setEditingStudentId(null)} className="text-[10px] text-ink-muted hover:text-ink px-1 cursor-pointer">Cancel</button></div>) : (<div className="flex items-center gap-1.5 mt-0.5"><span className="text-xs font-normal text-ink-muted">{customDates[s.id] || s.joined}</span><button type="button" onClick={() => setEditingStudentId(s.id)} className="p-0.5 text-ink-faint hover:text-brand-700 transition-colors cursor-pointer" title="Edit joining date"><Calendar size={12} /></button></div>)}</td><td className="px-5 py-3 text-ink-soft">{s.phone||"Not provided"}</td><td className="px-5 py-3">
         <div className="flex flex-wrap gap-2">
           {EXAMS.map(e => {
             const hasAccess = accessArr.includes(e.id);
@@ -4560,14 +4592,15 @@ export function AdmissionsPage() {
       return;
     }
     
-    const headers = ["Date", "Name", "Mobile Number", "Email ID", "Target Exam", "Mode of Learning"];
+    const headers = ["Date", "Name", "Mobile Number", "Email ID", "Course / Target Exam", "Mode of Learning", "District"];
     const rows = dataToExport.map(lead => [
       new Date(lead.createdAt?.toMillis ? lead.createdAt.toMillis() : Date.now()).toLocaleDateString("en-IN"),
       lead.fullName || lead.name || "Student",
       lead.mobileNumber || "",
       lead.emailId || "",
-      lead.targetExam || "General",
-      lead.modeOfLearning || "Online"
+      lead.course || lead.targetExam || "General",
+      lead.modeOfLearning || "Online",
+      lead.district || ""
     ]);
 
     const csvContent = "data:text/csv;charset=utf-8," 
@@ -4624,14 +4657,15 @@ export function AdmissionsPage() {
                 <th className="py-3 px-4 font-medium">Name</th>
                 <th className="py-3 px-4 font-medium">Mobile Number</th>
                 <th className="py-3 px-4 font-medium">Email ID</th>
-                <th className="py-3 px-4 font-medium">Target Exam</th>
+                <th className="py-3 px-4 font-medium">Target Exam / Course</th>
                 <th className="py-3 px-4 font-medium">Mode of Learning</th>
+                <th className="py-3 px-4 font-medium">District</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
               {admissions.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="py-8 text-center text-ink-muted">
+                  <td colSpan="7" className="py-8 text-center text-ink-muted">
                     No admission inquiries yet. Leads submitted from website popups & free mocks will appear here live!
                   </td>
                 </tr>
@@ -4664,11 +4698,14 @@ export function AdmissionsPage() {
                     </td>
                     <td className="py-3 px-4">
                       <span className="bg-amber-100 text-amber-900 font-bold px-2.5 py-1 rounded-lg text-xs">
-                        {lead.targetExam || "General"}
+                        {lead.course || lead.targetExam || "General"}
                       </span>
                     </td>
                     <td className="py-3 px-4">
                       <Badge>{lead.modeOfLearning || "Online"}</Badge>
+                    </td>
+                    <td className="py-3 px-4 font-medium text-ink text-xs">
+                      {lead.district || "—"}
                     </td>
                   </tr>
                 ))

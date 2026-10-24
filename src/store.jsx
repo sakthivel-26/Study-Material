@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { UPLOADS, NOTIFICATIONS, MOCK_TESTS, MOCK_TESTS_HISTORY, CATEGORIES } from "./data.js";
 import { useAuth, getRegisteredStudents, removeStudentById } from "./auth.jsx";
 import { isFirebaseConfigured } from "./firebase.js";
+import { parseStudentJoinDate, formatStudentJoinDate } from "./utils/studentDate.js";
 import {
   subscribeBackend,
   fsAddUpload,
@@ -295,18 +296,33 @@ export function AppProvider({ children }) {
         onNotifications: setNotifications,
         onStudents: (users) => {
           // Keep only student role and filter out deleted users
-          const studentUsers = users.filter(u => u.role !== "admin" && !u.deleted).map(u => ({
-            id: u.id,
-            name: u.name || u.displayName || (u.email ? u.email.split("@")[0] : "") || "Student",
-            email: u.email || "",
-            phone: u.phone || "",
-            access: u.paid_packages ? Object.keys(u.paid_packages) : "payment_required",
-            joined: new Date(u.createdAt || Date.now()).toLocaleDateString("en-IN", {
-              day: "2-digit",
-              month: "short",
-              year: "numeric",
-            })
-          }));
+          const studentUsers = users.filter(u => u.role !== "admin" && !u.deleted).map(u => {
+            const parsedDate = parseStudentJoinDate(u, testAttempts);
+
+            // If user doc in Firestore has no createdAt or joinedAt, backfill it so Firestore permanently remembers
+            if (u.id && !u.createdAt && !u.joinedAt) {
+              import("./firebase.js").then(({ getFirebaseDb }) => {
+                getFirebaseDb().then((db) => {
+                  import("firebase/firestore").then(({ doc, setDoc }) => {
+                    setDoc(doc(db, "users", u.id), {
+                      createdAt: parsedDate.toISOString(),
+                      joinedAt: parsedDate.toISOString()
+                    }, { merge: true }).catch(() => {});
+                  });
+                });
+              }).catch(() => {});
+            }
+
+            return {
+              id: u.id,
+              name: u.name || u.displayName || (u.email ? u.email.split("@")[0] : "") || "Student",
+              email: u.email || "",
+              phone: u.phone || "",
+              access: u.paid_packages ? Object.keys(u.paid_packages) : "payment_required",
+              joined: formatStudentJoinDate(parsedDate),
+              rawDate: parsedDate.toISOString(),
+            };
+          });
           setStudents(studentUsers);
         },
         onAdmissions: setAdmissions,

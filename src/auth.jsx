@@ -4,6 +4,7 @@ import {
   ADMIN_EMAILS,
   getFirebaseAuth,
 } from "./firebase.js";
+import { parseStudentJoinDate, formatStudentJoinDate } from "./utils/studentDate.js";
 
 // ------------------------------------------------------------------
 // Authentication for Shakthi Academy.
@@ -87,11 +88,7 @@ export const getRegisteredStudents = () => {
       access: u.access || "payment_required",
       enrolled: u.enrolled || "Banking",
       progress: u.progress || 0,
-      joined: new Date(u.createdAt || Date.now()).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }),
+      joined: formatStudentJoinDate(parseStudentJoinDate(u)),
     }));
 };
 
