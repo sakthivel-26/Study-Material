@@ -12,7 +12,9 @@ const FILTER_TABS = [
   { id: "tnpsc", label: "TNPSC", group: "TNPSC" },
   { id: "ssc", label: "SSC (CGL/CHSL)", group: "SSC" },
   { id: "railway", label: "Railway (NTPC/Group D)", group: "Railway" },
+  { id: "rrb", label: "RRB (PO & Clerk)", group: "RRB" },
   { id: "defence", label: "Defence & NDA", group: "Defence" },
+  { id: "insurance", label: "Insurance (LIC/NIACL)", group: "Insurance" },
   { id: "current-affairs", label: "Current Affairs & GK", group: "Common Subjects" }
 ];
 

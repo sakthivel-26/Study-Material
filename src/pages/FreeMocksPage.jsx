@@ -19,7 +19,9 @@ const FREE_CATEGORIES = [
   { id: "tnpsc", label: "TNPSC", group: "TNPSC" },
   { id: "ssc", label: "SSC (CGL/CHSL)", group: "SSC" },
   { id: "railway", label: "Railway (NTPC/Group D)", group: "Railway" },
-  { id: "defence", label: "Defence & NDA", group: "Defence" }
+  { id: "rrb", label: "RRB (PO & Clerk)", group: "RRB" },
+  { id: "defence", label: "Defence & NDA", group: "Defence" },
+  { id: "insurance", label: "Insurance (LIC/NIACL)", group: "Insurance" }
 ];
 
 export default function FreeMocksPage() {
@@ -50,7 +52,16 @@ export default function FreeMocksPage() {
     const tabDef = FREE_CATEGORIES.find(c => c.id === activeTab);
     if (!tabDef || !tabDef.group) return true;
     const cat = CATEGORIES.find(c => c.name === t.category);
-    return cat && cat.group === tabDef.group;
+    if (cat && cat.group === tabDef.group) return true;
+    const catStr = String(t.category || "").toLowerCase();
+    if (tabDef.id === "banking" && (catStr.includes("bank") || catStr.includes("ibps") || catStr.includes("sbi"))) return true;
+    if (tabDef.id === "rrb" && (catStr.includes("rrb") || catStr.includes("regional rural"))) return true;
+    if (tabDef.id === "insurance" && (catStr.includes("insurance") || catStr.includes("lic") || catStr.includes("niacl") || catStr.includes("uiic"))) return true;
+    if (tabDef.id === "tnpsc" && catStr.includes("tnpsc")) return true;
+    if (tabDef.id === "ssc" && catStr.includes("ssc")) return true;
+    if (tabDef.id === "railway" && (catStr.includes("railway") || catStr.includes("ntpc") || catStr.includes("group d"))) return true;
+    if (tabDef.id === "defence" && (catStr.includes("defence") || catStr.includes("nda") || catStr.includes("navy"))) return true;
+    return false;
   });
 
   const getMocksTaken = () => parseInt(localStorage.getItem('freeMocksTakenCount') || '0', 10);

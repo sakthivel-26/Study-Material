@@ -2,10 +2,14 @@ import React from "react";
 import { BookOpen, CheckCircle2, Lightbulb } from "lucide-react";
 import FormattedPassage from "./FormattedPassage.jsx";
 import DirectionDiagramView from "./DirectionDiagramView.jsx";
+import SyllogismDiagramView from "./SyllogismDiagramView.jsx";
+import { convertTextTableToMarkdown } from "../utils/aiTestGenerator.js";
 
 export function parseExplanationSteps(rawText) {
   if (!rawText || typeof rawText !== "string") return [];
-  const text = rawText.trim();
+  // Ensure any raw text tables in puzzle solutions are formatted to markdown
+  const formattedText = convertTextTableToMarkdown(rawText.trim());
+  const text = formattedText || rawText.trim();
 
   // 0. Extract Markdown table if present (Puzzles, Seating Arrangements, DI tables)
   const lines = text.split(/\r?\n/);
@@ -35,7 +39,7 @@ export function parseExplanationSteps(rawText) {
   if (tableBlock) {
     steps.push({
       stepNum: 1,
-      title: "Step 1: Solved Data Table / Matrix",
+      title: "Step 1: Solved Data Table / Arrangement Matrix",
       content: tableBlock,
       isTable: true,
     });
@@ -167,6 +171,9 @@ export default function BeginnerSolutionView({
 
       {/* Visual Direction Drawing / Diagram for Direction Sense Questions */}
       <DirectionDiagramView text={fullDirectionSource} compact={compact} />
+
+      {/* Visual Venn Diagram for Syllogism Questions */}
+      <SyllogismDiagramView text={fullDirectionSource} compact={compact} />
 
       {/* Structured Steps for Beginners */}
       <div className="space-y-2.5">

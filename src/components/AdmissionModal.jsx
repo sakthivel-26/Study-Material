@@ -285,7 +285,10 @@ export function AdmissionModal() {
                   </button>
 
                   <p className="text-[11px] text-center text-slate-400 mt-2 leading-relaxed">
-                    Our team will contact you with batch dates, fee structure &amp; syllabus details.
+                    Our team will contact you with batch dates, fee structure &amp; syllabus details. Need urgent help? Call Admission Hotline:{" "}
+                    <a href="tel:+917530015494" className="font-bold text-brand-700 hover:underline">
+                      +91 7530015494
+                    </a>
                   </p>
                 </form>
               )}

@@ -287,14 +287,29 @@ export default function AdmissionPage() {
             </h4>
             <div className="space-y-2 text-xs text-ink-muted">
               <p>For urgent admission queries, contact our admissions desk directly:</p>
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
                 <div>
                   <p className="font-bold text-ink text-sm">Admission Hotline</p>
-                  <p className="text-ink-muted">Mon - Sat: 9:00 AM - 7:00 PM</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <a
+                      href="tel:+917530015494"
+                      className="text-sm font-extrabold text-brand-700 hover:underline tracking-wide"
+                    >
+                      +91 7530015494
+                    </a>
+                    <span className="text-slate-300">|</span>
+                    <a
+                      href="tel:+917530015495"
+                      className="text-sm font-extrabold text-brand-700 hover:underline tracking-wide"
+                    >
+                      7530015495
+                    </a>
+                  </div>
+                  <p className="text-[11px] text-ink-muted mt-0.5">Mon - Sat: 9:00 AM - 7:00 PM</p>
                 </div>
                 <a
-                  href="tel:+919876543210"
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-700 transition-colors"
+                  href="tel:+917530015494"
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-700 transition-colors shadow-xs flex items-center gap-1.5 shrink-0"
                 >
                   Call Now
                 </a>

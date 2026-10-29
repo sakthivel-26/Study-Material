@@ -6,7 +6,17 @@ export const config = {
 
 const SYSTEM_PROMPT = `
 You are a strict data extraction AI for Bank and competitive exams. You MUST output ONLY valid JSON. DO NOT output any markdown, explanations, or conversational text.
+STRICT EXTRACTION INTEGRITY RULES:
+- Extract EXACTLY the questions that are uploaded in the text. NEVER invent, hallucinate, alter, or synthesize new questions.
+- Retain exact numbers, options (A through E), and phrasing from the source text.
+
 Extract: question number, question text, section ("English Language" | "Reasoning Ability" | "Quantitative Aptitude"), options (A, B, C, D, and E if present), source answer, page number, associated passage/directions, and step-by-step explanation.
+
+STEP-BY-STEP SOLUTION & DIAGRAM RULES:
+- For Reasoning Puzzles: provide step-by-step arrangement reasoning AND include the complete final solved markdown table (e.g. | Person | Floor / Position | Attribute | ...) in the explanation.
+- For Direction Sense questions: provide detailed step-by-step directional path details (e.g. "Starts at Point A, walks 10m North to Point B, turns right 5m East to Point C...") so diagram viewers can draw the exact path.
+- For Syllogism questions: clearly list the statements ("Statements: All A are B. Some B are C.") and conclusions ("Conclusions: I. Some A are C. II. No A is C.") with step-by-step Venn circle deduction.
+- For Quantitative Aptitude: show step-by-step calculation steps.
 
 CRITICAL MATHEMATICAL NOTATION RULES:
 - Squares: use ² (e.g. (803.63)² or 15²)
@@ -48,35 +58,89 @@ export default async function handler(req, res) {
     // Truncate if too long (AI token limit)
     const truncatedText = text.substring(0, 30000); 
 
-    // Call OpenRouter, Gemini, or NVIDIA
-    const openRouterKey = process.env.VITE_OPENROUTER_API_KEY;
-    const geminiKey = process.env.VITE_GEMINI_API_KEY;
-    const nvidiaKey = process.env.VITE_NVIDIA_API_KEY;
+    // Priority: NVIDIA (Primary) -> Google Gemini (Secondary) -> OpenRouter (Fallback)
+    const nvidiaKey = process.env.VITE_NVIDIA_API_KEY || process.env.NVIDIA_API_KEY;
+    const geminiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const openRouterKey = process.env.VITE_OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
 
     let completionText = "";
 
+    // 1. PRIMARY: NVIDIA Nemotron Models
     if (nvidiaKey) {
-      const apiRes = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${nvidiaKey}`,
-        },
-        body: JSON.stringify({
-          model: process.env.VITE_NVIDIA_MODEL || "meta/llama-3.1-70b-instruct",
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: `Extract questions from the following text:\n\n${truncatedText}` }
-          ],
-        }),
-      });
-      if (!apiRes.ok) {
-        const errText = await apiRes.text();
-        return res.status(500).json({ error: `NVIDIA API Error: ${apiRes.status} - ${errText}` });
+      try {
+        const candidateModels = [
+          process.env.VITE_NVIDIA_PARSE_MODEL,
+          process.env.VITE_NVIDIA_MODEL,
+          "nvidia/nemotron-parse-2.0",
+          "nvidia/nemotron-3.5-parse",
+          "nvidia/nemotron-4-340b-instruct",
+          "meta/llama-3.1-70b-instruct"
+        ].filter(Boolean);
+
+        for (const mod of candidateModels) {
+          try {
+            const apiRes = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${nvidiaKey}`,
+              },
+              body: JSON.stringify({
+                model: mod,
+                messages: [
+                  { role: "system", content: SYSTEM_PROMPT },
+                  { role: "user", content: `Extract exact questions from the following text (do not invent or alter questions):\n\n${truncatedText}` }
+                ],
+                temperature: 0.1,
+                max_tokens: 4000
+              }),
+            });
+            if (apiRes.ok) {
+              const result = await apiRes.json();
+              const textOutput = result.choices?.[0]?.message?.content || "";
+              if (textOutput && textOutput.length > 50) {
+                completionText = textOutput;
+                break;
+              }
+            }
+          } catch (mErr) {
+            console.warn(`NVIDIA model ${mod} call failed:`, mErr.message);
+          }
+        }
+      } catch (err) {
+        console.warn("NVIDIA Primary API Error, falling back to Gemini:", err.message);
       }
-      const result = await apiRes.json();
-      completionText = result.choices?.[0]?.message?.content || "";
-    } else if (openRouterKey) {
+    }
+
+    // 2. SECONDARY: Google Gemini Fallback
+    if (!completionText && geminiKey) {
+      const candidateGemini = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-2.5-flash"];
+      for (const modelName of candidateGemini) {
+        try {
+          const apiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+              contents: [{ parts: [{ text: `Extract exact questions from the following text (do not invent or alter questions):\n\n${truncatedText}` }] }]
+            }),
+          });
+          if (apiRes.ok) {
+            const result = await apiRes.json();
+            const textOutput = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            if (textOutput && textOutput.length > 50) {
+              completionText = textOutput;
+              break;
+            }
+          }
+        } catch (gErr) {
+          console.warn(`Gemini model ${modelName} call failed:`, gErr.message);
+        }
+      }
+    }
+
+    // 3. TERTIARY: OpenRouter Fallback
+    if (!completionText && openRouterKey) {
       const apiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -84,28 +148,21 @@ export default async function handler(req, res) {
           Authorization: `Bearer ${openRouterKey}`,
         },
         body: JSON.stringify({
-          model: process.env.VITE_OPENROUTER_MODEL || "google/gemma-2-9b-it:free",
+          model: process.env.VITE_OPENROUTER_MODEL || "nvidia/nemotron-4-340b-instruct:free",
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: `Extract questions from the following text:\n\n${truncatedText}` }
+            { role: "user", content: `Extract exact questions from the following text:\n\n${truncatedText}` }
           ],
         }),
       });
-      const result = await apiRes.json();
-      completionText = result.choices?.[0]?.message?.content || "";
-    } else if (geminiKey) {
-      const apiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${geminiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents: [{ parts: [{ text: `Extract questions from the following text:\n\n${truncatedText}` }] }]
-        }),
-      });
-      const result = await apiRes.json();
-      completionText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    } else {
-      return res.status(500).json({ error: "No AI API Key configured. Please add VITE_NVIDIA_API_KEY, VITE_GEMINI_API_KEY, or VITE_OPENROUTER_API_KEY in Vercel Environment Variables." });
+      if (apiRes.ok) {
+        const result = await apiRes.json();
+        completionText = result.choices?.[0]?.message?.content || "";
+      }
+    }
+
+    if (!completionText && !nvidiaKey && !geminiKey && !openRouterKey) {
+      return res.status(500).json({ error: "No AI API Key configured. Please add VITE_NVIDIA_API_KEY or VITE_GEMINI_API_KEY in Environment Variables." });
     }
 
     if (!completionText) {

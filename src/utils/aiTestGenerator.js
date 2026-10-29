@@ -246,12 +246,14 @@ async function callGemini(apiKey, prompt) {
 }
 
 // 2b. Google Gemini Vision — reads charts, tables, bar graphs from a page image
-// NVIDIA models are assigned by capability. The embedding model is deliberately
-// kept out of the chat chain: it retrieves/matches content but cannot extract
-// questions or write solutions.
-const NVIDIA_REASONING_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
-const NVIDIA_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct";
-const NVIDIA_EMBED_MODEL = "nvidia/nemotron-3.5-embed-8b";
+// NVIDIA Nemotron models are assigned by capability:
+// - Parsing & Vision: nvidia/nemotron-parse-2.0, nvidia/nemotron-3.5-parse
+// - Reasoning & Extraction: nvidia/nemotron-4-340b-instruct, nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+// - Embeddings: nvidia/nemotron-3.5-embed-1b (for semantic search & retrieval)
+const NVIDIA_REASONING_MODEL = "nvidia/nemotron-4-340b-instruct";
+const NVIDIA_PARSE_MODEL = "nvidia/nemotron-parse-2.0";
+const NVIDIA_VISION_MODEL = "nvidia/nemotron-parse-2.0";
+const NVIDIA_EMBED_MODEL = "nvidia/nemotron-3.5-embed-1b";
 
 const VISION_EXTRACTION_PROMPT = `You are an expert at reading Indian competitive exam question papers (IBPS, SBI, SSC, TNPSC etc.).
 Look at this PDF page image carefully.
@@ -260,7 +262,7 @@ Extract all data from charts, tables, diagrams, directions, questions, and optio
 export async function callGeminiVisionPage(apiKey, base64Image, mimeType = "image/jpeg") {
   if (!apiKey || typeof apiKey !== "string") return null;
   const cleanKey = apiKey.trim();
-  const candidateModels = ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"];
+  const candidateModels = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"];
 
   const prompt = `You are an expert at reading Indian competitive exam question papers (IBPS, SBI, SSC, TNPSC etc.).
 Look at this PDF page image carefully.
@@ -322,32 +324,47 @@ If no charts/tables/graphs are present, just output the text content of the page
   return null;
 }
 
-// NVIDIA Vision fallback for chart/table pages when Gemini is unavailable or fails.
+// NVIDIA Nemotron Parse / Vision (Primary model for charts, tables, and document layout)
 async function callNvidiaVisionPage(apiKey, base64Image, mimeType = "image/jpeg") {
   if (!apiKey || !base64Image) return null;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
-  try {
-    const response = await fetch("/api/nvidia/v1/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: getEnvKey("VITE_NVIDIA_VISION_MODEL") || NVIDIA_VISION_MODEL,
-        messages: [{ role: "user", content: [
-          { type: "text", text: VISION_EXTRACTION_PROMPT },
-          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
-        ] }],
-        temperature: 0.1,
-        max_tokens: 4000,
-      }),
-    });
-    if (!response.ok) throw new Error(`NVIDIA Vision API error (${response.status})`);
-    const data = await response.json();
-    return (data.choices?.[0]?.message?.content || "").trim() || null;
-  } finally {
-    clearTimeout(timeoutId);
+  const candidateModels = [
+    getEnvKey("VITE_NVIDIA_PARSE_MODEL"),
+    getEnvKey("VITE_NVIDIA_VISION_MODEL"),
+    NVIDIA_PARSE_MODEL,
+    "nvidia/nemotron-3.5-parse",
+    "meta/llama-3.2-11b-vision-instruct"
+  ].filter(Boolean);
+
+  for (const model of candidateModels) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 35000);
+    try {
+      const response = await fetch("/api/nvidia/v1/chat/completions", {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: "user", content: [
+            { type: "text", text: VISION_EXTRACTION_PROMPT },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+          ] }],
+          temperature: 0.1,
+          max_tokens: 4000,
+        }),
+      });
+      clearTimeout(timeoutId);
+      if (response.ok) {
+        const data = await response.json();
+        const content = (data.choices?.[0]?.message?.content || "").trim();
+        if (content && content.length > 30) return content;
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      console.warn(`[AI Vision] NVIDIA model ${model} skipped:`, err.message);
+    }
   }
+  return null;
 }
 
 // The embedding model supports semantic retrieval; it is intentionally separate
@@ -1369,49 +1386,58 @@ export function convertTextTableToMarkdown(rawText) {
   if (/\|.*\|/.test(rawText) && /\|\s*[-:]+[-| :]*\|/.test(rawText)) return rawText;
 
   const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
-  if (lines.length < 3) return rawText;
+  if (lines.length < 2) return rawText;
 
   const dataRows = [];
   let headerLineIndex = -1;
+  let lastDataRowIndex = -1;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    let tokens = line.split(/[|\t]+|\s{2,}|\s+(?=\d+)/).map(t => t.trim()).filter(Boolean);
-    const hasNumbers = tokens.filter(t => /^\d+(?:\.\d+)?%?$/.test(t)).length >= 1;
+    let tokens = line.split(/[|\t]+|\s{2,}|\s+(?=[₹$€£]?[-–—]?\d+(?:\.\d+)?%?|[-–—]|NA\b|N\/A\b)/i).map(t => t.trim()).filter(Boolean);
+    const hasNumbers = tokens.filter(t => /^[₹$€£]?[-–—]?\d+(?:\.\d+)?%?$/.test(t)).length >= 1;
     if (tokens.length >= 2 && hasNumbers) {
       if (headerLineIndex === -1 && i > 0) {
         headerLineIndex = i - 1;
       }
       dataRows.push(tokens);
+      lastDataRowIndex = i;
     }
   }
 
-  if (dataRows.length >= 2 && headerLineIndex >= 0) {
+  // Allow table formatting even if there is 1 data row (very common in single-row or horizontal DI tables)
+  if (dataRows.length >= 1) {
     const colCount = Math.max(...dataRows.map(r => r.length));
-    const headerLine = lines[headerLineIndex];
-    const introLines = lines.slice(0, headerLineIndex);
+    const headerLine = headerLineIndex >= 0 ? lines[headerLineIndex] : null;
+    const introLines = headerLineIndex >= 0 ? lines.slice(0, headerLineIndex) : [];
+    const outroLines = lastDataRowIndex >= 0 ? lines.slice(lastDataRowIndex + 1) : [];
 
-    let headerTokens = headerLine.split(/[|\t]+|\s{2,}/).map(t => t.trim()).filter(Boolean);
-    if (headerTokens.length !== colCount) {
-      const words = headerLine.split(/\s+/).map(t => t.trim()).filter(Boolean);
-      if (words.length === colCount) {
-        headerTokens = words;
-      } else if (words.length > colCount) {
-        const grouped = [words[0]];
-        const remainingWords = words.slice(1);
-        const remainingCols = colCount - 1;
-        const perCol = Math.floor(remainingWords.length / remainingCols);
-        for (let c = 0; c < remainingCols; c++) {
-          const start = c * perCol;
-          const end = (c === remainingCols - 1) ? remainingWords.length : (c + 1) * perCol;
-          grouped.push(remainingWords.slice(start, end).join(' '));
+    let headerTokens = [];
+    if (headerLine) {
+      headerTokens = headerLine.split(/[|\t]+|\s{2,}/).map(t => t.trim()).filter(Boolean);
+      if (headerTokens.length !== colCount) {
+        const words = headerLine.split(/\s+/).map(t => t.trim()).filter(Boolean);
+        if (words.length === colCount) {
+          headerTokens = words;
+        } else if (words.length === colCount - 1) {
+          headerTokens = ['', ...words];
+        } else if (words.length > colCount) {
+          const grouped = [words[0]];
+          const remainingWords = words.slice(1);
+          const remainingCols = colCount - 1;
+          const perCol = Math.floor(remainingWords.length / remainingCols);
+          for (let c = 0; c < remainingCols; c++) {
+            const start = c * perCol;
+            const end = (c === remainingCols - 1) ? remainingWords.length : (c + 1) * perCol;
+            grouped.push(remainingWords.slice(start, end).join(' '));
+          }
+          headerTokens = grouped;
         }
-        headerTokens = grouped;
       }
     }
 
     while (headerTokens.length < colCount) {
-      headerTokens.push('Col ' + (headerTokens.length + 1));
+      headerTokens.push(headerTokens.length === 0 ? 'Item' : ('Col ' + (headerTokens.length + 1)));
     }
     if (headerTokens.length > colCount) {
       headerTokens = headerTokens.slice(0, colCount);
@@ -1424,13 +1450,16 @@ export function convertTextTableToMarkdown(rawText) {
       return '| ' + row.slice(0, colCount).join(' | ') + ' |';
     });
 
-    return [
-      ...introLines,
-      '',
-      mdHeader,
-      mdDivider,
-      ...mdRows
-    ].join('\n');
+    const result = [];
+    if (introLines.length > 0) {
+      result.push(...introLines, '');
+    }
+    result.push(mdHeader, mdDivider, ...mdRows);
+    if (outroLines.length > 0) {
+      result.push('', ...outroLines);
+    }
+
+    return result.join('\n');
   }
   return rawText;
 }
@@ -1466,6 +1495,11 @@ const buildExtractionPrompt = (pdfChunk, expectedCount) => `You are a strict dat
 The text below contains exactly ${expectedCount} question block${expectedCount === 1 ? "" : "s"}. Extract EVERY block, in source order, without combining or omitting one. Keep question wording and options faithful to the source.
 Output a JSON object. No markdown, no extra text outside the JSON block.
 
+STRICT EXTRACTION INTEGRITY RULES:
+- Extract EXACTLY the questions that are uploaded in this chunk.
+- NEVER invent, generate, extrapolate, or hallucinate new or hypothetical questions. Extract ONLY what appears in the provided text.
+- Retain exact numbers, options (A through E), and question phrasing from the source text.
+
 CRITICAL MATHEMATICAL NOTATION RULES:
 - PRESERVE ALL POWERS AND ROOTS PRECISELY:
   * Squares: use ² (e.g. (803.63)² or 15²)
@@ -1479,14 +1513,17 @@ CRITICAL MATHEMATICAL NOTATION RULES:
   * Vertical/standalone fractions: write as 11/7, 3/4, etc. (e.g. - 11/7 of 1734.68). NEVER drop "11/7" to leave just "- of 1734.68"!
 - PRESERVE OPERATORS: use × for multiplication, ÷ for division, √ for square root, ∛ for cube root.
 
-STEP-BY-STEP SOLUTION MANDATE:
-- For the "explanation" field of EVERY question, you MUST provide a detailed step-by-step solution.
-- For Quantitative Aptitude (Simplification, Approximation, Series, DI):
-  Show:
-  Step 1: Conversion of mixed fractions and fractional powers (e.g. 22 ⅓% = 67/300, (1681)^(1/2) = 41, (4094)^(1/3) ≈ 16)
-  Step 2: Step-by-step arithmetic computation with intermediate values
-  Step 3: Clear statement of the correct option and final value.
-- For Reasoning & English: provide clear logical rationale.
+STEP-BY-STEP SOLUTION & DIAGRAM MANDATE:
+- For the "explanation" field of EVERY question, you MUST provide a detailed step-by-step solution:
+  * Reasoning Puzzles & Seating Arrangements: Provide step-by-step deductive logic AND include the complete final solved markdown table (e.g. | Person | Floor / Position | Attribute | ...) so students see the complete solved matrix!
+  * Direction Sense: Detail each step of the journey with exact distances and cardinal directions (e.g. "Starts at Point A, walks 10m North to Point B, turns right and walks 5m East to Point C...") so the diagram generator can draw the exact path.
+  * Syllogisms: Explicitly list the statements ("Statements: All A are B. Some B are C.") and conclusions ("Conclusions: I. Some A are C. II. No A is C.") with step-by-step Venn circle analysis and deduction.
+  * Quantitative Aptitude (Simplification, Approximation, Series, DI):
+    Show:
+    Step 1: Conversion of mixed fractions and fractional powers (e.g. 22 ⅓% = 67/300, (1681)^(1/2) = 41, (4094)^(1/3) ≈ 16)
+    Step 2: Step-by-step arithmetic computation with intermediate values
+    Step 3: Clear statement of the correct option and final value.
+  * English Language: State the grammatical rule, error correction, or context-based justification.
 
 BANK EXAM 3-SECTION MANDATE:
 Categorize each question into one of the 3 standard Bank sections:
@@ -1618,17 +1655,17 @@ async function callGroq(apiKey, prompt) {
 
 
 async function callLLMChain(prompt) {
-  const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY");
-  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
   const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
+  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
+  const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY");
   
   const providers = [];
+  if (nvidiaKey) providers.push({ name: "NVIDIA", fn: () => callNvidia(nvidiaKey, prompt) });
   if (geminiKey) providers.push({ name: "Gemini", fn: () => callGemini(geminiKey, prompt) });
   if (groqKey)   providers.push({ name: "Groq",   fn: () => callGroq(groqKey, prompt) });
-  if (nvidiaKey) providers.push({ name: "NVIDIA", fn: () => callNvidia(nvidiaKey, prompt) });
 
   if (providers.length === 0) {
-    throw new Error("No API key configured. Add at least one of: VITE_GROQ_API_KEY, VITE_GEMINI_API_KEY, or VITE_NVIDIA_API_KEY in your .env file.");
+    throw new Error("No API key configured. Add at least one of: VITE_NVIDIA_API_KEY, VITE_GEMINI_API_KEY, or VITE_GROQ_API_KEY in your .env file.");
   }
 
   let lastError = null;
@@ -1677,8 +1714,8 @@ function chunkText(text, maxLen = 12000) {
 // split a question from its options, which was the main reason questions vanished.
 function chunkQuestions(text, maxQuestions = 6, maxChars = 5000) {
   // Some PDFs run the question number directly into the text (for example,
-  // "51.Which..."). A look-ahead preserves both that form and "51. Which...".
-  const marker = /(^|\n)\s*(?:(?:question|ques|q)\s*)?\d{1,3}\s*[.)](?=\s*\S)/gim;
+  // "51.Which..."). A look-ahead preserves both that form, "51. Which...", "Q.51:", and "(51)".
+  const marker = /(^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*\d{1,3}\s*[\.\)\:\-]\s*|\(\d{1,3}\)\s*)(?=\s*\S)/gim;
   const starts = [];
   let match;
   while ((match = marker.exec(text)) !== null) starts.push(match.index + match[1].length);
@@ -1955,17 +1992,17 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     throw new Error("PDF text content is too short or empty. Please upload a valid question paper PDF.");
   }
 
-  // Use Gemini first for page OCR, with NVIDIA Llama Vision as a fallback for
-  // chart/table pages. Both providers receive only selected relevant pages.
-  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
+  // Use NVIDIA Nemotron Parse / Vision as Primary for page OCR, with Google Gemini
+  // Vision as Secondary fallback for chart/table pages.
   const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
+  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
   let enrichedText = pdfText;
 
-  if (pageImages.length > 0 && (geminiKey || nvidiaKey)) {
+  if (pageImages.length > 0 && (nvidiaKey || geminiKey)) {
     // Selectively enrich only DI chart / table pages (max 4) rather than bombarding all 19 pages
     const diPages = pageImages.filter(p => !p.isPromo && (p.hasDI || /(?:directions?|chart|graph|table|breakup|ratio|sold by|percentage)/i.test(p.text || ""))).slice(0, 4);
     if (diPages.length > 0) {
-      console.log(`[AI Vision] 🖼️ Enriching ${diPages.length} DI chart page(s) with Gemini Vision...`);
+      console.log(`[AI Vision] 🖼️ Enriching ${diPages.length} DI chart page(s) with NVIDIA Nemotron Parse (Primary) & Gemini (Secondary)...`);
       if (onProgress) onProgress(0, diPages.length);
       const visionResults = [];
       const BATCH_SIZE = 2;
@@ -1975,14 +2012,14 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         const batchPromises = batch.map(async (pageImg, bIdx) => {
           const pageNum = pageImg.pageNum || (i + bIdx + 1);
           try {
-            console.log(`[AI Vision] Scanning page ${pageNum} for charts/tables/graphs...`);
+            console.log(`[AI Vision] Scanning page ${pageNum} with NVIDIA Nemotron Parse (Primary)...`);
             let visionText = null;
-            if (geminiKey) {
-              visionText = await callGeminiVisionPage(geminiKey, pageImg.base64, pageImg.mimeType || "image/jpeg");
-            }
-            if (!visionText && nvidiaKey) {
-              console.log(`[AI Vision] Gemini unavailable; using NVIDIA Llama Vision for page ${pageNum}.`);
+            if (nvidiaKey) {
               visionText = await callNvidiaVisionPage(nvidiaKey, pageImg.base64, pageImg.mimeType || "image/jpeg");
+            }
+            if (!visionText && geminiKey) {
+              console.log(`[AI Vision] NVIDIA unavailable; using Gemini Vision (Secondary) for page ${pageNum}.`);
+              visionText = await callGeminiVisionPage(geminiKey, pageImg.base64, pageImg.mimeType || "image/jpeg");
             }
             if (visionText && visionText.length > 50) {
               console.log(`[AI Vision] ✅ Page ${pageNum}: Extracted ${visionText.length} chars (charts/tables detected)`);
@@ -2004,9 +2041,19 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
   }
 
-  // Separate solutions/answers so AI processes questions without hitting output limits on solutions
-  const splitMatch = enrichedText.match(/\n\s*(?:ANSWERS?\s*(?:KEY|SHEET|&\s*EXPLANATIONS|:)?|HINTS\s*&\s*SOLUTIONS|DETAILED\s*SOLUTIONS|SOLUTIONS\s*&\s*EXPLANATIONS)\b/i);
-  const questionsOnlyText = splitMatch && splitMatch.index > 800 ? enrichedText.substring(0, splitMatch.index) : enrichedText;
+  // Only isolate solutions/answers if there are no subsequent questions after the header
+  let questionsOnlyText = enrichedText;
+  const splitMatch = enrichedText.match(/\n\s*(?:[-=~_*#]{2,}\s*)?(?:ANSWERS?\s+(?:KEY|SHEET)|ANSWER\s+KEY|HINTS\s*(?:&|AND)\s*SOLUTIONS?|DETAILED\s*SOLUTIONS?|SOLUTIONS\s*(?:&|AND)\s*EXPLANATIONS?)(?:\s*[-=~_*#]{2,})?\b/i);
+  if (splitMatch && splitMatch.index > 800) {
+    const textAfter = enrichedText.substring(splitMatch.index);
+    const subsequentQs = (textAfter.match(/(?:^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*\d{1,3}\s*[\.\)\:\-]\s*|\(\d{1,3}\)\s*)(?=\s*\S)/gi) || []).length;
+    if (subsequentQs < 2) {
+      questionsOnlyText = enrichedText.substring(0, splitMatch.index);
+      console.log(`[AI] Final solutions section detected at char ${splitMatch.index}. Extracted clean questions text.`);
+    } else {
+      console.log(`[AI] Notice: "${splitMatch[0].trim()}" is an intermediate heading (${subsequentQs} more questions follow). Retaining full document to prevent question loss.`);
+    }
+  }
 
   // Compact, question-aligned batches keep every response below provider limits.
   const chunks = chunkQuestions(questionsOnlyText, 6, 5000);
@@ -2028,11 +2075,11 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     };
   }
 
-  // Create an array of available provider callers
+  // Create an array of available provider callers: NVIDIA (Primary), Gemini (Secondary), Groq (Fallback)
   const providerCallers = [];
+  if (nvidiaKey) providerCallers.push({ name: "NVIDIA", call: (prompt) => callNvidia(nvidiaKey, prompt) });
   if (geminiKey) providerCallers.push({ name: "Gemini", call: (prompt) => callGemini(geminiKey, prompt) });
   if (groqKey)   providerCallers.push({ name: "Groq",   call: (prompt) => callGroq(groqKey, prompt) });
-  if (nvidiaKey) providerCallers.push({ name: "NVIDIA", call: (prompt) => callNvidia(nvidiaKey, prompt) });
 
   // How many parallel workers = min(number of providers, 3)
   const CONCURRENCY = Math.min(providerCallers.length, 3) || 1;

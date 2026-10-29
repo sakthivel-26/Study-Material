@@ -19,11 +19,13 @@ import { sortTestsByRecent } from "../utils/testSorting.js";
 const claimedKey = "ken_academy_free_mock_claimed";
 const readClaimed = () => { try { return JSON.parse(localStorage.getItem(claimedKey) || "{}"); } catch { return {}; } };
 const PACKAGES = {
-  banking: { label: "Banking", groups: ["Banking"], amount: "499" },
+  banking: { label: "Banking (IBPS & SBI)", groups: ["Banking"], amount: "499" },
+  rrb: { label: "RRB (PO & Clerk)", groups: ["RRB"], amount: "499" },
+  insurance: { label: "Insurance (LIC/NIACL)", groups: ["Insurance"], amount: "499" },
   tnpsc: { label: "TNPSC", groups: ["TNPSC"], amount: "599" },
   ssc: { label: "SSC", groups: ["SSC"], amount: "499" },
   railway: { label: "Railway", groups: ["Railway"], amount: "399" },
-  navy: { label: "Defence & Navy", groups: ["Navy"], amount: "399" }
+  navy: { label: "Defence & NDA", groups: ["Navy", "Defence"], amount: "399" }
 };
 const planAmount = (id, fallback) => {
   try {
@@ -33,6 +35,17 @@ const planAmount = (id, fallback) => {
   } catch (e) {}
   return fallback;
 };
+
+const MOCK_CATEGORY_TABS = [
+  { id: "all", label: "All Exams" },
+  { id: "banking", label: "BANK IBPS & SBI" },
+  { id: "tnpsc", label: "TNPSC" },
+  { id: "ssc", label: "SSC (CGL/CHSL)" },
+  { id: "railway", label: "Railway (NTPC/Group D)" },
+  { id: "rrb", label: "RRB (PO & Clerk)" },
+  { id: "defence", label: "Defence & NDA" },
+  { id: "insurance", label: "Insurance (LIC/NIACL)" },
+];
 
 export default function MockTestsPage() {
   const { mockTests, getLatestAttempt, plans = [] } = useApp();
@@ -49,6 +62,7 @@ export default function MockTestsPage() {
   const [pendingTestForMode, setPendingTestForMode] = useState(null);
   const [activeExamMode, setActiveExamMode] = useState("real");
   const [viewingAttempt, setViewingAttempt] = useState(null); // { attempt, tab, test }
+  const [activeCategoryTab, setActiveCategoryTab] = useState("all");
   
   const [claimed, setClaimed] = useState(readClaimed);
   const [notice, setNotice] = useState(null);
@@ -58,10 +72,12 @@ export default function MockTestsPage() {
   const testGroup = (test) => {
     if (!test) return "Other";
     const cat = String(test.category || "").toLowerCase();
+    if (cat.includes("rrb") || cat.includes("regional rural")) return "RRB";
+    if (cat.includes("insurance") || cat.includes("lic") || cat.includes("niacl") || cat.includes("uiic")) return "Insurance";
     if (cat.includes("bank") || cat.includes("ibps") || cat.includes("sbi")) return "Banking";
     if (cat.includes("tnpsc")) return "TNPSC";
     if (cat.includes("ssc")) return "SSC";
-    if (cat.includes("railway") || cat.includes("rrb") || cat.includes("ntpc")) return "Railway";
+    if (cat.includes("railway") || cat.includes("ntpc")) return "Railway";
     if (cat.includes("defence") || cat.includes("navy") || cat.includes("nda")) return "Navy";
     return CATEGORIES.find(c => c.name.toLowerCase() === cat)?.group || "Other";
   };
@@ -69,10 +85,12 @@ export default function MockTestsPage() {
   const getPackageForTest = (test) => {
     if (!test) return null;
     const cat = String(test.category || "").toLowerCase();
+    if (cat.includes("rrb") || cat.includes("regional rural")) return { id: "rrb", ...PACKAGES.rrb };
+    if (cat.includes("insurance") || cat.includes("lic") || cat.includes("niacl") || cat.includes("uiic")) return { id: "insurance", ...PACKAGES.insurance };
     if (cat.includes("bank") || cat.includes("ibps") || cat.includes("sbi")) return { id: "banking", ...PACKAGES.banking };
     if (cat.includes("tnpsc")) return { id: "tnpsc", ...PACKAGES.tnpsc };
     if (cat.includes("ssc")) return { id: "ssc", ...PACKAGES.ssc };
-    if (cat.includes("railway") || cat.includes("rrb") || cat.includes("ntpc")) return { id: "railway", ...PACKAGES.railway };
+    if (cat.includes("railway") || cat.includes("ntpc")) return { id: "railway", ...PACKAGES.railway };
     if (cat.includes("defence") || cat.includes("navy") || cat.includes("nda")) return { id: "navy", ...PACKAGES.navy };
 
     const group = CATEGORIES.find(c => c.name.toLowerCase() === cat)?.group || "Other";
@@ -95,10 +113,24 @@ export default function MockTestsPage() {
     }
   }, [isAuthed, user?.id]);
 
-  const packageTests = sortTestsByRecent(
+  const basePackageTests = sortTestsByRecent(
     selected ? mockTests.filter(t => selected.groups.includes(testGroup(t)) && !t.isFree) : mockTests.filter(t => !t.isFree)
   );
-  const visibleTests = exam ? packageTests.filter(t => t.category.toLowerCase().includes(exam.toLowerCase().split(" ")[0]) || t.title.toLowerCase().includes(exam.toLowerCase())) : packageTests;
+  const visibleTests = basePackageTests.filter(t => {
+    if (exam) {
+      return t.category.toLowerCase().includes(exam.toLowerCase().split(" ")[0]) || t.title.toLowerCase().includes(exam.toLowerCase());
+    }
+    if (activeCategoryTab === "all") return true;
+    const catStr = String(t.category || "").toLowerCase();
+    if (activeCategoryTab === "banking") return (catStr.includes("bank") || catStr.includes("ibps") || catStr.includes("sbi")) && !catStr.includes("rrb");
+    if (activeCategoryTab === "rrb") return catStr.includes("rrb") || catStr.includes("regional rural");
+    if (activeCategoryTab === "insurance") return catStr.includes("insurance") || catStr.includes("lic") || catStr.includes("niacl") || catStr.includes("uiic");
+    if (activeCategoryTab === "tnpsc") return catStr.includes("tnpsc");
+    if (activeCategoryTab === "ssc") return catStr.includes("ssc");
+    if (activeCategoryTab === "railway") return catStr.includes("railway") || catStr.includes("ntpc") || catStr.includes("group d");
+    if (activeCategoryTab === "defence") return catStr.includes("defence") || catStr.includes("nda") || catStr.includes("navy");
+    return true;
+  });
   const firstForCategory = (test) => visibleTests.filter(t=>t.category===test.category).find(t=>t.id===test.id)?.id===test.id;
   const amount = selected ? planAmount(packageId, selected.amount) : "—";
   
@@ -211,12 +243,31 @@ export default function MockTestsPage() {
         </div>
       )}
 
+      {/* Category Tabs */}
+      {!requestedPackage && !exam && (
+        <div className="flex flex-nowrap overflow-x-auto gap-2 mb-6 pb-2 hide-scrollbar">
+          {MOCK_CATEGORY_TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveCategoryTab(tab.id)}
+              className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs md:text-sm font-bold transition-all cursor-pointer ${
+                activeCategoryTab === tab.id 
+                  ? "bg-[#1B4F72] text-white shadow-md" 
+                  : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Series Title Section (Matching Screenshot 2) */}
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-6 bg-rose-600 rounded-full" />
           <h2 className="text-lg md:text-xl font-extrabold text-slate-900">
-            {selected ? `${selected.label} Mock Test 2026 Series` : exam ? `${exam} Mock Test Series` : "Official Mock Test 2026 Series"}
+            {selected ? `${selected.label} Mock Test 2026 Series` : exam ? `${exam} Mock Test Series` : `${MOCK_CATEGORY_TABS.find(t => t.id === activeCategoryTab)?.label || "Official"} Mock Test 2026 Series`}
           </h2>
         </div>
         <span className="text-xs text-slate-500 font-semibold">

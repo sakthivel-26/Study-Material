@@ -18,6 +18,7 @@ import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from 
 import { formatStudentJoinDate } from "../../utils/studentDate.js";
 import { sortTestsByRecent } from "../../utils/testSorting.js";
 import DirectionDiagramView from "../../components/DirectionDiagramView.jsx";
+import SyllogismDiagramView from "../../components/SyllogismDiagramView.jsx";
 
 /* ---------------------------- Create Mock Test ---------------------------- */
 import CategoryGrid from "../../components/CategoryGrid.jsx";
@@ -451,6 +452,45 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     { name: "Quantitative Aptitude", durationMinutes: 20, questionCount: 35 },
     { name: "Reasoning Ability", durationMinutes: 20, questionCount: 35 },
   ];
+
+  const MAINS_200_SECTIONS = [
+    { name: "Reasoning & Computer Aptitude", durationMinutes: 40, questionCount: 50 },
+    { name: "Quantitative Aptitude / Data Analysis", durationMinutes: 40, questionCount: 50 },
+    { name: "General / Financial Awareness", durationMinutes: 20, questionCount: 50 },
+    { name: "English Language", durationMinutes: 20, questionCount: 50 },
+  ];
+
+  const IBPS_PO_MAINS_SECTIONS = [
+    { name: "Reasoning & Computer Aptitude", durationMinutes: 60, questionCount: 45 },
+    { name: "Data Analysis & Interpretation", durationMinutes: 45, questionCount: 35 },
+    { name: "General / Economy / Banking Awareness", durationMinutes: 35, questionCount: 40 },
+    { name: "English Language", durationMinutes: 40, questionCount: 35 },
+    { name: "Descriptive Paper (Letter & Essay)", durationMinutes: 30, questionCount: 2 },
+  ];
+
+  const SBI_PO_MAINS_SECTIONS = [
+    { name: "Reasoning & Computer Aptitude", durationMinutes: 50, questionCount: 40 },
+    { name: "Data Analysis & Interpretation", durationMinutes: 45, questionCount: 30 },
+    { name: "General / Economy / Banking Awareness", durationMinutes: 45, questionCount: 50 },
+    { name: "English Language", durationMinutes: 40, questionCount: 35 },
+    { name: "Descriptive Paper (Letter & Essay)", durationMinutes: 30, questionCount: 2 },
+  ];
+
+  const IBPS_CLERK_MAINS_SECTIONS = [
+    { name: "General / Financial Awareness", durationMinutes: 35, questionCount: 50 },
+    { name: "General English", durationMinutes: 35, questionCount: 35 },
+    { name: "Reasoning Ability & Computer Aptitude", durationMinutes: 45, questionCount: 50 },
+    { name: "Quantitative Aptitude", durationMinutes: 45, questionCount: 50 },
+  ];
+
+  const RRB_MAINS_SECTIONS = [
+    { name: "Reasoning Ability", durationMinutes: 30, questionCount: 40 },
+    { name: "Quantitative Aptitude", durationMinutes: 30, questionCount: 40 },
+    { name: "General Awareness", durationMinutes: 20, questionCount: 40 },
+    { name: "English / Hindi Language", durationMinutes: 25, questionCount: 40 },
+    { name: "Computer Knowledge", durationMinutes: 15, questionCount: 40 },
+  ];
+
   const [testType, setTestType] = useState("full_mock"); // "full_mock" | "standard"
   const [sectionsConfig, setSectionsConfig] = useState(BANKING_DEFAULT_SECTIONS);
   const [activeManualSectionTab, setActiveManualSectionTab] = useState("English Language");
@@ -476,12 +516,88 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   };
 
   const resetToBankingPresets = () => {
-    setSectionsConfig([
-      { name: "English Language", durationMinutes: 20, questionCount: 30 },
-      { name: "Quantitative Aptitude", durationMinutes: 20, questionCount: 35 },
-      { name: "Reasoning Ability", durationMinutes: 20, questionCount: 35 },
-    ]);
-    pushToast("Loaded Standard Banking Prelims sections!");
+    setSectionsConfig(BANKING_DEFAULT_SECTIONS);
+    pushToast("Loaded Standard Banking Prelims sections (100Q · 60m)!");
+  };
+
+  const loadMains200Presets = () => {
+    setSectionsConfig(MAINS_200_SECTIONS);
+    setF(prev => ({
+      ...prev,
+      category: prev.category || "Banking",
+      subject: "Mains Full Mock",
+      topic: "All Sections (200Q)",
+      questions: "200",
+      time: "120 min",
+      isSectionalTimed: true,
+      sections: MAINS_200_SECTIONS.map(s => s.name)
+    }));
+    setTestType("full_mock");
+    pushToast("Loaded Bank Mains Pattern (200 Qs · 120m)!");
+  };
+
+  const loadIbpsPoMainsPresets = () => {
+    setSectionsConfig(IBPS_PO_MAINS_SECTIONS);
+    setF(prev => ({
+      ...prev,
+      category: "Banking",
+      subject: "IBPS PO Mains",
+      topic: "Objective + Descriptive",
+      questions: "172",
+      time: "210 min",
+      isSectionalTimed: true,
+      sections: IBPS_PO_MAINS_SECTIONS.map(s => s.name)
+    }));
+    setTestType("full_mock");
+    pushToast("Loaded IBPS PO Mains Pattern (170 Objective + 2 Descriptive · 210m)!");
+  };
+
+  const loadSbiPoMainsPresets = () => {
+    setSectionsConfig(SBI_PO_MAINS_SECTIONS);
+    setF(prev => ({
+      ...prev,
+      category: "Banking",
+      subject: "SBI PO Mains",
+      topic: "Objective + Descriptive",
+      questions: "157",
+      time: "210 min",
+      isSectionalTimed: true,
+      sections: SBI_PO_MAINS_SECTIONS.map(s => s.name)
+    }));
+    setTestType("full_mock");
+    pushToast("Loaded SBI PO Mains Pattern (155 Objective + 2 Descriptive · 210m)!");
+  };
+
+  const loadIbpsClerkMainsPresets = () => {
+    setSectionsConfig(IBPS_CLERK_MAINS_SECTIONS);
+    setF(prev => ({
+      ...prev,
+      category: "Banking",
+      subject: "IBPS Clerk Mains",
+      topic: "All 4 Sections",
+      questions: "190",
+      time: "160 min",
+      isSectionalTimed: true,
+      sections: IBPS_CLERK_MAINS_SECTIONS.map(s => s.name)
+    }));
+    setTestType("full_mock");
+    pushToast("Loaded IBPS Clerk Mains Pattern (190 Qs · 160m)!");
+  };
+
+  const loadRrbMainsPresets = () => {
+    setSectionsConfig(RRB_MAINS_SECTIONS);
+    setF(prev => ({
+      ...prev,
+      category: "RRB (PO & Clerk)",
+      subject: "RRB PO / Clerk Mains",
+      topic: "All 5 Sections",
+      questions: "200",
+      time: "120 min",
+      isSectionalTimed: true,
+      sections: RRB_MAINS_SECTIONS.map(s => s.name)
+    }));
+    setTestType("full_mock");
+    pushToast("Loaded RRB PO / Clerk Mains Pattern (200 Qs · 120m)!");
   };
 
   const autoGenerateQuestionSlots = () => {
@@ -1283,21 +1399,25 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     const cleanText = fullText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
     // 1. ISOLATE QUESTIONS TEXT & SOLUTIONS TEXT
-    // Distinguish between pure ANSWER KEY (single letters) and HINTS & SOLUTIONS (full working steps)
-    const detailedSolMatch = cleanText.match(/\n\s*(?:HINTS?\s*(?:&|AND)\s*SOLUTIONS?|DETAILED\s*SOLUTIONS?|SOLUTIONS?\s*(?:&|AND)\s*EXPLANATIONS?|HINTS?\s*(?:&|AND)\s*EXPLANATIONS?|EXPLANATIONS?|SOLUTIONS?)\b/i);
-    const ansKeyMatch = cleanText.match(/\n\s*(?:ANSWERS?\s*(?:KEY|SHEET|&\s*EXPLANATIONS|:)?)\b/i);
+    // Distinguish between pure ANSWER KEY headers and HINTS & SOLUTIONS headers
+    const detailedSolMatch = cleanText.match(/\n\s*(?:[-=~_*#]{2,}\s*)?(?:HINTS?\s*(?:&|AND)\s*SOLUTIONS?|DETAILED\s*SOLUTIONS?|SOLUTIONS?\s*(?:&|AND)\s*EXPLANATIONS?|HINTS?\s*(?:&|AND)\s*EXPLANATIONS?)(?:\s*[-=~_*#]{2,})?\b/i);
+    const ansKeyMatch = cleanText.match(/\n\s*(?:[-=~_*#]{2,}\s*)?(?:ANSWERS?\s+(?:KEY|SHEET)|ANSWER\s+KEY)(?:\s*[-=~_*#]{2,})?\b/i);
 
     const firstSplitIndex = [ansKeyMatch?.index, detailedSolMatch?.index].filter(idx => typeof idx === "number" && idx > 500).sort((a,b) => a - b)[0];
     
     let questionsText = cleanText;
-    let solutionsText = "";
-    let detailedSolText = "";
+    let solutionsText = cleanText;
+    let detailedSolText = detailedSolMatch ? cleanText.substring(detailedSolMatch.index) : cleanText;
 
     if (firstSplitIndex) {
-      questionsText = cleanText.substring(0, firstSplitIndex);
-      solutionsText = cleanText.substring(firstSplitIndex);
+      const textAfter = cleanText.substring(firstSplitIndex);
+      const subsequentQs = (textAfter.match(/(?:^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*\d{1,3}\s*[\.\)\:\-]\s*|\(\d{1,3}\)\s*)(?=\s*\S)/gi) || []).length;
+      if (subsequentQs < 2) {
+        questionsText = cleanText.substring(0, firstSplitIndex);
+        solutionsText = cleanText.substring(firstSplitIndex);
+        detailedSolText = detailedSolMatch && detailedSolMatch.index > 500 ? cleanText.substring(detailedSolMatch.index) : solutionsText;
+      }
     }
-    detailedSolText = detailedSolMatch && detailedSolMatch.index > 500 ? cleanText.substring(detailedSolMatch.index) : solutionsText;
 
     // 2. EXTRACT ANSWER KEY MAP (e.g. 1. d.) 2401, 2. d) 248, 6.d, 11. b, 16. (Option A), 81. a)
     const answerKeyMap = {};
@@ -1850,8 +1970,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             });
             if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
               const aiQs = aiResult.rawExtractedQuestions;
-              // If AI only extracted a partial set (e.g. 33 questions out of 100), merge seamlessly so all 100 questions are preserved!
-              if (offlineQuestions.length > aiQs.length && offlineQuestions.length >= 20) {
+              // If AI only extracted a partial set (e.g. 7 questions out of 30), merge seamlessly so all questions are preserved!
+              if (offlineQuestions.length > aiQs.length && offlineQuestions.length > 0) {
                 console.log(`[Extraction] AI extracted ${aiQs.length} questions, but full paper has ${offlineQuestions.length} questions. Merging complete paper!`);
                 const merged = [...offlineQuestions];
                 aiQs.forEach((aiQ, idx) => {
@@ -2394,21 +2514,49 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               onClick={() => setF(prev => ({ ...prev, category: "Banking", subject: "Quantitative Aptitude", topic: "Full Quants & DI", questions: "35", time: "20 min", isSectionalTimed: false }))}
               className="px-2.5 py-1 text-xs font-bold rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-colors cursor-pointer"
             >
-              📊 Quants Sectional (35 Qs · 20m)
+              📊 Quants (35 Qs · 20m)
             </button>
             <button
               type="button"
               onClick={() => setF(prev => ({ ...prev, category: "Banking", subject: "Reasoning Ability", topic: "Puzzles & Seating", questions: "35", time: "20 min", isSectionalTimed: false }))}
               className="px-2.5 py-1 text-xs font-bold rounded-lg border border-purple-200 bg-purple-50 text-purple-800 hover:bg-purple-100 transition-colors cursor-pointer"
             >
-              🧩 Reasoning Sectional (35 Qs · 20m)
+              🧩 Reasoning (35 Qs · 20m)
             </button>
             <button
               type="button"
-              onClick={() => setF(prev => ({ ...prev, category: "Banking", subject: "Prelims Full Mock", topic: "All Sections", questions: "100", time: "60 min", isSectionalTimed: true }))}
+              onClick={resetToBankingPresets}
               className="px-2.5 py-1 text-xs font-bold rounded-lg border border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 transition-colors cursor-pointer"
             >
-              📝 Full Mock (100 Qs · 60m)
+              📝 Prelims (100 Qs · 60m)
+            </button>
+            <button
+              type="button"
+              onClick={loadMains200Presets}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 transition-colors cursor-pointer"
+            >
+              🏆 Mains (200 Qs · 120m)
+            </button>
+            <button
+              type="button"
+              onClick={loadIbpsPoMainsPresets}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 transition-colors cursor-pointer"
+            >
+              🏛️ IBPS PO Mains (170Q + Desc)
+            </button>
+            <button
+              type="button"
+              onClick={loadIbpsClerkMainsPresets}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-800 hover:bg-cyan-100 transition-colors cursor-pointer"
+            >
+              💼 Clerk Mains (190 Qs)
+            </button>
+            <button
+              type="button"
+              onClick={loadRrbMainsPresets}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg border border-emerald-300 bg-emerald-100/70 text-emerald-900 hover:bg-emerald-200/70 transition-colors cursor-pointer"
+            >
+              🌾 RRB Mains (200 Qs)
             </button>
             <button
               type="button"
@@ -2432,6 +2580,32 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               <datalist id="category-options">
                 {CATEGORIES.map((c) => <option key={c.id} value={c.name} />)}
               </datalist>
+
+              {/* Quick Category Selection Chips */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                {[
+                  { name: "Banking", label: "🏦 Bank" },
+                  { name: "RRB (PO & Clerk)", label: "🌾 RRB" },
+                  { name: "Insurance Exams", label: "🛡️ Insurance" },
+                  { name: "TNPSC", label: "🏛️ TNPSC" },
+                  { name: "SSC", label: "📜 SSC" },
+                  { name: "Railway", label: "🚆 Railway" },
+                  { name: "Defence & NDA", label: "🎖️ Defence" },
+                ].map((cat) => (
+                  <button
+                    key={cat.name}
+                    type="button"
+                    onClick={() => set("category", cat.name)}
+                    className={`px-2 py-0.5 text-[11px] font-bold rounded-md border transition-all cursor-pointer ${
+                      f.category === cat.name
+                        ? "bg-[#1B4F72] text-white border-[#1B4F72] shadow-xs"
+                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div>
               <label className="text-sm font-medium text-ink-soft mb-1.5 block">Subject</label>
@@ -2656,13 +2830,48 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       <span className="text-xs font-bold text-[#1B4F72] uppercase tracking-wider">
                         Configure Sections (Timing &amp; Question Target):
                       </span>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <button
                           type="button"
                           onClick={resetToBankingPresets}
-                          className="text-[11px] font-bold text-blue-700 bg-white hover:bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg transition-colors"
+                          className="text-[11px] font-bold text-blue-700 bg-white hover:bg-blue-50 border border-blue-200 px-2 py-1 rounded-lg transition-colors"
                         >
-                          ↻ Reset to Banking Prelims (60m · 100Q)
+                          ↻ Prelims (100Q · 60m)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={loadMains200Presets}
+                          className="text-[11px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-1 rounded-lg transition-colors"
+                        >
+                          🏆 Mains 200Q (120m)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={loadIbpsPoMainsPresets}
+                          className="text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg transition-colors"
+                        >
+                          🏛️ IBPS PO Mains
+                        </button>
+                        <button
+                          type="button"
+                          onClick={loadSbiPoMainsPresets}
+                          className="text-[11px] font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2 py-1 rounded-lg transition-colors"
+                        >
+                          🏛️ SBI PO Mains
+                        </button>
+                        <button
+                          type="button"
+                          onClick={loadIbpsClerkMainsPresets}
+                          className="text-[11px] font-bold text-cyan-700 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 px-2 py-1 rounded-lg transition-colors"
+                        >
+                          💼 Clerk Mains (190Q)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={loadRrbMainsPresets}
+                          className="text-[11px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-1 rounded-lg transition-colors"
+                        >
+                          🌾 RRB Mains (200Q)
                         </button>
                         <button
                           type="button"
@@ -3207,8 +3416,14 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                 const curPassage = approvedQuestions[idx]?.passage ?? (q.passage || "");
                                 if (curPassage && curPassage.trim()) {
                                   const formatted = convertTextTableToMarkdown(curPassage);
-                                  editPassage(idx, formatted);
-                                  pushToast("✨ Formatted into clean Markdown table!");
+                                  if (formatted && formatted !== curPassage) {
+                                    editPassage(idx, formatted);
+                                    pushToast("✨ Formatted into clean Markdown table!");
+                                  } else if (/\|.*\|/.test(curPassage) && /\|\s*[-:]+[-| :]*\|/.test(curPassage)) {
+                                    pushToast("ℹ️ Table is already in clean Markdown format!");
+                                  } else {
+                                    pushToast("⚠️ Could not detect a table. Format with columns or use '+ Insert DI Table'.");
+                                  }
                                 } else {
                                   const tableTemplate = `Directions: Study the following table and answer the questions:\n\n| Shop | Male visitors | Female visitors |\n| --- | --- | --- |\n| A | 40 | 60 |\n| B | 50 | 70 |\n| C | 60 | 90 |\n| D | 80 | 100 |\n`;
                                   editPassage(idx, tableTemplate);
@@ -3511,6 +3726,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         />
                       </div>
 
+                      {/* Direction Sense Visual Diagram Preview */}
+                      <DirectionDiagramView text={`${approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "")} ${approvedQuestions[idx]?.questionText ?? q.question_text ?? ""} ${approvedQuestions[idx]?.passage ?? (q.passage || "")}`} compact={true} />
+
+                      {/* Syllogism Venn Diagram Preview */}
+                      <SyllogismDiagramView text={`${approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "")} ${approvedQuestions[idx]?.questionText ?? q.question_text ?? ""} ${approvedQuestions[idx]?.passage ?? (q.passage || "")}`} compact={true} />
                     </div>
                   );
                 })}
@@ -3688,8 +3908,14 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                               const curPassage = approvedQuestions[idx]?.passage ?? (q.passage || "");
                               if (curPassage && curPassage.trim()) {
                                 const formatted = convertTextTableToMarkdown(curPassage);
-                                editPassage(idx, formatted);
-                                pushToast("✨ Formatted into clean Markdown table!");
+                                if (formatted && formatted !== curPassage) {
+                                  editPassage(idx, formatted);
+                                  pushToast("✨ Formatted into clean Markdown table!");
+                                } else if (/\|.*\|/.test(curPassage) && /\|\s*[-:]+[-| :]*\|/.test(curPassage)) {
+                                  pushToast("ℹ️ Table is already in clean Markdown format!");
+                                } else {
+                                  pushToast("⚠️ Could not detect a table. Format with columns or use '+ Insert DI Table'.");
+                                }
                               } else {
                                 const tableTemplate = `Directions: Study the following table and answer the questions:\n\n| Shop | Male visitors | Female visitors |\n| --- | --- | --- |\n| A | 40 | 60 |\n| B | 50 | 70 |\n| C | 60 | 90 |\n| D | 80 | 100 |\n`;
                                 editPassage(idx, tableTemplate);
@@ -4671,6 +4897,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                         {/* Direction Sense Visual Drawing Preview */}
                         <DirectionDiagramView text={`${q.explanation || ""} ${q.question || ""} ${q.passage || ""}`} compact={true} />
+
+                        {/* Syllogism Venn Diagram Preview */}
+                        <SyllogismDiagramView text={`${q.explanation || ""} ${q.question || ""} ${q.passage || ""}`} compact={true} />
                         
                         {/* Solution Image Upload */}
                         <div className="mt-4 flex items-center gap-2">

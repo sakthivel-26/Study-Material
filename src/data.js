@@ -23,6 +23,12 @@ export const CATEGORIES = [
   { id: "sbi-po", name: "SBI PO / Clerk", group: "Banking", icon: "🏦", color: "#0284C7", gradient: "from-sky-600 to-blue-600", materials: 0 },
   { id: "ibps-po", name: "IBPS PO / Clerk", group: "Banking", icon: "🏦", color: "#0EA5E9", gradient: "from-sky-500 to-cyan-500", materials: 0 },
 
+  // ----- RRB (Regional Rural Banks) -----
+  { id: "rrb-po", name: "RRB PO / Clerk", group: "RRB", icon: "🌾", color: "#0D9488", gradient: "from-teal-600 to-emerald-600", materials: 0 },
+
+  // ----- Insurance Exams -----
+  { id: "insurance-exams", name: "Insurance (LIC / NIACL / UIIC)", group: "Insurance", icon: "🛡️", color: "#6366F1", gradient: "from-indigo-600 to-violet-600", materials: 0 },
+
   // ----- SSC & Railway -----
   { id: "ssc-cgl", name: "SSC CGL / CHSL", group: "SSC", icon: "🏛", color: "#EF4444", gradient: "from-rose-500 to-red-500", materials: 0 },
   { id: "railway-ntpc", name: "Railway NTPC & Group D", group: "Railway", icon: "🚆", color: "#F59E0B", gradient: "from-amber-500 to-orange-500", materials: 0 },
@@ -38,7 +44,7 @@ export const CATEGORIES = [
 ];
 
 // Ordered exam groups for the category grid.
-export const CATEGORY_GROUPS = ["Banking", "SSC", "Railway", "TNPSC", "Defence", "Common Subjects"];
+export const CATEGORY_GROUPS = ["Banking", "RRB", "Insurance", "SSC", "Railway", "Defence", "TNPSC", "Common Subjects"];
 
 export const BANK_TOPICS = {
   "Quant": [
