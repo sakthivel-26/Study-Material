@@ -9,7 +9,7 @@ import {
 import { useApp } from "../store.jsx";
 import { useAuth } from "../auth.jsx";
 import BeginnerSolutionView from "./BeginnerSolutionView.jsx";
-import FormattedPassage from "./FormattedPassage.jsx";
+import FormattedPassage, { renderMathInline } from "./FormattedPassage.jsx";
 
 export default function TestAnalysisView({ attempt, onRetake, onClose, initialTab = "overview" }) {
   const { pushToast } = useApp();
@@ -761,7 +761,7 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
 
                     {/* Question Statement */}
                     <div className="font-semibold text-sm md:text-base text-slate-900 leading-relaxed">
-                      {activeSolutionQ?.question}
+                      {renderMathInline(activeSolutionQ?.question)}
                     </div>
 
                     {/* Options list with visual color codes */}
@@ -786,7 +786,7 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
                               <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-800 flex items-center justify-center text-xs font-bold">
                                 {String.fromCharCode(65 + oIdx)}
                               </span>
-                              <span>{opt}</span>
+                              <span>{renderMathInline(opt)}</span>
                             </div>
                             <div className="flex items-center gap-2 text-[11px] font-bold">
                               {isRightOpt && <span className="text-emerald-700">✓ Correct Answer</span>}
@@ -800,7 +800,7 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
                     {/* Detailed Beginner Step-by-Step Explanation Box */}
                     <div className="mt-4">
                       <BeginnerSolutionView
-                        explanation={activeSolutionQ?.explanation || "The correct answer has been verified by Ken IAS Academy subject experts."}
+                        explanation={activeSolutionQ?.solutionText || activeSolutionQ?.explanation || "The correct answer has been verified by Ken IAS Academy subject experts."}
                         correctAnswerIndex={activeSolutionQ?.correctAnswerIndex}
                         options={activeSolutionQ?.options}
                         question={activeSolutionQ?.question}

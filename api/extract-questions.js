@@ -5,23 +5,33 @@ export const config = {
 };
 
 const SYSTEM_PROMPT = `
-You are a strict data extraction AI. You MUST output ONLY valid JSON. DO NOT output any markdown, explanations, or conversational text.
-Extract: question number, question text, A, B, C, D, source answer, page number, and any associated passage/directions.
-If the question is part of a reading comprehension, puzzle, seating arrangement, or data interpretation chart, include the full passage/directions text in the 'passage' field. Otherwise, 'passage': null.
+You are a strict data extraction AI for Bank and competitive exams. You MUST output ONLY valid JSON. DO NOT output any markdown, explanations, or conversational text.
+Extract: question number, question text, section ("English Language" | "Reasoning Ability" | "Quantitative Aptitude"), options (A, B, C, D, and E if present), source answer, page number, associated passage/directions, and step-by-step explanation.
+
+CRITICAL MATHEMATICAL NOTATION RULES:
+- Squares: use ² (e.g. (803.63)² or 15²)
+- Cubes: use ³ (e.g. 27³ or 12³)
+- Higher powers: use ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- Fractional exponents: write as ^(1/2), ^(1/3), ^(2/3), etc. (e.g. (1681)^(1/2) + (4094)^(1/3) = ?)
+- NEVER drop powers or carets! (1681)^(1/2) must stay (1681)^(1/2), NEVER (1681)^.
+- Fractions: preserve mixed fractions (e.g. 22 ⅓ % of 435.1) and vertical fractions (e.g. 11/7 of 1734.68). NEVER drop fractions!
+- Operators: use × for multiplication, ÷ for division, √ for square root, ∛ for cube root.
+
 Return ONLY JSON matching this schema:
 {
   "questions": [
     {
       "passage": "Directions (1-5): Study the following information carefully...",
       "question_number": 1,
+      "section": "Quantitative Aptitude",
       "question_text": "...",
-      "options": { "A": "...", "B": "...", "C": "...", "D": "..." },
+      "options": { "A": "...", "B": "...", "C": "...", "D": "...", "E": "..." },
       "source_answer": null,
+      "explanation": "Detailed step-by-step solution showing calculations and intermediate steps.",
       "page_number": 1
     }
   ]
 }
-Never invent missing information. If the answer key is not present: "source_answer": null
 `;
 
 export default async function handler(req, res) {

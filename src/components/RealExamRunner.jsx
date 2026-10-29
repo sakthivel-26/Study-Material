@@ -8,7 +8,7 @@ import {
 import { useApp } from "../store.jsx";
 import { useAuth } from "../auth.jsx";
 import TestAnalysisView from "./TestAnalysisView.jsx";
-import FormattedPassage from "./FormattedPassage.jsx";
+import FormattedPassage, { renderMathInline } from "./FormattedPassage.jsx";
 
 export default function RealExamRunner({ test, onClose }) {
   const { pushToast, saveTestAttempt } = useApp();
@@ -33,12 +33,14 @@ export default function RealExamRunner({ test, onClose }) {
         }
         const finalLetter = q.ai_verified_answer || q.source_answer || "A";
         const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
+        const sol = q.solutionText || q.explanation || q.verification_explanation || "Verified answer.";
         return {
           id: q.id || `q_${idx}`,
           question: q.question_text || q.question || `Question ${idx + 1}`,
           options: opts,
           correctAnswerIndex: ansIndex < opts.length ? ansIndex : 0,
-          explanation: q.verification_explanation || "Verified answer.",
+          explanation: sol,
+          solutionText: sol,
           section: q.section || "General",
           passage: q.passage || "",
           imageUrl: q.imageUrl || q.image || q.chartUrl || q.img || "",
@@ -120,6 +122,37 @@ export default function RealExamRunner({ test, onClose }) {
   const [status, setStatus] = useState({});
   const [visited, setVisited] = useState({});
 
+  // Dynamic references to guarantee timer callbacks and async auto-submits ALWAYS have latest state
+  const answersRef = useRef(answers);
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+
+  const statusRef = useRef(status);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  const currentSectionIndexRef = useRef(currentSectionIndex);
+  useEffect(() => {
+    currentSectionIndexRef.current = currentSectionIndex;
+  }, [currentSectionIndex]);
+
+  const sectionsConfigRef = useRef(sectionsConfig);
+  useEffect(() => {
+    sectionsConfigRef.current = sectionsConfig;
+  }, [sectionsConfig]);
+
+  const sectionQuestionsMapRef = useRef(sectionQuestionsMap);
+  useEffect(() => {
+    sectionQuestionsMapRef.current = sectionQuestionsMap;
+  }, [sectionQuestionsMap]);
+
+  const rawQuestionsRef = useRef(rawQuestions);
+  useEffect(() => {
+    rawQuestionsRef.current = rawQuestions;
+  }, [rawQuestions]);
+
   // Timers:
   // Track sectional timer for current section
   const [sectionTimeLeft, setSectionTimeLeft] = useState(() => (currentSection.durationMinutes || 20) * 60);
@@ -150,15 +183,13 @@ export default function RealExamRunner({ test, onClose }) {
     }
   }, [currentSectionIndex, screenPhase]);
 
-  // Section countdown interval (reliably stops when isPaused is true and resumes without resetting)
+  // Section countdown interval (re-starts reliably when section changes or resumes from pause)
   useEffect(() => {
     if (screenPhase !== "exam" || isPaused) return;
 
     const timer = setInterval(() => {
       setSectionTimeLeft(prev => {
         if (prev <= 1) {
-          clearInterval(timer);
-          handleAutoSubmitSection();
           return 0;
         }
         return prev - 1;
@@ -166,7 +197,29 @@ export default function RealExamRunner({ test, onClose }) {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [screenPhase, isPaused]);
+  }, [screenPhase, isPaused, currentSectionIndex]);
+
+  // Handle section countdown expiry (Auto-switch to next section or auto-submit on last section)
+  useEffect(() => {
+    if (screenPhase !== "exam" || isPaused) return;
+    if (sectionTimeLeft === 0) {
+      const curIdx = currentSectionIndexRef.current;
+      const configs = sectionsConfigRef.current;
+      const curSec = configs[curIdx] || { name: "Current Section" };
+
+      if (curIdx < configs.length - 1) {
+        const nextIdx = curIdx + 1;
+        const nextSec = configs[nextIdx];
+        pushToast(`⏰ Time up for ${curSec.name}! Auto-switched to ${nextSec.name}.`);
+        setCurrentSectionIndex(nextIdx);
+        setCurrentQIndexInSection(0);
+        setSectionTimeLeft((nextSec.durationMinutes || 20) * 60);
+      } else {
+        pushToast("⏰ Examination time completed! Auto-submitting all answers...");
+        calculateFinalResults(answersRef.current);
+      }
+    }
+  }, [sectionTimeLeft, screenPhase, isPaused]);
 
   // Mark current question as visited
   useEffect(() => {
@@ -178,7 +231,9 @@ export default function RealExamRunner({ test, onClose }) {
       const currentStat = prev[activeQuestion.id];
       // If not yet answered or marked, mark as not_answered
       if (!currentStat || currentStat === "not_visited") {
-        return { ...prev, [activeQuestion.id]: "not_answered" };
+        const next = { ...prev, [activeQuestion.id]: "not_answered" };
+        statusRef.current = next;
+        return next;
       }
       return prev;
     });
@@ -204,12 +259,41 @@ export default function RealExamRunner({ test, onClose }) {
     }
   };
 
+  // Helper to reliably parse correct answer index from various question formats
+  const getQuestionCorrectIndex = (q) => {
+    if (typeof q?.correctAnswerIndex === "number" && !isNaN(q.correctAnswerIndex)) {
+      return q.correctAnswerIndex;
+    }
+    if (typeof q?.correctAnswer === "number" && !isNaN(q.correctAnswer)) {
+      return q.correctAnswer;
+    }
+    const ansVal = q?.ai_verified_answer || q?.source_answer || q?.answer || q?.correctOption || "A";
+    if (typeof ansVal === "string" && ansVal.trim()) {
+      const ch = ansVal.trim().toUpperCase()[0];
+      if (ch >= "A" && ch <= "E") return ch.charCodeAt(0) - 65;
+      if (ch >= "1" && ch <= "5") return parseInt(ch, 10) - 1;
+    }
+    return 0;
+  };
+
   // ---------------------------------------------------------
   // 4. Candidate Response Actions
   // ---------------------------------------------------------
   const handleSelectOption = (optIndex) => {
     if (screenPhase !== "exam" || isPaused) return;
-    setAnswers(prev => ({ ...prev, [activeQuestion.id]: optIndex }));
+    setAnswers(prev => {
+      const next = { ...prev, [activeQuestion.id]: optIndex };
+      answersRef.current = next;
+      return next;
+    });
+    // Immediately mark as answered (or answered & marked for review) so palette updates and response is saved
+    setStatus(prev => {
+      const cur = prev[activeQuestion.id];
+      const nextStat = (cur === "review" || cur === "ans_review") ? "ans_review" : "answered";
+      const next = { ...prev, [activeQuestion.id]: nextStat };
+      statusRef.current = next;
+      return next;
+    });
   };
 
   const handleClearResponse = () => {
@@ -217,20 +301,29 @@ export default function RealExamRunner({ test, onClose }) {
     setAnswers(prev => {
       const next = { ...prev };
       delete next[activeQuestion.id];
+      answersRef.current = next;
       return next;
     });
-    setStatus(prev => ({ ...prev, [activeQuestion.id]: "not_answered" }));
+    setStatus(prev => {
+      const next = { ...prev, [activeQuestion.id]: "not_answered" };
+      statusRef.current = next;
+      return next;
+    });
     pushToast("Response cleared");
   };
 
   const handleSaveAndNext = () => {
     if (screenPhase !== "exam" || isPaused) return;
 
-    const hasAnswer = answers[activeQuestion.id] !== undefined;
-    setStatus(prev => ({
-      ...prev,
-      [activeQuestion.id]: hasAnswer ? "answered" : "not_answered"
-    }));
+    const hasAnswer = (answersRef.current[activeQuestion.id] !== undefined) || (answers[activeQuestion.id] !== undefined);
+    setStatus(prev => {
+      const next = {
+        ...prev,
+        [activeQuestion.id]: hasAnswer ? "answered" : "not_answered"
+      };
+      statusRef.current = next;
+      return next;
+    });
 
     // Advance to next question in current section
     if (currentQIndexInSection < currentSectionQuestions.length - 1) {
@@ -243,11 +336,15 @@ export default function RealExamRunner({ test, onClose }) {
   const handleMarkForReviewAndNext = () => {
     if (screenPhase !== "exam" || isPaused) return;
 
-    const hasAnswer = answers[activeQuestion.id] !== undefined;
-    setStatus(prev => ({
-      ...prev,
-      [activeQuestion.id]: hasAnswer ? "ans_review" : "review"
-    }));
+    const hasAnswer = (answersRef.current[activeQuestion.id] !== undefined) || (answers[activeQuestion.id] !== undefined);
+    setStatus(prev => {
+      const next = {
+        ...prev,
+        [activeQuestion.id]: hasAnswer ? "ans_review" : "review"
+      };
+      statusRef.current = next;
+      return next;
+    });
 
     if (currentQIndexInSection < currentSectionQuestions.length - 1) {
       setCurrentQIndexInSection(prev => prev + 1);
@@ -263,41 +360,52 @@ export default function RealExamRunner({ test, onClose }) {
   // 5. Section Submission & Test Completion
   // ---------------------------------------------------------
   const handleAutoSubmitSection = () => {
-    pushToast(`⏰ Time up for ${currentSection.name}! Moving forward.`);
+    const curIdx = currentSectionIndexRef.current;
+    const configs = sectionsConfigRef.current;
+    const curSec = configs[curIdx] || { name: "Current Section" };
+    pushToast(`⏰ Time up for ${curSec.name}! Moving forward.`);
     proceedNextSectionOrFinish();
   };
 
   const proceedNextSectionOrFinish = () => {
     setShowSectionSubmitConfirm(false);
-    if (currentSectionIndex < sectionsConfig.length - 1) {
-      const nextSec = sectionsConfig[currentSectionIndex + 1];
-      setCurrentSectionIndex(prev => prev + 1);
+    const curIdx = currentSectionIndexRef.current;
+    const configs = sectionsConfigRef.current;
+    if (curIdx < configs.length - 1) {
+      const nextIdx = curIdx + 1;
+      const nextSec = configs[nextIdx];
+      setCurrentSectionIndex(nextIdx);
       setCurrentQIndexInSection(0);
+      setSectionTimeLeft((nextSec.durationMinutes || 20) * 60);
       pushToast(`Now starting section: ${nextSec.name}`);
     } else {
-      // Final submission of entire test
-      calculateFinalResults();
+      // Final submission of entire test with latest answers
+      calculateFinalResults(answersRef.current);
     }
   };
 
-  const calculateFinalResults = () => {
+  const calculateFinalResults = (providedAnswers = null) => {
+    const activeAnswers = providedAnswers || answersRef.current || answers;
     let totalScore = 0;
     let totalCorrect = 0;
     let totalIncorrect = 0;
     let totalUnattempted = 0;
 
-    const totalQs = rawQuestions.length || 1;
+    const allQuestions = rawQuestionsRef.current?.length > 0 ? rawQuestionsRef.current : rawQuestions;
+    const totalQs = allQuestions.length || 1;
     const totalDurationSecs = (Number(test?.durationMinutes) || 60) * 60;
+    const configs = sectionsConfigRef.current || sectionsConfig;
+    const qMap = sectionQuestionsMapRef.current || sectionQuestionsMap;
 
-    const sectionsBreakdown = sectionsConfig.map(sec => {
-      const secQs = sectionQuestionsMap[sec.name] || [];
+    const sectionsBreakdown = configs.map(sec => {
+      const secQs = qMap[sec.name] || [];
       let secCorrect = 0;
       let secIncorrect = 0;
       let secUnattempted = 0;
 
       secQs.forEach(q => {
-        const studentAns = answers[q.id];
-        const correctIdx = typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0;
+        const studentAns = activeAnswers[q.id];
+        const correctIdx = getQuestionCorrectIndex(q);
         if (studentAns === undefined) {
           secUnattempted++;
         } else if (studentAns === correctIdx) {
@@ -331,7 +439,9 @@ export default function RealExamRunner({ test, onClose }) {
       };
     });
 
-    const accuracy = Math.round((totalCorrect / (totalCorrect + totalIncorrect || 1)) * 100);
+    const accuracy = (totalCorrect + totalIncorrect > 0)
+      ? Math.round((totalCorrect / (totalCorrect + totalIncorrect)) * 100)
+      : 0;
     const finalScore = Math.max(0, +totalScore.toFixed(2));
     const finalPercentage = Math.max(0, +((finalScore / totalQs) * 100).toFixed(2));
     const finalCutoff = test?.cutoffMarks || +(totalQs * 0.625).toFixed(1);
@@ -360,8 +470,8 @@ export default function RealExamRunner({ test, onClose }) {
       percentile: finalPercentile,
       rank: simulatedRank,
       sectionsBreakdown,
-      answers,
-      questions: rawQuestions
+      answers: activeAnswers,
+      questions: allQuestions
     };
 
     if (saveTestAttempt) {
@@ -370,7 +480,7 @@ export default function RealExamRunner({ test, onClose }) {
 
     setResultsData(attemptRecord);
     setScreenPhase("results");
-    pushToast("🎉 Test submitted & performance recorded to database!");
+    pushToast(`🎉 Test submitted! You scored ${finalScore}/${totalQs} (${accuracy}% accuracy)`);
   };
 
   // Status counts for current section
@@ -867,7 +977,7 @@ export default function RealExamRunner({ test, onClose }) {
 
             {/* Question Text */}
             <div className={`${contentFontSizeClass} font-semibold text-slate-900 leading-relaxed`}>
-              {activeQuestion.question}
+              {renderMathInline(activeQuestion.question)}
             </div>
 
             {/* Options Radio List */}
@@ -894,7 +1004,7 @@ export default function RealExamRunner({ test, onClose }) {
                     />
                     <div className="flex-1 text-slate-800 text-xs md:text-sm">
                       <span className="font-bold mr-2 text-slate-500">{letter}.</span>
-                      <span>{opt}</span>
+                      <span>{renderMathInline(opt)}</span>
                     </div>
                   </label>
                 );

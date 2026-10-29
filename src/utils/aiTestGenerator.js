@@ -246,6 +246,17 @@ async function callGemini(apiKey, prompt) {
 }
 
 // 2b. Google Gemini Vision — reads charts, tables, bar graphs from a page image
+// NVIDIA models are assigned by capability. The embedding model is deliberately
+// kept out of the chat chain: it retrieves/matches content but cannot extract
+// questions or write solutions.
+const NVIDIA_REASONING_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
+const NVIDIA_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct";
+const NVIDIA_EMBED_MODEL = "nvidia/nemotron-3.5-embed-8b";
+
+const VISION_EXTRACTION_PROMPT = `You are an expert at reading Indian competitive exam question papers (IBPS, SBI, SSC, TNPSC etc.).
+Look at this PDF page image carefully.
+Extract all data from charts, tables, diagrams, directions, questions, and options. Preserve original values; do not solve or invent content. Format tables as Markdown.`;
+
 export async function callGeminiVisionPage(apiKey, base64Image, mimeType = "image/jpeg") {
   if (!apiKey || typeof apiKey !== "string") return null;
   const cleanKey = apiKey.trim();
@@ -260,8 +271,8 @@ Return a structured text description of each chart/table/graph found, followed b
 For PIE CHARTS: List each segment label and its percentage value.
 For BAR CHARTS: List each bar's category and its value/height.
 For LINE CHARTS: List each point's x and y values.
-For TABLES: Reproduce the table data in a readable format with column headers and rows.
-For DATA INTERPRETATION sets: Include the full directions text AND all chart/table data.
+For TABLES: STRICTLY output the table as a clean Markdown table format (| Col 1 | Col 2 | Col 3 |\n|---|---|---|) so it can be directly displayed and edited.
+For DATA INTERPRETATION sets: Include the full directions text AND format any data tables as Markdown tables.
 
 Then, extract all visible text questions and answer options from the page.
 
@@ -311,6 +322,56 @@ If no charts/tables/graphs are present, just output the text content of the page
   return null;
 }
 
+// NVIDIA Vision fallback for chart/table pages when Gemini is unavailable or fails.
+async function callNvidiaVisionPage(apiKey, base64Image, mimeType = "image/jpeg") {
+  if (!apiKey || !base64Image) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch("/api/nvidia/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: getEnvKey("VITE_NVIDIA_VISION_MODEL") || NVIDIA_VISION_MODEL,
+        messages: [{ role: "user", content: [
+          { type: "text", text: VISION_EXTRACTION_PROMPT },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+        ] }],
+        temperature: 0.1,
+        max_tokens: 4000,
+      }),
+    });
+    if (!response.ok) throw new Error(`NVIDIA Vision API error (${response.status})`);
+    const data = await response.json();
+    return (data.choices?.[0]?.message?.content || "").trim() || null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// The embedding model supports semantic retrieval; it is intentionally separate
+// from the chat models and uses the NVIDIA embeddings endpoint.
+export async function embedNvidiaPassages(apiKey, input, inputType = "passage") {
+  if (!apiKey || !input) return [];
+  const values = Array.isArray(input) ? input : [input];
+  const response = await fetch("/api/nvidia/v1/embeddings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: getEnvKey("VITE_NVIDIA_EMBED_MODEL") || NVIDIA_EMBED_MODEL,
+      input: values,
+      input_type: inputType,
+      modality: "text",
+      encoding_format: "float",
+      truncate: "END",
+    }),
+  });
+  if (!response.ok) throw new Error(`NVIDIA Embed API error (${response.status})`);
+  const data = await response.json();
+  return (data.data || []).sort((a, b) => a.index - b.index).map(item => item.embedding);
+}
+
 // 3. OpenAI API Provider
 async function callOpenAI(apiKey, prompt, model = "gpt-4o-mini") {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -357,7 +418,7 @@ async function callDeepSeek(apiKey, prompt) {
 
 // 6. NVIDIA API Provider
 async function callNvidia(apiKey, prompt) {
-  const model = getEnvKey("VITE_NVIDIA_MODEL") || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
+  const model = getEnvKey("VITE_NVIDIA_MODEL") || NVIDIA_REASONING_MODEL;
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), 45000); // 45-second timeout
 
@@ -1303,63 +1364,158 @@ export async function generateAIMockTest({ category, subject, topic, level = "me
 // Upload a PYQ paper PDF → AI extracts exact questions → Mock Test
 // ------------------------------------------------------------------
 
-const buildExtractionPrompt = (pdfChunk, limit) => `You are a strict data extractor for Indian competitive exam question papers. Extract up to ${limit} questions from this text.
+export function convertTextTableToMarkdown(rawText) {
+  if (!rawText || typeof rawText !== "string") return rawText;
+  if (/\|.*\|/.test(rawText) && /\|\s*[-:]+[-| :]*\|/.test(rawText)) return rawText;
+
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length < 3) return rawText;
+
+  const dataRows = [];
+  let headerLineIndex = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let tokens = line.split(/[|\t]+|\s{2,}|\s+(?=\d+)/).map(t => t.trim()).filter(Boolean);
+    const hasNumbers = tokens.filter(t => /^\d+(?:\.\d+)?%?$/.test(t)).length >= 1;
+    if (tokens.length >= 2 && hasNumbers) {
+      if (headerLineIndex === -1 && i > 0) {
+        headerLineIndex = i - 1;
+      }
+      dataRows.push(tokens);
+    }
+  }
+
+  if (dataRows.length >= 2 && headerLineIndex >= 0) {
+    const colCount = Math.max(...dataRows.map(r => r.length));
+    const headerLine = lines[headerLineIndex];
+    const introLines = lines.slice(0, headerLineIndex);
+
+    let headerTokens = headerLine.split(/[|\t]+|\s{2,}/).map(t => t.trim()).filter(Boolean);
+    if (headerTokens.length !== colCount) {
+      const words = headerLine.split(/\s+/).map(t => t.trim()).filter(Boolean);
+      if (words.length === colCount) {
+        headerTokens = words;
+      } else if (words.length > colCount) {
+        const grouped = [words[0]];
+        const remainingWords = words.slice(1);
+        const remainingCols = colCount - 1;
+        const perCol = Math.floor(remainingWords.length / remainingCols);
+        for (let c = 0; c < remainingCols; c++) {
+          const start = c * perCol;
+          const end = (c === remainingCols - 1) ? remainingWords.length : (c + 1) * perCol;
+          grouped.push(remainingWords.slice(start, end).join(' '));
+        }
+        headerTokens = grouped;
+      }
+    }
+
+    while (headerTokens.length < colCount) {
+      headerTokens.push('Col ' + (headerTokens.length + 1));
+    }
+    if (headerTokens.length > colCount) {
+      headerTokens = headerTokens.slice(0, colCount);
+    }
+
+    const mdHeader = '| ' + headerTokens.join(' | ') + ' |';
+    const mdDivider = '| ' + headerTokens.map(() => '---').join(' | ') + ' |';
+    const mdRows = dataRows.map(row => {
+      while (row.length < colCount) row.push('-');
+      return '| ' + row.slice(0, colCount).join(' | ') + ' |';
+    });
+
+    return [
+      ...introLines,
+      '',
+      mdHeader,
+      mdDivider,
+      ...mdRows
+    ].join('\n');
+  }
+  return rawText;
+}
+
+export function inferSectionFromContent(questionText = "", passageText = "") {
+  const text = `${passageText || ""} ${questionText || ""}`.toLowerCase();
+  
+  // 1. English indicators
+  if (
+    /(?:passage|reading comprehension|author|antonym|synonym|closest in meaning|opposite in meaning|grammatical|grammatically|spelt|misspelt|phrase replacement|cloze|para[\s-]?jumble|rearrange the following sentences|first sentence after rearrangement|error|spotting error|sentence correction|bold word|underlined phrase)/i.test(text)
+  ) {
+    return "English Language";
+  }
+
+  // 2. Reasoning indicators (Check first before Quants so puzzles/syllogisms/relations are NEVER misclassified as math)
+  if (
+    /(?:puzzle|seating arrangement|seated|sitting|circular table|square table|linear row|parallel rows|facing|floor|flat|box|boxes placed|blood relation|father|mother|brother|sister|son|daughter|uncle|aunt|nephew|niece|spouse|married to|related to\b|syllogism|only a few|some books are|statements?:|conclusions?:|does not follow|neither nor|either or|inequalit|[A-Z]\s*[><≥≤=]\s*[A-Z]|coding[\s-]?decoding|written as\b|coded as\b|code language|direction sense|\bdirection\b|\b(?:north|south|east|west|northeast|northwest|southeast|southwest)\b|walks \d+[\s]?m|shortest distance|pythagoras|alphabet series|alphanumeric|vowels?|consonants?|meaningful word|how many such pairs|letters of the word|rank|order and ranking|alike in a certain way|does not belong|odd one out|machine input|input[\s-]output|step [I|V|X\d]+|who sits|sits second|sits third|sits immediate|extreme end|how many persons|immediate left|immediate right)/i.test(text)
+  ) {
+    return "Reasoning Ability";
+  }
+
+  // 3. Quants indicators (Strict math terms, NO standalone question mark '?')
+  if (
+    /(?:data interpretation|\bdi\b|bar graph|bar chart|pie chart|line graph|tabular|table shows|caselet|simplification|approximation|(?:(?:\+|\-|\*|\/|=)\s*\?|\?\s*(?:\+|\-|\*|\/|=)|(?:√|sqrt)\s*\?|\(\s*\?\s*\)\s*[²³]|\?\s*%\s*of)|≈|number series|missing number|wrong number|quadratic equation|profit and loss|simple interest|compound interest|time and work|pipes and cistern|speed time|downstream|upstream|ratio and proportion|mixture|alligation|mensuration|perimeter|cylinder|cone|probability|visitors|total students|boys and girls|average of|find the value of|percentage of|ratio of)/i.test(text)
+  ) {
+    return "Quantitative Aptitude";
+  }
+
+  return "General";
+}
+
+const buildExtractionPrompt = (pdfChunk, expectedCount) => `You are a strict data extractor and expert solver for Indian competitive exam question papers (SBI PO/Clerk, IBPS PO/Clerk, RRB, Banking).
+The text below contains exactly ${expectedCount} question block${expectedCount === 1 ? "" : "s"}. Extract EVERY block, in source order, without combining or omitting one. Keep question wording and options faithful to the source.
 Output a JSON object. No markdown, no extra text outside the JSON block.
+
+CRITICAL MATHEMATICAL NOTATION RULES:
+- PRESERVE ALL POWERS AND ROOTS PRECISELY:
+  * Squares: use ² (e.g. (803.63)² or 15²)
+  * Cubes: use ³ (e.g. 27³ or 12³)
+  * Higher powers: ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+  * Fractional exponents: write as ^(1/2), ^(1/3), ^(2/3), etc. (e.g. (1681)^(1/2) + (4094)^(1/3) = ?)
+  * NEVER drop fractional powers or carets! (1681)^(1/2) must NEVER become (1681)^.
+  * If the raw text contains a dangling caret like (1681)^ or (4094)^ due to PDF OCR artifact, deduce and restore the mathematical power: 1681 is 41² so power is (1/2), 4096 is 16³ so power is (1/3).
+- PRESERVE ALL FRACTIONS PRECISELY:
+  * Mixed fractions: use vulgar fractions where possible (e.g. 22 ⅓ % of 435.1) or write as 22 1/3 %. NEVER omit the fraction!
+  * Vertical/standalone fractions: write as 11/7, 3/4, etc. (e.g. - 11/7 of 1734.68). NEVER drop "11/7" to leave just "- of 1734.68"!
+- PRESERVE OPERATORS: use × for multiplication, ÷ for division, √ for square root, ∛ for cube root.
+
+STEP-BY-STEP SOLUTION MANDATE:
+- For the "explanation" field of EVERY question, you MUST provide a detailed step-by-step solution.
+- For Quantitative Aptitude (Simplification, Approximation, Series, DI):
+  Show:
+  Step 1: Conversion of mixed fractions and fractional powers (e.g. 22 ⅓% = 67/300, (1681)^(1/2) = 41, (4094)^(1/3) ≈ 16)
+  Step 2: Step-by-step arithmetic computation with intermediate values
+  Step 3: Clear statement of the correct option and final value.
+- For Reasoning & English: provide clear logical rationale.
+
+BANK EXAM 3-SECTION MANDATE:
+Categorize each question into one of the 3 standard Bank sections:
+- "English Language": Reading Comprehension, Para Jumbles, Cloze Test, Error Spotting, Fillers, Sentence Improvement.
+- "Reasoning Ability": Puzzles, Seating Arrangements, Syllogisms, Inequalities, Coding-Decoding, Blood Relations, Direction Sense.
+- "Quantitative Aptitude": Data Interpretation (Bar/Pie/Line/Table/Caselet), Simplification, Approximation, Number Series, Quadratic Equations, Arithmetic.
 
 FORMAT:
 {
   "questions": [
     {
-      "passage": "If the question is part of a Reading Comprehension, Caselet DI, Puzzle, Seating Arrangement, or group of questions sharing a common paragraph/directions, you MUST copy the ENTIRE shared paragraph verbatim here. IMPORTANT FOR CASELET / PARAGRAPH DI: Copy ONLY the original text paragraph verbatim into 'passage'. DO NOT generate or solve a table into 'passage'! The student must read and solve the paragraph themselves during the exam. Put the complete solved table in 'explanation'!",
-      "question": "Only the specific question being asked (e.g. 'Who sits immediate left of E?'). Do NOT put the puzzle/passage text here.",
-      "options": ["option text A", "option text B", "option text C", "option text D"],
+      "section": "English Language" | "Reasoning Ability" | "Quantitative Aptitude",
+      "topic": "short topic name or empty string",
+      "passage": "Shared directions/passage only. Copy it exactly; do not solve it.",
+      "question": "Only the specific question being asked (e.g. '(1681)^(1/2) + (4094)^(1/3) = ?'). Include all mathematical symbols, powers, fractions accurately.",
+      "options": ["Option text A", "Option text B", "Option text C", "Option text D", "Option text E"],
       "correctAnswerIndex": 0,
-      "explanation": "Provide beginner-friendly step-by-step explanation. For PUZZLE/SEATING ARRANGEMENTS & CASELET DI: You MUST include the final solved arrangement/data table as a Markdown table (e.g. | Person | Department | Sport | or | Category | Boys | Girls | Total |) followed by Step 1, Step 2 logical deductions.",
+      "source_answer": "A or empty string when no answer is printed in this chunk",
+      "explanation": "Detailed step-by-step solution showing all calculations and intermediate steps.",
       "chart_page_number": null
     }
   ]
 }
 
-!!! PUZZLE & SEATING ARRANGEMENT MANDATORY RULE (MANDATORY) !!!
-For any Reasoning Puzzle (Floor puzzle, Day/Month scheduling, Box puzzle, Departments & Sports, Circular/Square/Linear Seating Arrangement, Blood Relations):
-In the "explanation" field, you MUST generate the complete FINAL SOLVED MATRIX / ARRANGEMENT AS A CLEAN MARKDOWN TABLE (| Person | Department | Sport | or | Floor | Person | Item | etc.) with all entities completely solved!
-Followed by:
-Step 1: Given Conditions: ...
-Step 2: Step-by-Step Logical Working & Elimination: ...
-Step 3: Final Answer & Conclusion: ...
-DO NOT provide plain words only without the solved table grid! Students require the solved table column to understand the puzzle!
-
-!!! DIRECTION & DISTANCE SENSE QUESTIONS MANDATORY RULE (MANDATORY) !!!
-For any Direction & Distance Sense question (walking North/South/East/West, turns, Point A to Point B distances, displacement):
-In the "explanation" field, you MUST include a structured Direction Path line at the very top of explanation in this exact format:
-[Direction Path: A --(10m North)--> B --(15m East)--> C --(10m South)--> D]
-Followed by:
-Step 1: Movement & Coordinate Mapping: ...
-Step 2: Distance & Direction Calculations (apply Pythagoras theorem if required): ...
-Step 3: Final Answer & Conclusion: ...
-
-!!! DATA INTERPRETATION (DI), CASELET, CHARTS, & TABLES RULE (CRITICAL & STRICT) !!!
-1. CASELET / PARAGRAPH-BASED DI (STRICT MANDATE):
-   - When a DI question is presented as a text paragraph or story (e.g. "Read the following information: In a college of 1200 students... 40% are boys..."):
-   - IN THE "passage" FIELD: You MUST extract ONLY the original paragraph / text directions VERBATIM as given in the paper.
-     DO NOT SOLVE the paragraph into a table inside the "passage" field!
-     NEVER put a solved table, answer breakdown, or deduced matrix inside "passage"!
-     The student must read the raw paragraph and solve it themselves during the mock test.
-   - IN THE "explanation" FIELD (SOLUTION SECTION): THAT is where you MUST generate the complete FINAL SOLVED DATA TABLE / MATRIX (| Category | Boys | Girls | Total |) followed by step-by-step calculations and working!
-   - REMEMBER: For Caselet DI, the table belongs in "explanation" ONLY, NOT in "passage"!
-
-2. PRINTED RAW TABLES (SOURCE TABULAR DI):
-   - ONLY if the original source exam question paper itself had an explicit raw data table printed directly as the question (and not a story paragraph to be solved):
-     reproduce that raw question table in the "passage" field.
-
-3. PIE CHARTS, BAR CHARTS, LINE GRAPHS:
-   - Set "chart_page_number" to the integer page number (e.g. 1, 2, 3) where the chart/table appears in the PDF.
-   - Do NOT omit table/chart data! Without it, students cannot answer the questions.
-
-OTHER RULES:
-- options must be EXACTLY 4 or 5 strings (no labels like 'A)', '(a)', '1.' prefix in the option text itself).
-- correctAnswerIndex must be 0, 1, 2, 3, or 4.
-- Provide detailed explanation in the "explanation" field.
+RULES:
+- options must contain the source options in A-to-E order. Do not invent placeholder options.
+- correctAnswerIndex must be 0 through 4.
+- If source_answer is missing in text, calculate the verified answer and set correctAnswerIndex and source_answer.
+- For charts, set chart_page_number to the source page number when present.
 
 TEXT:
 ${pdfChunk}
@@ -1393,7 +1549,7 @@ ${JSON.stringify(questionJson, null, 2)}
 """`;
 
 async function callGroq(apiKey, prompt) {
-  const models = ["qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
+  const models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"];
   let lastErr = null;
   for (const model of models) {
     try {
@@ -1407,7 +1563,7 @@ async function callGroq(apiKey, prompt) {
           model: model,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.1,
-          max_tokens: 1000,
+          max_tokens: 4096,
         }),
       });
 
@@ -1517,6 +1673,40 @@ function chunkText(text, maxLen = 12000) {
   return chunks;
 }
 
+// Keep each LLM request aligned to complete questions. Character-only chunks can
+// split a question from its options, which was the main reason questions vanished.
+function chunkQuestions(text, maxQuestions = 6, maxChars = 5000) {
+  // Some PDFs run the question number directly into the text (for example,
+  // "51.Which..."). A look-ahead preserves both that form and "51. Which...".
+  const marker = /(^|\n)\s*(?:(?:question|ques|q)\s*)?\d{1,3}\s*[.)](?=\s*\S)/gim;
+  const starts = [];
+  let match;
+  while ((match = marker.exec(text)) !== null) starts.push(match.index + match[1].length);
+
+  if (starts.length === 0) {
+    return chunkText(text, maxChars).map(chunk => ({ text: chunk, expectedCount: 1 }));
+  }
+
+  const prefix = text.slice(0, starts[0]).trim();
+  const blocks = starts.map((start, index) => text.slice(start, starts[index + 1] || text.length).trim());
+  const chunks = [];
+  let current = prefix;
+  let count = 0;
+
+  for (const block of blocks) {
+    const wouldExceed = count > 0 && (count >= maxQuestions || current.length + block.length > maxChars);
+    if (wouldExceed) {
+      chunks.push({ text: current.trim(), expectedCount: count });
+      current = "";
+      count = 0;
+    }
+    current += `${current ? "\n\n" : ""}${block}`;
+    count++;
+  }
+  if (count > 0) chunks.push({ text: current.trim(), expectedCount: count });
+  return chunks;
+}
+
 function regexExtractQuestions(pdfText, category) {
   const cleanText = pdfText.replace(/\r\n/g, '\n');
   const qRegex = /(?:^|\s)(?:Ques|Question|Q)[\s\.]*\d+\s*[\.\)]\s+|(?:^|\s)\d+\s*[\.\)]\s+(?=[A-Z])/i;
@@ -1611,10 +1801,10 @@ export function sanitizeDIPassageAndExplanation(passage, explanation, question =
     .replace(/###\s*(?:Table|Data|Solved|Arrangement|Matrix)[^\n]*/gi, "")
     .trim();
 
-  // If there is any non-table text alongside the table (e.g. story, caselet, directions, sentences),
-  // the paragraph belongs to the question passage so the student can solve it,
-  // while the solved table/matrix belongs strictly in the solution explanation!
-  if (pureParagraph.length >= 20) {
+  // If there is an explicitly marked solved table/matrix (solution section), move it to explanation
+  const isExplicitlySolvedTable = /###\s*(?:Solved|Solution|Final Arrangement|Answer Matrix)/i.test(passage) ||
+                                  /solved|arrangement/i.test(tableLines[0]);
+  if (isExplicitlySolvedTable && pureParagraph.length >= 20) {
     const cleanPassage = pureParagraph;
 
     // Move the solved table into the explanation (solution section)
@@ -1631,6 +1821,7 @@ export function sanitizeDIPassageAndExplanation(passage, explanation, question =
     };
   }
 
+  // Standard DI table belongs IN the passage for students to see and solve!
   const trimmedPassage = passage.trim();
   return { 
     passage: trimmedPassage, 
@@ -1645,18 +1836,32 @@ export function isDIQuestion(q) {
   const passage = (q.passage || "").toLowerCase();
   const qText = (q.question || q.question_text || "").toLowerCase();
   const section = (q.section || q.subject || "").toLowerCase();
-  const fullText = `${section} ${passage} ${qText}`;
+  const content = `${passage} ${qText}`;
 
-  // 1. Strict Exclusions: Reasoning & Puzzle questions MUST NEVER be marked as DI or have diagrams attached!
-  const isPuzzleOrReasoning = /(?:puzzle|sitting around|seated around|circular table|linear row|facing north|facing south|facing inside|facing outside|facing the centre|facing center|parallel rows|floor puzzle|box puzzle|blood relation|syllogism|statement and conclusion|direction sense|coding[\s-]?decoding|order and ranking|reasoning ability|logical reasoning)/i.test(fullText);
-  if (isPuzzleOrReasoning) {
+  // 1. Strict Exclusions: English verbal tests or Reasoning Puzzles MUST NEVER be marked as DI or have chart diagrams attached!
+  if (section.includes("english") || /(?:antonym|synonym|cloze test|para[\s-]?jumble|grammatical|spelt|sentence rearrangement)/i.test(content)) {
+    return false;
+  }
+  const isReasoningPuzzle = /(?:sitting around|seated around|circular table|facing north|facing south|facing inside|facing outside|facing the centre|facing center|parallel rows|floor puzzle|box puzzle|blood relation|syllogism|statement and conclusion|direction sense|coding[\s-]?decoding|order and ranking)/i.test(content);
+  if (isReasoningPuzzle) {
     return false;
   }
 
-  // 2. Strict Inclusions: Must be actual Quantitative Aptitude Data Interpretation (chart/graph/tabular DI)
-  const hasDIIndicators = /(?:pie[\s-]?chart|bar[\s-]?graph|bar[\s-]?chart|line[\s-]?graph|line[\s-]?chart|histogram|radar[\s-]?graph|tabular[\s-]?di|given below shows the (?:number|percentage|production|sales|distribution|ratio)|data interpretation|production of|sales of|study the following (?:bar|pie|line|table|chart|graph))/i.test(fullText);
+  // Exclude standard Arithmetic & Speed Math mini questions that never have diagrams
+  if (/(?:simplification|approximation|quadratic equation|number series|missing number|wrong number)/i.test(content)) {
+    return false;
+  }
 
-  const isQuants = /(?:quantitative|quants|math|aptitude)/i.test(section) || (!section.includes("reasoning") && !section.includes("english"));
+  // 2. Passage contains a markdown table (| ... |) -> Genuine Tabular DI
+  if (/\|.*\|/.test(q.passage || "") && /---/.test(q.passage || "")) {
+    return true;
+  }
+
+  // 3. Strict DI indicators: Must explicitly reference a visual chart, graph, or tabular DI set
+  const hasDIIndicators = /(?:pie[\s-]?chart|bar[\s-]?graph|bar[\s-]?chart|line[\s-]?graph|line[\s-]?chart|histogram|radar[\s-]?graph|radar[\s-]?chart|tabular[\s-]?di|data interpretation|\bdi\b|caselet di|study the (?:following|given) (?:table|bar|pie|line|chart|graph)|refer to the (?:table|chart|graph|data given)|given (?:table|bar|pie|line|chart|graph) shows|the (?:following|given) (?:table|bar|pie|line|chart|graph) (?:shows|represents|depicts)|direction[s]?\s*(?:\([^\)]+\))?[\:\s]*(?:study|the following|read the following) (?:table|graph|chart))/i.test(content);
+
+  const isQuants = /(?:quantitative|quants|math|aptitude)/i.test(section) ||
+    (!section.includes("reasoning") && !section.includes("english"));
 
   return isQuants && hasDIIndicators;
 }
@@ -1664,12 +1869,13 @@ export function isDIQuestion(q) {
 export function findBestMatchingChartPage(q, pageImages) {
   if (!pageImages || pageImages.length === 0) return null;
 
-  // Strict check: ONLY attach charts to Quantitative Aptitude DI questions, NEVER to puzzles or reasoning!
+  // Strict check: ONLY attach charts to genuine Quantitative Aptitude DI questions, NEVER to mini questions!
   if (!isDIQuestion(q)) return null;
 
-  // 1. Direct chart_page_number check if provided and valid
-  if (q.chart_page_number) {
-    const found = pageImages.find(p => p.pageNum === q.chart_page_number) || pageImages[q.chart_page_number - 1];
+  // 1. Direct chart_page_number or page_number check if provided and valid
+  const targetPageNum = q.chart_page_number || q.page_number;
+  if (targetPageNum) {
+    const found = pageImages.find(p => p.pageNum === targetPageNum);
     if (found && !found.isPromo) return found;
   }
 
@@ -1736,7 +1942,8 @@ export function findBestMatchingChartPage(q, pageImages) {
     }
   }
 
-  if (highestScore >= 35) {
+  // Only attach if there is strong, confident evidence this page contains the DI chart
+  if (highestScore >= 30) {
     return bestPage;
   }
 
@@ -1748,11 +1955,13 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     throw new Error("PDF text content is too short or empty. Please upload a valid question paper PDF.");
   }
 
-  // If we have page images and a Gemini key, enrich pdfText with vision-extracted chart/table data
+  // Use Gemini first for page OCR, with NVIDIA Llama Vision as a fallback for
+  // chart/table pages. Both providers receive only selected relevant pages.
   const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
+  const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
   let enrichedText = pdfText;
 
-  if (pageImages.length > 0 && geminiKey) {
+  if (pageImages.length > 0 && (geminiKey || nvidiaKey)) {
     // Selectively enrich only DI chart / table pages (max 4) rather than bombarding all 19 pages
     const diPages = pageImages.filter(p => !p.isPromo && (p.hasDI || /(?:directions?|chart|graph|table|breakup|ratio|sold by|percentage)/i.test(p.text || ""))).slice(0, 4);
     if (diPages.length > 0) {
@@ -1767,7 +1976,14 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
           const pageNum = pageImg.pageNum || (i + bIdx + 1);
           try {
             console.log(`[AI Vision] Scanning page ${pageNum} for charts/tables/graphs...`);
-            const visionText = await callGeminiVisionPage(geminiKey, pageImg.base64, pageImg.mimeType || "image/jpeg");
+            let visionText = null;
+            if (geminiKey) {
+              visionText = await callGeminiVisionPage(geminiKey, pageImg.base64, pageImg.mimeType || "image/jpeg");
+            }
+            if (!visionText && nvidiaKey) {
+              console.log(`[AI Vision] Gemini unavailable; using NVIDIA Llama Vision for page ${pageNum}.`);
+              visionText = await callNvidiaVisionPage(nvidiaKey, pageImg.base64, pageImg.mimeType || "image/jpeg");
+            }
             if (visionText && visionText.length > 50) {
               console.log(`[AI Vision] ✅ Page ${pageNum}: Extracted ${visionText.length} chars (charts/tables detected)`);
               return `\n\n=== [Page ${pageNum} Vision Extract] ===\n${visionText}`;
@@ -1788,18 +2004,18 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
   }
 
-  // Adaptive chunk size: Gemini 3.6 Flash handles large context with thinkingBudget: 0 in < 3s!
-  // Use 22,000 characters so typical 5-15 page exam papers process in a SINGLE lightning-fast call.
-  const chunkSize = geminiKey ? 22000 : 8000;
-  const chunks = chunkText(enrichedText, chunkSize);
+  // Separate solutions/answers so AI processes questions without hitting output limits on solutions
+  const splitMatch = enrichedText.match(/\n\s*(?:ANSWERS?\s*(?:KEY|SHEET|&\s*EXPLANATIONS|:)?|HINTS\s*&\s*SOLUTIONS|DETAILED\s*SOLUTIONS|SOLUTIONS\s*&\s*EXPLANATIONS)\b/i);
+  const questionsOnlyText = splitMatch && splitMatch.index > 800 ? enrichedText.substring(0, splitMatch.index) : enrichedText;
+
+  // Compact, question-aligned batches keep every response below provider limits.
+  const chunks = chunkQuestions(questionsOnlyText, 6, 5000);
   let allQuestions = [];
   let completedChunks = 0;
 
   if (onProgress) onProgress(0, chunks.length);
 
   const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY");
-  const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
-
   // Build dedicated caller functions for parallel workers
   function makeDirectCaller(name, fn) {
     return async (prompt) => {
@@ -1843,8 +2059,9 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
   }
 
-  async function processChunk(chunk, index, workerIndex) {
+  async function processChunk(chunkInfo, index, workerIndex) {
     if (signal?.aborted) throw new Error("Extraction cancelled by user.");
+    const { text: chunk, expectedCount } = chunkInfo;
 
     // Fast-skip non-question chunks (promo, instruction pages, copyright notices) in 0ms
     const hasQMarkers = /(?:[1-9]\d*[\.\)]|\b(?:Q|Question)[\s\.]*\d+|[A-Ea-e][\.\)]\s*\w+)/i.test(chunk);
@@ -1856,42 +2073,72 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
 
     let chunkQuestions = [];
-    const limits = chunkSize >= 15000 ? [35, 15] : [12, 8];
-    let currentLimitIndex = 0;
-
-    while (currentLimitIndex < limits.length) {
-      const limit = limits[currentLimitIndex];
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        console.log(`[AI] Chunk ${index + 1}: Requesting up to ${limit} questions (Worker ${workerIndex})...`);
-        const prompt = buildExtractionPrompt(chunk, limit);
+        console.log(`[AI] Chunk ${index + 1}: Requesting ${expectedCount} questions (Worker ${workerIndex}, attempt ${attempt + 1})...`);
+        const prompt = buildExtractionPrompt(chunk, expectedCount);
         let response = await callWithPreferredProvider(prompt, workerIndex);
         
         let parsedQuestions = Array.isArray(response) ? response : (response.questions || []);
         
-        // Strict Validation
-        parsedQuestions = parsedQuestions.filter(q => {
-          return q && 
-                 typeof q.question === "string" && 
-                 q.question.trim() !== "" &&
-                 Array.isArray(q.options) && 
-                 (q.options.length === 4 || q.options.length === 5) &&
-                 typeof q.correctAnswerIndex === "number" && 
-                 q.correctAnswerIndex >= 0 && 
-                 q.correctAnswerIndex <= 4;
-        });
+        // Normalize each question so no questions are silently dropped due to minor format deviations
+        parsedQuestions = parsedQuestions.map((q, qIndex) => {
+          if (!q) return null;
+          const qText = (q.question || q.question_text || "").trim();
+          if (!qText) return null;
 
-        if (parsedQuestions.length > 0) {
+          // Normalize options to an array of 5 options
+          let opts = [];
+          if (Array.isArray(q.options)) {
+            opts = q.options.map(o => String(o || "").trim()).filter(Boolean);
+          } else if (q.options && typeof q.options === "object") {
+            const keys = Object.keys(q.options).sort();
+            opts = keys.map(k => String(q.options[k] || "").trim()).filter(Boolean);
+          }
+          while (opts.length < 5) {
+            opts.push(`Option ${String.fromCharCode(65 + opts.length)}`);
+          }
+          if (opts.length > 5) opts = opts.slice(0, 5);
+
+          // Normalize correctAnswerIndex
+          let ansIdx = q.correctAnswerIndex;
+          if (typeof ansIdx === "string") {
+            if (/^[0-4]$/.test(ansIdx.trim())) ansIdx = parseInt(ansIdx.trim(), 10);
+            else if (/^[A-Ea-e]$/.test(ansIdx.trim())) ansIdx = ansIdx.trim().toUpperCase().charCodeAt(0) - 65;
+            else ansIdx = 0;
+          }
+          if (typeof ansIdx !== "number" || isNaN(ansIdx) || ansIdx < 0 || ansIdx > 4) {
+            if (typeof q.source_answer === "string" && /^[A-Ea-e]$/.test(q.source_answer.trim())) {
+              ansIdx = q.source_answer.trim().toUpperCase().charCodeAt(0) - 65;
+            } else {
+              ansIdx = 0;
+            }
+          }
+
+          return {
+            ...q,
+            question: qText,
+            question_text: qText,
+            options: opts,
+            correctAnswerIndex: ansIdx,
+            passage: q.passage || ""
+          };
+        }).filter(Boolean);
+
+        if (parsedQuestions.length >= expectedCount) {
           console.log(`[AI] ✅ Success: ${parsedQuestions.length} questions from Chunk ${index + 1}`);
           chunkQuestions = parsedQuestions;
           break;
+        } else if (attempt === 0 && expectedCount > 1) {
+          console.warn(`[AI] Chunk ${index + 1} returned ${parsedQuestions.length}/${expectedCount}; retrying instead of silently dropping questions.`);
         } else {
-          // LLM legitimately parsed the segment and found 0 questions; do not waste time retrying
-          console.log(`[AI] Chunk ${index + 1}: Model parsed clean output with 0 questions in this segment.`);
+          console.warn(`[AI] Chunk ${index + 1} is incomplete: ${parsedQuestions.length}/${expectedCount} questions.`);
+          chunkQuestions = parsedQuestions;
           break;
         }
       } catch (err) {
-        if (err.message.includes("max_tokens reached") || err.message.includes("json_validate_failed") || err.message.includes("Failed to validate JSON")) {
-          console.log(`[AI] Response truncated or JSON invalid on Chunk ${index + 1} with limit ${limit}. Reducing...`);
+        if (attempt === 0) {
+          console.log(`[AI] Chunk ${index + 1} failed on its first attempt; retrying...`);
         } else {
           console.warn(`[AI] Chunk ${index + 1} extraction failed:`, err.message);
           if (err.message.includes("401") || err.message.includes("API Key")) {
@@ -1900,7 +2147,6 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
           break;
         }
       }
-      currentLimitIndex++;
     }
 
     if (chunkQuestions.length > 0) {
@@ -1948,12 +2194,17 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   let uniqueQuestions = [];
   const seen = new Set();
 
-  for (const q of allQuestions) {
-    const qText = q.question || q.question_text || "";
-    const cleanQ = qText.trim().toLowerCase();
-    const optSignature = Array.isArray(q.options) ? q.options.slice(0, 3).join("|").toLowerCase() : "";
-    const dedupeKey = `${cleanQ}:::${optSignature}`;
-    if (cleanQ && !seen.has(dedupeKey)) {
+  for (let i = 0; i < allQuestions.length; i++) {
+    const q = allQuestions[i];
+    const qText = (q.question || q.question_text || "").trim();
+    if (!qText) continue;
+
+    // Use question text + first 2 options + first 25 chars of passage to avoid colliding on identical question stems (e.g. "Which of the following is true?")
+    const optSignature = Array.isArray(q.options) ? q.options.slice(0, 2).map(o => o.toLowerCase().trim()).join("::") : "";
+    const passSignature = (q.passage || "").slice(0, 25).toLowerCase().trim();
+    const dedupeKey = `${qText.toLowerCase()}:::${optSignature}:::${passSignature}`;
+
+    if (!seen.has(dedupeKey)) {
       seen.add(dedupeKey);
       
       // Automatically detect and attach chart / table images for Quantitative Aptitude DI questions ONLY
@@ -1967,6 +2218,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
       // Ensure paragraph-based DI has only the raw text paragraph in passage, and solved table in explanation
       const sanitized = sanitizeDIPassageAndExplanation(q.passage, q.explanation, qText);
+      const finalPassage = (q.passage || sanitized.passage || "").trim();
 
       uniqueQuestions.push({
         id: q.id || `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
@@ -1975,13 +2227,32 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         options: q.options,
         correctAnswerIndex: q.correctAnswerIndex,
         source_answer: String.fromCharCode(65 + q.correctAnswerIndex),
-        passage: sanitized.passage || "",
-        section: category || "General",
-        explanation: sanitized.explanation || "",
+        passage: finalPassage,
+        section: q.section || inferSectionFromContent(qText, finalPassage) || (category?.includes("Bank") ? "Reasoning Ability" : (category || "General")),
+        topic: q.topic || "",
+        explanation: sanitized.explanation || q.explanation || "",
         imageUrl: attachedChartImg || "",
         chartImageUrl: attachedChartImg || "",
         chartImageUrls: attachedChartImg ? [attachedChartImg] : []
       });
+    }
+  }
+
+  // Propagate shared passage across 5-question puzzle / RC / DI sets if subsequent questions have empty passage
+  let currentGroupPassage = "";
+  let currentGroupCount = 0;
+  for (let i = 0; i < uniqueQuestions.length; i++) {
+    const q = uniqueQuestions[i];
+    const rawPassage = (q.passage || "").trim();
+    if (rawPassage && rawPassage.length > 25) {
+      currentGroupPassage = rawPassage;
+      currentGroupCount = 1;
+    } else if (currentGroupPassage && currentGroupCount < 5) {
+      q.passage = currentGroupPassage;
+      currentGroupCount++;
+    } else {
+      currentGroupPassage = "";
+      currentGroupCount = 0;
     }
   }
 
@@ -2033,6 +2304,10 @@ export async function verifyQuestionsBackground(questions, onProgress) {
             q.answer_status = v.answer_status;
             q.verification_explanation = v.verification_explanation;
             q.needs_review = v.needs_review;
+            if (v.verification_explanation && (!q.explanation || q.explanation.length < 25 || q.explanation.includes("Verification pending") || q.explanation.startsWith("Verified correct answer"))) {
+              q.explanation = v.verification_explanation;
+              q.solutionText = v.verification_explanation;
+            }
           } else {
             q.answer_status = q.source_answer ? "NEEDS_REVIEW" : "NO_SOURCE_ANSWER";
             q.review_reason = q.source_answer

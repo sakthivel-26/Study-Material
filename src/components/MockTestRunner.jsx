@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Clock, HelpCircle, CheckCircle2, XCircle, AlertCircle, Bookmark, Award, RotateCcw, ChevronLeft, ChevronRight, Send, X, Eye, Menu, ChevronDown, ChevronUp } from "lucide-react";
 import { useApp } from "../store.jsx";
@@ -26,12 +26,14 @@ export default function MockTestRunner({ test, onClose }) {
         }
         const finalLetter = q.ai_verified_answer || q.source_answer || "A";
         const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
+        const sol = q.solutionText || q.explanation || q.verification_explanation || "Verified answer.";
         return {
           id: q.id || `q_${idx}`,
           question: q.question_text || q.question || `Question ${idx + 1}`,
           options: opts,
           correctAnswerIndex: ansIndex < opts.length ? ansIndex : 0,
-          explanation: q.verification_explanation || "Verified answer.",
+          explanation: sol,
+          solutionText: sol,
           section: q.section || "General",
           passage: q.passage || "",
           imageUrl: q.imageUrl || q.image || q.chartUrl || q.img || "",
@@ -64,19 +66,75 @@ export default function MockTestRunner({ test, onClose }) {
 
     let res = str;
 
+    const superDigits = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹' };
+    const subDigits = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉' };
+    const toSuperDigits = (s) => s.split('').map(c => superDigits[c] || c).join('');
+    const toSubDigits = (s) => s.split('').map(c => subDigits[c] || c).join('');
+
+    // 0. Repair dangling carets from PDF OCR extraction noise for common speed math powers
     res = res
+      .replace(/(\b1681\b|\(1681\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₂$2")
+      .replace(/(\b409[4-6]\b|\(409[4-6]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b219[6-8]\b|\(219[6-8]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b172[7-9]\b|\(172[7-9]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b274[3-5]\b|\(274[3-5]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b337[4-6]\b|\(337[4-6]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b583[1-3]\b|\(583[1-3]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b685[8-9]\b|\(685[8-9]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b926[0-2]\b|\(926[0-2]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b1382[3-5]\b|\(1382[3-5]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b2438[8-9]\b|\(2438[8-9]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2");
+
+    // 1. Convert fractional exponents: ^(1/2) -> ¹⁄₂, ^1/2 -> ¹⁄₂, ^(1/3) -> ¹⁄₃, etc.
+    res = res.replace(/\^\s*[\(\{]?(\d+)\/(\d+)[\)\}]?/g, (_, num, den) => {
+      return toSuperDigits(num) + '⁄' + toSubDigits(den);
+    });
+
+    // ^(n) or ^{n} — parenthesized exponents like ^(4), ^{10}
+    res = res.replace(/\^[\(\{](\d+)[\)\}]/g, (_, exp) => {
+      return toSuperDigits(exp);
+    });
+
+    // 2. Convert simple caret notation: ^2 -> ², ^3 -> ³, etc. up to ^9
+    res = res
+      .replace(/\^0/g, "⁰")
+      .replace(/\^1(?![0-9\/])/g, "¹")
       .replace(/\^2/g, "²")
       .replace(/\^3/g, "³")
       .replace(/\^4/g, "⁴")
-      .replace(/\^5/g, "⁵");
+      .replace(/\^5/g, "⁵")
+      .replace(/\^6/g, "⁶")
+      .replace(/\^7/g, "⁷")
+      .replace(/\^8/g, "⁸")
+      .replace(/\^9/g, "⁹");
 
+    // 3. Convert common text fractions to Unicode vulgar fractions
+    res = res
+      .replace(/(?<![0-9])1\/2(?![0-9])/g, "½")
+      .replace(/(?<![0-9])1\/3(?![0-9])/g, "⅓")
+      .replace(/(?<![0-9])2\/3(?![0-9])/g, "⅔")
+      .replace(/(?<![0-9])1\/4(?![0-9])/g, "¼")
+      .replace(/(?<![0-9])3\/4(?![0-9])/g, "¾")
+      .replace(/(?<![0-9])1\/5(?![0-9])/g, "⅕")
+      .replace(/(?<![0-9])2\/5(?![0-9])/g, "⅖")
+      .replace(/(?<![0-9])3\/5(?![0-9])/g, "⅗")
+      .replace(/(?<![0-9])4\/5(?![0-9])/g, "⅘")
+      .replace(/(?<![0-9])1\/6(?![0-9])/g, "⅙")
+      .replace(/(?<![0-9])5\/6(?![0-9])/g, "⅚")
+      .replace(/(?<![0-9])1\/8(?![0-9])/g, "⅛")
+      .replace(/(?<![0-9])3\/8(?![0-9])/g, "⅜")
+      .replace(/(?<![0-9])5\/8(?![0-9])/g, "⅝")
+      .replace(/(?<![0-9])7\/8(?![0-9])/g, "⅞");
+
+    // 4. Convert space-separated powers like "15 2" or "(15) 2" -> "15²" (only 2 and 3)
     res = res.replace(/(\b\d+|\))\s+([23])(?=\s*(?:[\+\-\*\/\=\,\)\?]|$))/g, (match, base, exp) => {
-      if (/[²³⁴⁵]$/.test(base)) return match;
+      if (/[²³⁴⁵⁶⁷⁸⁹⁰¹]$/.test(base)) return match;
       const superscripts = { "2": "²", "3": "³" };
       return `${base}${superscripts[exp] || exp}`;
     });
 
-    res = res.replace(/([²³⁴⁵])\1+/g, "$1");
+    // 5. Clean up any duplicate consecutive superscripts
+    res = res.replace(/([²³⁴⁵⁶⁷⁸⁹⁰¹])\1+/g, "$1");
 
     return res;
   };
@@ -201,11 +259,38 @@ export default function MockTestRunner({ test, onClose }) {
 
   const currentQ = questions[currentIndex] || {};
 
+  // Dynamic ref to guarantee auto-submit timer always has latest answers
+  const answersRef = useRef(answers);
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+
+  const questionsRef = useRef(questions);
+  useEffect(() => {
+    questionsRef.current = questions;
+  }, [questions]);
+
+  const getQuestionCorrectIndex = (q) => {
+    if (typeof q?.correctAnswerIndex === "number" && !isNaN(q.correctAnswerIndex)) {
+      return q.correctAnswerIndex;
+    }
+    if (typeof q?.correctAnswer === "number" && !isNaN(q.correctAnswer)) {
+      return q.correctAnswer;
+    }
+    const ansVal = q?.ai_verified_answer || q?.source_answer || q?.answer || q?.correctOption || "A";
+    if (typeof ansVal === "string" && ansVal.trim()) {
+      const ch = ansVal.trim().toUpperCase()[0];
+      if (ch >= "A" && ch <= "E") return ch.charCodeAt(0) - 65;
+      if (ch >= "1" && ch <= "5") return parseInt(ch, 10) - 1;
+    }
+    return 0;
+  };
+
   // Countdown Timer
   useEffect(() => {
     if (viewState !== "test") return;
     if (timeLeft <= 0) {
-      handleSubmitTest();
+      handleSubmitTest(answersRef.current);
       return;
     }
     const timer = setInterval(() => {
@@ -225,7 +310,12 @@ export default function MockTestRunner({ test, onClose }) {
 
   const selectOption = (optIndex) => {
     if (viewState !== "test") return;
-    setAnswers((prev) => ({ ...prev, [currentQ.id]: optIndex }));
+    setAnswers((prev) => {
+      const next = { ...prev, [currentQ.id]: optIndex };
+      answersRef.current = next;
+      return next;
+    });
+    setStatus((prev) => ({ ...prev, [currentQ.id]: "answered" }));
   };
 
   const clearResponse = () => {
@@ -233,6 +323,7 @@ export default function MockTestRunner({ test, onClose }) {
     setAnswers((prev) => {
       const copy = { ...prev };
       delete copy[currentQ.id];
+      answersRef.current = copy;
       return copy;
     });
     setStatus((prev) => ({ ...prev, [currentQ.id]: "not_answered" }));
@@ -246,7 +337,8 @@ export default function MockTestRunner({ test, onClose }) {
 
   const saveAndNext = () => {
     if (viewState !== "test") return;
-    if (answers[currentQ.id] !== undefined) {
+    const hasAnswer = (answersRef.current[currentQ.id] !== undefined) || (answers[currentQ.id] !== undefined);
+    if (hasAnswer) {
       setStatus((prev) => ({ ...prev, [currentQ.id]: "answered" }));
     } else {
       setStatus((prev) => ({ ...prev, [currentQ.id]: "not_answered" }));
@@ -268,16 +360,18 @@ export default function MockTestRunner({ test, onClose }) {
     }
   };
 
-  const handleSubmitTest = () => {
+  const handleSubmitTest = (providedAnswers = null) => {
     setConfirmSubmit(false);
+    const activeAnswers = providedAnswers || answersRef.current || answers;
+    const allQuestions = questionsRef.current?.length > 0 ? questionsRef.current : questions;
     
     let correctCount = 0;
     let incorrectCount = 0;
     let unattemptedCount = 0;
 
-    questions.forEach((q) => {
-      const studentAns = answers[q.id];
-      const correctIdx = typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0;
+    allQuestions.forEach((q) => {
+      const studentAns = activeAnswers[q.id];
+      const correctIdx = getQuestionCorrectIndex(q);
       if (studentAns === undefined) {
         unattemptedCount++;
       } else if (studentAns === correctIdx) {
@@ -287,9 +381,11 @@ export default function MockTestRunner({ test, onClose }) {
       }
     });
 
-    const totalQs = questions.length || 1;
+    const totalQs = allQuestions.length || 1;
     const score = Math.max(0, +(correctCount - incorrectCount * 0.25).toFixed(2));
-    const accuracy = Math.round((correctCount / (correctCount + incorrectCount || 1)) * 100);
+    const accuracy = (correctCount + incorrectCount > 0)
+      ? Math.round((correctCount / (correctCount + incorrectCount)) * 100)
+      : 0;
     const percent = Math.round((correctCount / totalQs) * 100);
     const timeSpentSeconds = totalDurationSeconds - timeLeft;
 
@@ -300,15 +396,15 @@ export default function MockTestRunner({ test, onClose }) {
     const simulatedRank = Math.max(1, Math.floor(130997 * (1 - finalPercentile / 100))) + "/130997";
 
     // Build section breakdown
-    const sectionsList = Array.from(new Set(questions.map(q => q.section || "General")));
+    const sectionsList = Array.from(new Set(allQuestions.map(q => q.section || "General")));
     const sectionsBreakdown = sectionsList.map(secName => {
-      const secQs = questions.filter(q => (q.section || "General") === secName);
+      const secQs = allQuestions.filter(q => (q.section || "General") === secName);
       let secCorrect = 0;
       let secIncorrect = 0;
       let secUnattempted = 0;
       secQs.forEach(q => {
-        const studentAns = answers[q.id];
-        const correctIdx = typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0;
+        const studentAns = activeAnswers[q.id];
+        const correctIdx = getQuestionCorrectIndex(q);
         if (studentAns === undefined) secUnattempted++;
         else if (studentAns === correctIdx) secCorrect++;
         else secIncorrect++;
@@ -351,8 +447,8 @@ export default function MockTestRunner({ test, onClose }) {
       percentile: finalPercentile,
       rank: simulatedRank,
       sectionsBreakdown,
-      answers,
-      questions: questions,
+      answers: activeAnswers,
+      questions: allQuestions,
       date: now.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
     };
 
@@ -695,7 +791,7 @@ export default function MockTestRunner({ test, onClose }) {
                       {showSolutionAccordion && (
                         <div className="mt-4 space-y-3">
                           <BeginnerSolutionView
-                            explanation={currentQ.explanation || `Correct Option is (${String.fromCharCode(65 + (currentQ.correctAnswerIndex || 0))})`}
+                            explanation={currentQ.solutionText || currentQ.explanation || `Correct Option is (${String.fromCharCode(65 + (currentQ.correctAnswerIndex || 0))})`}
                             correctAnswerIndex={currentQ.correctAnswerIndex}
                             options={currentQ.options}
                             question={currentQ.question}

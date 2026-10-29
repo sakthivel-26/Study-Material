@@ -44,18 +44,32 @@ client = (
 )
 
 SYSTEM_PROMPT = """
-You are a strict data extraction AI. You MUST output ONLY valid JSON. DO NOT output any markdown, explanations, or conversational text.
-Extract: question number, question text, A, B, C, D, source answer, page number, and any associated passage/directions.
-If the question is part of a reading comprehension, puzzle, seating arrangement, or data interpretation chart, include the full passage/directions text in the 'passage' field. Otherwise, 'passage': null.
+You are a strict data extraction AI for Bank and competitive exams. You MUST output ONLY valid JSON. DO NOT output any markdown, explanations, or conversational text.
+Extract: question number, question text, section ("English Language" | "Reasoning Ability" | "Quantitative Aptitude"), options (A, B, C, D, and E if present), source answer, page number, and any associated passage/directions.
+If the question is part of a reading comprehension, para jumble, cloze test, puzzle, seating arrangement, or data interpretation chart/table, include the full passage/directions text in the 'passage' field. Otherwise, 'passage': null.
 If there are tabular data or data interpretation tables in the passage or question, format them precisely as Markdown tables in the 'passage' or 'question_text' field.
+
+CRITICAL — Preserve ALL mathematical notation precisely:
+- Squares: use ² (e.g. 15² not 15^2 or 152)
+- Cubes: use ³ (e.g. 27³ not 27^3 or 273)
+- Higher powers: use ⁴ ⁵ ⁶ ⁷ ⁸ ⁹ (e.g. x⁴ not x^4)
+- Fractional exponents: write as ^(1/2), ^(1/3), ^(2/3), ^(1/4) etc. (e.g. (1681)^(1/2) not 1681 1/2)
+- Fractions in text: use Unicode vulgar fractions where possible: ½ ⅓ ¼ ⅔ ¾ ⅕ ⅖ ⅗ ⅘ ⅙ ⅚ ⅛ ⅜ ⅝ ⅞. For other fractions like 11/7, keep as 11/7.
+- Square root: use √ symbol (e.g. √25)
+- Cube root: use ∛ symbol (e.g. ∛27)
+- Multiplication: use × (not x or *)
+- Division: use ÷ (not /)
+- Do NOT drop or flatten exponents. (803.63)² must stay as (803.63)², NOT (803.63)2 or 803.632.
+
 Return ONLY JSON matching this schema:
 {
   "questions": [
     {
       "passage": "Directions (1-5): Study the following information carefully...\n\n| Months | Visitors |\n|---|---|\n| Jan | 20 |",
       "question_number": 1,
+      "section": "Quantitative Aptitude",
       "question_text": "...",
-      "options": { "A": "...", "B": "...", "C": "...", "D": "..." },
+      "options": { "A": "...", "B": "...", "C": "...", "D": "...", "E": "..." },
       "source_answer": null,
       "page_number": 1
     }
@@ -74,15 +88,28 @@ def extract_text_from_pdf(file_content: bytes):
     return pages
 
 def regex_extract_questions(pages):
-    """Best-effort, layout-tolerant MCQ parser for selectable-text PDFs."""
+    """Best-effort, layout-tolerant MCQ parser for selectable-text Bank PDFs."""
     import re
     found, seen = [], set()
-    option_start = r"(?:\(?[A-Fa-f]\)?\s*[.)\]:-])"
+    option_start = r"(?:\(?[A-Fa-f1-5]\)?\s*[.)\]:-])"
     question_re = re.compile(
         r"(?ms)^\s*(?:Q(?:uestion)?\s*)?(\d{1,3})(?:\s*[.)\]:-]|\s{2,})(.*?)(?=^\s*(?:Q(?:uestion)?\s*)?\d{1,3}(?:\s*[.)\]:-]|\s{2,})|\Z)"
     )
-    option_re = re.compile(r"(?m)^\s*\(?([A-Fa-f])\)?\s*[.)\]:-]\s*(.*)$")
-    answer_re = re.compile(r"(?im)(?:answer|ans)\s*[:\-]?\s*\(?([A-F])\)?")
+    option_re = re.compile(r"(?m)^\s*\(?([A-Ea-e1-5])\)?\s*[.)\]:-]\s*(.*)$")
+    answer_re = re.compile(r"(?im)(?:answer|ans)\s*[:\-]?\s*\(?([A-E1-5])\)?")
+
+    def infer_sec(num, text):
+        t = text.lower()
+        if any(w in t for w in ["passage", "reading comprehension", "antonym", "synonym", "cloze", "para jumble", "parajumble", "grammat", "spelt"]):
+            return "English Language"
+        if any(w in t for w in ["puzzle", "seating arrangement", "circular table", "linear row", "syllogism", "blood relation", "direction sense"]):
+            return "Reasoning Ability"
+        if any(w in t for w in ["data interpretation", "bar graph", "pie chart", "simplification", "approximation", "number series", "quadratic"]):
+            return "Quantitative Aptitude"
+        if num <= 30: return "English Language"
+        if num <= 65: return "Reasoning Ability"
+        return "Quantitative Aptitude"
+
     for page in pages:
         text = page["text"].replace("\r", "\n")
         text = re.sub(r"(?<!^)(?<!\n)\s+(?=" + option_start + r")", "\n", text)
@@ -90,14 +117,30 @@ def regex_extract_questions(pages):
             options = {}
             for letter, value in option_re.findall(block):
                 value = re.sub(r"\s+", " ", value).strip()
-                if value: options[letter.upper()] = value
+                if value:
+                    key = letter.upper()
+                    if key in "12345":
+                        key = chr(64 + int(key))
+                    options[key] = value
             if len(options) < 2: continue
             question = re.sub(r"\s+", " ", option_re.split(block, maxsplit=1)[0]).strip()
-            identity = (question.lower(), tuple(options.items()))
+            identity = (question.lower(), tuple(sorted(options.items())))
             if not question or identity in seen: continue
             seen.add(identity)
             answer = answer_re.search(block)
-            found.append({"question_number": int(number), "question_text": question, "options": {key: options[key] for key in sorted(options)}, "source_answer": answer.group(1) if answer else None, "page_number": page["page_number"], "extraction_method": "offline-parser"})
+            raw_ans = answer.group(1).upper() if answer else None
+            if raw_ans and raw_ans in "12345":
+                raw_ans = chr(64 + int(raw_ans))
+            q_num = int(number)
+            found.append({
+                "question_number": q_num,
+                "section": infer_sec(q_num, question),
+                "question_text": question,
+                "options": {key: options[key] for key in sorted(options)},
+                "source_answer": raw_ans,
+                "page_number": page["page_number"],
+                "extraction_method": "offline-parser"
+            })
     return found
 
 def chunk_pages(pages):
@@ -254,7 +297,8 @@ Return ONLY a JSON object matching this exact format, with no markdown fences, n
   "questions": [
     {{
       "question": "Question text...",
-      "options": ["A", "B", "C", "D"],
+      "section": "English Language",
+      "options": ["Option A", "Option B", "Option C", "Option D", "Option E"],
       "correctAnswer": 0,
       "explanation": "..."
     }}
@@ -284,9 +328,9 @@ Return ONLY a JSON object matching this exact format, with no markdown fences, n
                     continue
                 if q["question"] in seen_qs:
                     continue
-                if "options" not in q or not isinstance(q["options"], list) or len(q["options"]) != 4:
+                if "options" not in q or not isinstance(q["options"], list) or not (4 <= len(q["options"]) <= 5):
                     continue
-                if "correctAnswer" not in q or not isinstance(q["correctAnswer"], int) or q["correctAnswer"] < 0 or q["correctAnswer"] > 3:
+                if "correctAnswer" not in q or not isinstance(q["correctAnswer"], int) or not (0 <= q["correctAnswer"] < len(q["options"])):
                     continue
                 seen_qs.add(q["question"])
                 valid_questions.append(q)

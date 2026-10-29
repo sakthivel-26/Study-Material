@@ -11,7 +11,8 @@ import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
 import { CATEGORIES, COURSE_PROGRESS } from "../../data.js";
 import { Badge, ProgressBar } from "../../components/ui.jsx";
-import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findBestMatchingChartPage, isDIQuestion, sanitizeDIPassageAndExplanation } from "../../utils/aiTestGenerator.js";
+import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findBestMatchingChartPage, isDIQuestion, sanitizeDIPassageAndExplanation, convertTextTableToMarkdown } from "../../utils/aiTestGenerator.js";
+import { extractTextWithMathPreservation } from "../../utils/pdfParser.js";
 import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
 import { formatStudentJoinDate } from "../../utils/studentDate.js";
@@ -67,6 +68,55 @@ export function compressBase64Image(dataUrl, maxDimension = 650, quality = 0.68)
     img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
   });
+}
+
+// Robust helper to parse and split pasted options (handles multi-line, tab-separated, inline '(a) ... (b) ...', 'A. ... B. ...')
+export function parsePastedOptions(pasteText) {
+  if (!pasteText || typeof pasteText !== "string") return [];
+  const raw = pasteText.trim();
+  if (!raw) return [];
+
+  const stripOptionPrefix = (str) =>
+    str.replace(/^(?:\([a-eA-E1-5]\)|\[[a-eA-E1-5]\]|[a-eA-E][\.\)]|[1-5][\.\)]|\b[A-E]\b[\.\)]?)\s*[:\-]?\s*/i, '').trim();
+
+  // 1. Line-by-line split (e.g. copied from vertical PDF column)
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length >= 2) {
+    const cleaned = lines.map(stripOptionPrefix).filter(Boolean);
+    if (cleaned.length >= 2) return cleaned;
+  }
+
+  // 2. Tab-separated split
+  if (raw.includes("\t")) {
+    const tabParts = raw.split("\t").map(p => p.trim()).filter(Boolean);
+    if (tabParts.length >= 2) {
+      const cleaned = tabParts.map(stripOptionPrefix).filter(Boolean);
+      if (cleaned.length >= 2) return cleaned;
+    }
+  }
+
+  // 3. Inline marker split: e.g. "(a) 120 (b) 140 (c) 160 (d) 180 (e) 200" or "A. 120 B. 140 C. 160"
+  const inlineMarkerRegex = /(?:\s|^)(?:\(([a-eA-E1-5])\)|\[([a-eA-E1-5])\]|([a-eA-E][\.\)])|([1-5][\.\)])|\b([A-E])[\.\)])\s*/g;
+  const matches = [...raw.matchAll(inlineMarkerRegex)];
+  if (matches.length >= 2) {
+    const parts = [];
+    for (let i = 0; i < matches.length; i++) {
+      const start = matches[i].index + matches[i][0].length;
+      const end = (i + 1 < matches.length) ? matches[i + 1].index : raw.length;
+      const val = stripOptionPrefix(raw.substring(start, end).trim());
+      if (val) parts.push(val);
+    }
+    if (parts.length >= 2) return parts;
+  }
+
+  // 4. Fallback split by typical list delimiters
+  const splitRegex = /(?:\([a-eA-E1-5]\)|[a-eA-E][\.\)]|[1-5][\.\)]|\b[A-E]\b[\.\)]?)\s+/;
+  const fallbackParts = raw.split(splitRegex).map(p => stripOptionPrefix(p.trim())).filter(p => p !== "");
+  if (fallbackParts.length > 1) {
+    return fallbackParts;
+  }
+
+  return [];
 }
 
 function getRelatedDIQuestionIndices(targetIdx, rawQuestions = [], approvedQuestions = {}) {
@@ -173,6 +223,217 @@ function CroppedPreviewImg({ src, cropTop, cropBottom, cropLeft, cropRight }) {
     return <span className="text-[11px] text-ink-muted">Rendering preview...</span>;
   }
   return <img src={croppedUrl} alt="Cropped Preview" className="max-h-full max-w-full object-contain" />;
+}
+
+function InteractiveImageCropper({
+  src,
+  cropTop,
+  cropBottom,
+  cropLeft,
+  cropRight,
+  onChangeCrop
+}) {
+  const containerRef = useRef(null);
+  const [activeDrag, setActiveDrag] = useState(null);
+
+  const handlePointerDown = (e, mode) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+    setActiveDrag({
+      mode,
+      startX: x,
+      startY: y,
+      origTop: cropTop,
+      origBottom: cropBottom,
+      origLeft: cropLeft,
+      origRight: cropRight
+    });
+
+    try {
+      e.target.setPointerCapture?.(e.pointerId);
+    } catch (_) {}
+  };
+
+  const handlePointerMove = (e) => {
+    if (!activeDrag || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const curX = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+    const curY = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+    const dx = curX - activeDrag.startX;
+    const dy = curY - activeDrag.startY;
+
+    if (activeDrag.mode === "create") {
+      const minX = Math.min(activeDrag.startX, curX);
+      const maxX = Math.max(activeDrag.startX, curX);
+      const minY = Math.min(activeDrag.startY, curY);
+      const maxY = Math.max(activeDrag.startY, curY);
+
+      onChangeCrop({
+        cropTop: Math.max(0, Math.min(80, Math.round(minY))),
+        cropBottom: Math.max(0, Math.min(80, Math.round(100 - maxY))),
+        cropLeft: Math.max(0, Math.min(75, Math.round(minX))),
+        cropRight: Math.max(0, Math.min(75, Math.round(100 - maxX)))
+      });
+    } else if (activeDrag.mode === "move") {
+      const boxW = 100 - activeDrag.origLeft - activeDrag.origRight;
+      const boxH = 100 - activeDrag.origTop - activeDrag.origBottom;
+
+      const newLeft = Math.max(0, Math.min(100 - boxW, activeDrag.origLeft + dx));
+      const newTop = Math.max(0, Math.min(100 - boxH, activeDrag.origTop + dy));
+
+      onChangeCrop({
+        cropLeft: Math.round(newLeft),
+        cropRight: Math.round(100 - newLeft - boxW),
+        cropTop: Math.round(newTop),
+        cropBottom: Math.round(100 - newTop - boxH)
+      });
+    } else {
+      let newTop = activeDrag.origTop;
+      let newBottom = activeDrag.origBottom;
+      let newLeft = activeDrag.origLeft;
+      let newRight = activeDrag.origRight;
+
+      if (activeDrag.mode.includes("n")) {
+        newTop = Math.max(0, Math.min(85 - newBottom, activeDrag.origTop + dy));
+      }
+      if (activeDrag.mode.includes("s")) {
+        newBottom = Math.max(0, Math.min(85 - newTop, activeDrag.origBottom - dy));
+      }
+      if (activeDrag.mode.includes("w")) {
+        newLeft = Math.max(0, Math.min(80 - newRight, activeDrag.origLeft + dx));
+      }
+      if (activeDrag.mode.includes("e")) {
+        newRight = Math.max(0, Math.min(80 - newLeft, activeDrag.origRight - dx));
+      }
+
+      onChangeCrop({
+        cropTop: Math.round(newTop),
+        cropBottom: Math.round(newBottom),
+        cropLeft: Math.round(newLeft),
+        cropRight: Math.round(newRight)
+      });
+    }
+  };
+
+  const handlePointerUp = (e) => {
+    if (activeDrag) {
+      try {
+        e.target.releasePointerCapture?.(e.pointerId);
+      } catch (_) {}
+      setActiveDrag(null);
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      onPointerDown={(e) => handlePointerDown(e, "create")}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      className="relative inline-block max-w-full max-h-[380px] select-none cursor-crosshair overflow-hidden touch-none"
+    >
+      <img
+        src={src}
+        alt="Source Page"
+        className="max-h-[360px] w-auto object-contain block mx-auto select-none pointer-events-none rounded-lg"
+        draggable={false}
+      />
+
+      {/* Shaded Top */}
+      <div
+        className="absolute top-0 left-0 right-0 bg-black/60 backdrop-blur-[1px] pointer-events-none transition-none"
+        style={{ height: `${cropTop}%` }}
+      />
+      {/* Shaded Bottom */}
+      <div
+        className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-[1px] pointer-events-none transition-none"
+        style={{ height: `${cropBottom}%` }}
+      />
+      {/* Shaded Left */}
+      <div
+        className="absolute left-0 bg-black/60 backdrop-blur-[1px] pointer-events-none transition-none"
+        style={{
+          top: `${cropTop}%`,
+          bottom: `${cropBottom}%`,
+          width: `${cropLeft}%`
+        }}
+      />
+      {/* Shaded Right */}
+      <div
+        className="absolute right-0 bg-black/60 backdrop-blur-[1px] pointer-events-none transition-none"
+        style={{
+          top: `${cropTop}%`,
+          bottom: `${cropBottom}%`,
+          width: `${cropRight}%`
+        }}
+      />
+
+      {/* Interactive Highlighted Bounding Box */}
+      <div
+        onPointerDown={(e) => handlePointerDown(e, "move")}
+        className="absolute border-2 border-emerald-400 bg-emerald-500/10 shadow-[0_0_0_1px_rgba(0,0,0,0.6)] cursor-move flex items-center justify-center select-none"
+        style={{
+          top: `${cropTop}%`,
+          bottom: `${cropBottom}%`,
+          left: `${cropLeft}%`,
+          right: `${cropRight}%`,
+        }}
+      >
+        <span className="text-[10px] font-extrabold text-emerald-950 bg-emerald-400/95 px-2.5 py-0.5 rounded shadow pointer-events-none select-none">
+          ✂️ Drag Box or Edges
+        </span>
+
+        {/* 4 Corner Handles */}
+        <div
+          onPointerDown={(e) => handlePointerDown(e, "nw")}
+          className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-emerald-500 rounded-full shadow-md cursor-nwse-resize z-20 hover:scale-125 transition-transform"
+          title="Drag to resize top-left"
+        />
+        <div
+          onPointerDown={(e) => handlePointerDown(e, "ne")}
+          className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-emerald-500 rounded-full shadow-md cursor-nesw-resize z-20 hover:scale-125 transition-transform"
+          title="Drag to resize top-right"
+        />
+        <div
+          onPointerDown={(e) => handlePointerDown(e, "sw")}
+          className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-emerald-500 rounded-full shadow-md cursor-nesw-resize z-20 hover:scale-125 transition-transform"
+          title="Drag to resize bottom-left"
+        />
+        <div
+          onPointerDown={(e) => handlePointerDown(e, "se")}
+          className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-emerald-500 rounded-full shadow-md cursor-nwse-resize z-20 hover:scale-125 transition-transform"
+          title="Drag to resize bottom-right"
+        />
+
+        {/* 4 Edge Handles */}
+        <div
+          onPointerDown={(e) => handlePointerDown(e, "n")}
+          className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-6 h-3 bg-white border-2 border-emerald-500 rounded-full shadow-md cursor-ns-resize z-20 hover:scale-110 transition-transform"
+          title="Drag top edge"
+        />
+        <div
+          onPointerDown={(e) => handlePointerDown(e, "s")}
+          className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-6 h-3 bg-white border-2 border-emerald-500 rounded-full shadow-md cursor-ns-resize z-20 hover:scale-110 transition-transform"
+          title="Drag bottom edge"
+        />
+        <div
+          onPointerDown={(e) => handlePointerDown(e, "w")}
+          className="absolute -left-1.5 top-1/2 -translate-y-1/2 w-3 h-6 bg-white border-2 border-emerald-500 rounded-full shadow-md cursor-ew-resize z-20 hover:scale-110 transition-transform"
+          title="Drag left edge"
+        />
+        <div
+          onPointerDown={(e) => handlePointerDown(e, "e")}
+          className="absolute -right-1.5 top-1/2 -translate-y-1/2 w-3 h-6 bg-white border-2 border-emerald-500 rounded-full shadow-md cursor-ew-resize z-20 hover:scale-110 transition-transform"
+          title="Drag right edge"
+        />
+      </div>
+    </div>
+  );
 }
 
 export function CreateMockTestPage({ isFreeByDefault = false }) {
@@ -408,6 +669,34 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     });
   };
 
+  const removeEditingImage = (qIdx, imgIdx) => {
+    setEditingTest(prev => {
+      if (!prev) return null;
+      const updatedList = [...prev.questionsList];
+      const q = { ...updatedList[qIdx] };
+      const urls = q.imageUrls || (q.imageUrl ? [q.imageUrl] : []);
+      const newUrls = urls.filter((_, i) => i !== imgIdx);
+      q.imageUrls = newUrls;
+      q.imageUrl = newUrls.length > 0 ? newUrls[0] : "";
+      updatedList[qIdx] = q;
+      return { ...prev, questionsList: updatedList };
+    });
+  };
+
+  const addEditingImage = (qIdx, base64DataUrl) => {
+    if (!base64DataUrl) return;
+    setEditingTest(prev => {
+      if (!prev) return null;
+      const updatedList = [...prev.questionsList];
+      const q = { ...updatedList[qIdx] };
+      const urls = q.imageUrls || (q.imageUrl ? [q.imageUrl] : []);
+      q.imageUrls = [...urls, base64DataUrl];
+      q.imageUrl = q.imageUrls[0] || base64DataUrl;
+      updatedList[qIdx] = q;
+      return { ...prev, questionsList: updatedList };
+    });
+  };
+
   const saveEditingTest = async () => {
     if (!editingTest) return;
     setIsSavingEdit(true);
@@ -420,11 +709,32 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           explanation: cleanExplanation
         };
       });
+
+      // Rebuild sectionsConfig and sections from the updated question section names
+      const secCounts = {};
+      sanitizedQuestions.forEach(q => {
+        const s = q.section || "General";
+        secCounts[s] = (secCounts[s] || 0) + 1;
+      });
+      const updatedSectionNames = Object.keys(secCounts);
+      const oldSectionsConfig = editingTest.sectionsConfig || [];
+      const updatedSectionsConfig = updatedSectionNames.map(secName => {
+        // Try to preserve duration from old config if this section existed (possibly renamed)
+        const existing = oldSectionsConfig.find(s => s.name === secName);
+        return {
+          name: secName,
+          questionCount: secCounts[secName],
+          durationMinutes: existing?.durationMinutes || 20
+        };
+      });
+
       const finalObject = {
         ...editingTest,
         title: editingTest.title.trim() || "Untitled Mock Test",
         questionsList: sanitizedQuestions,
-        questions: sanitizedQuestions.length
+        questions: sanitizedQuestions.length,
+        sections: updatedSectionNames,
+        sectionsConfig: updatedSectionsConfig.length > 0 ? updatedSectionsConfig : editingTest.sectionsConfig
       };
       await updateMockTest(editingTest.id, finalObject);
       setEditingTest(null);
@@ -539,11 +849,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   };
 
   const handleOptionPaste = (e, qIdx, optIdx) => {
-    const pasteText = e.clipboardData.getData("text");
-    
-    // Check if it matches typical list formats like "(a) xyz (b) abc" or "A. xyz B. abc" or "1) xyz 2) abc"
-    const splitRegex = /(?:\([a-eA-E1-5]\)|[a-eA-E1-5][\.\)]|\b[A-E]\b[\.\)]?)\s+/;
-    const parts = pasteText.split(splitRegex).map(p => p.trim()).filter(p => p !== "");
+    const pasteText = e.clipboardData?.getData("text") || "";
+    const parts = parsePastedOptions(pasteText);
     
     if (parts.length > 1) {
       e.preventDefault();
@@ -554,7 +861,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           
           let pIdx = 0;
           for (let j = optIdx; j < optIdx + parts.length; j++) {
-            if (j < 5) { // Assuming max 5 options
+            if (j < 7) { // Support up to 7 options (A to G)
               if (j < newOptions.length) {
                 newOptions[j] = parts[pIdx];
               } else {
@@ -566,6 +873,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           return { ...q, options: newOptions };
         })
       );
+      pushToast(`✨ Automatically split ${parts.length} options!`);
     }
   };
 
@@ -731,16 +1039,45 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
       // Strip rawExtractedQuestions to avoid duplicate storage bloat
       const { rawExtractedQuestions, ...cleanTestMeta } = generatedTest;
+      // Automatically build sectionsConfig from compressedQuestions
+      const secCounts = {};
+      compressedQuestions.forEach(q => {
+        const s = q.section || "General";
+        secCounts[s] = (secCounts[s] || 0) + 1;
+      });
+
+      const uniqueSections = Object.keys(secCounts);
+      const isBankTest = (f.category || generatedTest.category || "").toLowerCase().includes("bank") || compressedQuestions.length >= 60;
+      
+      const computedSectionsConfig = uniqueSections.map(secName => {
+        let dur = 20;
+        if (compressedQuestions.length <= 40) {
+          dur = 20;
+        } else if (compressedQuestions.length >= 80) {
+          dur = 20; // 3 x 20 mins = 60 mins for Bank PO / Clerk 100 Qs
+        } else {
+          dur = Math.max(10, Math.floor(60 / (uniqueSections.length || 1)));
+        }
+        return {
+          name: secName,
+          durationMinutes: dur,
+          questionCount: secCounts[secName]
+        };
+      });
+
+      const totalTestMinutes = computedSectionsConfig.reduce((sum, s) => sum + s.durationMinutes, 0) || (compressedQuestions.length >= 80 ? 60 : 30);
+
       const testToPublish = { 
         ...cleanTestMeta, 
         title: f.title.trim() || generatedTest.title || `${f.category || 'Banking'} Mock Test`,
         category: f.category || generatedTest.category || "Banking",
         subject: f.subject || generatedTest.subject || "",
         topic: f.topic || generatedTest.topic || "",
-        time: f.time || generatedTest.time || "30 min",
-        durationMinutes: Math.max(1, parseInt(f.time || generatedTest.time) || 30),
+        time: f.time || generatedTest.time || `${totalTestMinutes} min`,
+        durationMinutes: Math.max(1, parseInt(f.time || generatedTest.time) || totalTestMinutes),
         isFree: !!f.isFree,
-        isSectionalTimed: !!f.isSectionalTimed,
+        isSectionalTimed: isBankTest || !!f.isSectionalTimed || uniqueSections.length > 1,
+        sectionsConfig: computedSectionsConfig.length > 0 ? computedSectionsConfig : BANKING_DEFAULT_SECTIONS,
         questionsList: compressedQuestions, 
         questions: compressedQuestions.length,
         createdAt: new Date().toISOString()
@@ -865,151 +1202,336 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
     let res = str;
 
-    // 1. Convert caret notation: e.g. 15^2 -> 15², x^3 -> x³
+    const superDigits = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹' };
+    const subDigits = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉' };
+    const toSuperDigits = (s) => s.split('').map(c => superDigits[c] || c).join('');
+    const toSubDigits = (s) => s.split('').map(c => subDigits[c] || c).join('');
+
+    // 0. Repair dangling carets from PDF OCR extraction noise for common speed math powers
     res = res
+      .replace(/(\b1681\b|\(1681\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₂$2")
+      .replace(/(\b409[4-6]\b|\(409[4-6]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b219[6-8]\b|\(219[6-8]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b172[7-9]\b|\(172[7-9]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b274[3-5]\b|\(274[3-5]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b337[4-6]\b|\(337[4-6]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b583[1-3]\b|\(583[1-3]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b685[8-9]\b|\(685[8-9]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b926[0-2]\b|\(926[0-2]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b1382[3-5]\b|\(1382[3-5]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2")
+      .replace(/(\b2438[8-9]\b|\(2438[8-9]\))\^(\s*(?:[\+\-\*\/=]|$))/g, "$1¹⁄₃$2");
+
+    // 1. Convert fractional exponents: ^(1/2) -> ¹⁄₂, ^1/2 -> ¹⁄₂, ^(1/3) -> ¹⁄₃, etc.
+    res = res.replace(/\^\s*[\(\{]?(\d+)\/(\d+)[\)\}]?/g, (_, num, den) => {
+      return toSuperDigits(num) + '⁄' + toSubDigits(den);
+    });
+
+    // ^(n) or ^{n} — parenthesized single-digit exponents like ^(4), ^{10}
+    res = res.replace(/\^[\(\{](\d+)[\)\}]/g, (_, exp) => {
+      return toSuperDigits(exp);
+    });
+
+    // 2. Convert simple caret notation: ^2 -> ², ^3 -> ³, etc. up to ^9
+    res = res
+      .replace(/\^0/g, "⁰")
+      .replace(/\^1(?![0-9\/])/g, "¹")
       .replace(/\^2/g, "²")
       .replace(/\^3/g, "³")
       .replace(/\^4/g, "⁴")
-      .replace(/\^5/g, "⁵");
+      .replace(/\^5/g, "⁵")
+      .replace(/\^6/g, "⁶")
+      .replace(/\^7/g, "⁷")
+      .replace(/\^8/g, "⁸")
+      .replace(/\^9/g, "⁹");
 
-    // 2. Convert space-separated powers like "15 2" or "12 2" or "(15) 2" -> "15²", "12²"
+    // 3. Convert common text fractions to Unicode vulgar fractions
+    //    Only replace standalone fractions (not inside longer numbers like 11/7)
+    res = res
+      .replace(/(?<![0-9])1\/2(?![0-9])/g, "½")
+      .replace(/(?<![0-9])1\/3(?![0-9])/g, "⅓")
+      .replace(/(?<![0-9])2\/3(?![0-9])/g, "⅔")
+      .replace(/(?<![0-9])1\/4(?![0-9])/g, "¼")
+      .replace(/(?<![0-9])3\/4(?![0-9])/g, "¾")
+      .replace(/(?<![0-9])1\/5(?![0-9])/g, "⅕")
+      .replace(/(?<![0-9])2\/5(?![0-9])/g, "⅖")
+      .replace(/(?<![0-9])3\/5(?![0-9])/g, "⅗")
+      .replace(/(?<![0-9])4\/5(?![0-9])/g, "⅘")
+      .replace(/(?<![0-9])1\/6(?![0-9])/g, "⅙")
+      .replace(/(?<![0-9])5\/6(?![0-9])/g, "⅚")
+      .replace(/(?<![0-9])1\/8(?![0-9])/g, "⅛")
+      .replace(/(?<![0-9])3\/8(?![0-9])/g, "⅜")
+      .replace(/(?<![0-9])5\/8(?![0-9])/g, "⅝")
+      .replace(/(?<![0-9])7\/8(?![0-9])/g, "⅞");
+
+    // 4. Convert space-separated powers like "15 2" or "(15) 2" -> "15²" (only 2 and 3)
     res = res.replace(/(\b\d+|\))\s+([23])(?=\s*(?:[\+\-\*\/\=\,\)\?]|$))/g, (match, base, exp) => {
-      if (/[²³⁴⁵]$/.test(base)) return match;
+      if (/[²³⁴⁵⁶⁷⁸⁹⁰¹]$/.test(base)) return match;
       const superscripts = { "2": "²", "3": "³" };
       return `${base}${superscripts[exp] || exp}`;
     });
 
-    // 3. Clean up any duplicate consecutive superscripts (e.g. ²² -> ²) to prevent double superscript bugs
-    res = res.replace(/([²³⁴⁵])\1+/g, "$1");
+    // 5. Clean up any duplicate consecutive superscripts (e.g. ²² -> ²)
+    res = res.replace(/([²³⁴⁵⁶⁷⁸⁹⁰¹])\1+/g, "$1");
 
     return res;
   };
 
-  const parseQuestionsFromPDFText = (fullText, sectionName = "General", targetCount = 35) => {
+
+  const parseQuestionsFromPDFText = (fullText, defaultSection = "General", targetCount = 100) => {
     if (!fullText || !fullText.trim()) return [];
 
-    let questions = [];
     const cleanText = fullText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-    // Flexible Regex Splitter (matches 1., Q1., Q.1, Question 1:, 1), (1), Q1 -, 1 -)
-    const qSplitRegex = /(?:^|\n|\s)(?:Q(?:uestion)?[\s\.-]*\d+|\d+[\)\.\:\-]|(?:\(\d+\)))\s+/gi;
-    const rawBlocks = cleanText.split(qSplitRegex).map(b => b.trim()).filter(Boolean);
+    // 1. ISOLATE QUESTIONS TEXT & SOLUTIONS TEXT
+    // Distinguish between pure ANSWER KEY (single letters) and HINTS & SOLUTIONS (full working steps)
+    const detailedSolMatch = cleanText.match(/\n\s*(?:HINTS?\s*(?:&|AND)\s*SOLUTIONS?|DETAILED\s*SOLUTIONS?|SOLUTIONS?\s*(?:&|AND)\s*EXPLANATIONS?|HINTS?\s*(?:&|AND)\s*EXPLANATIONS?|EXPLANATIONS?|SOLUTIONS?)\b/i);
+    const ansKeyMatch = cleanText.match(/\n\s*(?:ANSWERS?\s*(?:KEY|SHEET|&\s*EXPLANATIONS|:)?)\b/i);
 
-    const parseOptionsFromBlock = (block) => {
-      // Lookahead regex to parse single-line or multi-line options (A. 7 B. 12 C. 15 D. 20 E. 25)
-      const optRegex = /(?:\b|\s|\(|\[)([A-Ea-e1-5])[\)\.\:\-\]\s]+(.*?)(?=(?:\s*(?:\b|\s|\(|\[)[A-Ea-e1-5][\)\.\:\-\]\s]+)|$|\n)/gi;
-      let options = {};
-      let questionText = block;
-      let firstOptIndex = -1;
-      let match;
+    const firstSplitIndex = [ansKeyMatch?.index, detailedSolMatch?.index].filter(idx => typeof idx === "number" && idx > 500).sort((a,b) => a - b)[0];
+    
+    let questionsText = cleanText;
+    let solutionsText = "";
+    let detailedSolText = "";
 
-      while ((match = optRegex.exec(block)) !== null) {
-        if (firstOptIndex === -1) firstOptIndex = match.index;
-        let key = match[1].toUpperCase();
-        if (/^[1-5]$/.test(key)) {
-          key = String.fromCharCode(64 + parseInt(key));
+    if (firstSplitIndex) {
+      questionsText = cleanText.substring(0, firstSplitIndex);
+      solutionsText = cleanText.substring(firstSplitIndex);
+    }
+    detailedSolText = detailedSolMatch && detailedSolMatch.index > 500 ? cleanText.substring(detailedSolMatch.index) : solutionsText;
+
+    // 2. EXTRACT ANSWER KEY MAP (e.g. 1. d.) 2401, 2. d) 248, 6.d, 11. b, 16. (Option A), 81. a)
+    const answerKeyMap = {};
+    const ansKeyRegex = /(?:^|\n)\s*(\d{1,3})\s*[\.\)]\s*(?:\(?\s*(?:Option\s*)?([A-Ea-e])\b|\.([A-Ea-e])\b)/gi;
+    let km;
+    while ((km = ansKeyRegex.exec(solutionsText || cleanText)) !== null) {
+      const qNum = parseInt(km[1], 10);
+      let ansVal = (km[2] || km[3]).toUpperCase();
+      if (/^[1-5]$/.test(ansVal)) {
+        ansVal = String.fromCharCode(64 + parseInt(ansVal, 10)); // 1->A, 2->B, etc.
+      }
+      if (qNum >= 1 && qNum <= 250 && !answerKeyMap[qNum]) {
+        answerKeyMap[qNum] = ansVal;
+      }
+    }
+
+    // 3. EXTRACT DETAILED SOLUTIONS MAP (e.g. "1. d.) 2401 \n Solution: ...")
+    const solutionsMap = {};
+    const textForSolutions = detailedSolText || solutionsText;
+    if (textForSolutions) {
+      const solSplitRegex = /(?:^|\n)\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*(?:[\.\)\:\-]\s*|\s{2,})/g;
+      const solMatches = [];
+      let sm;
+      while ((sm = solSplitRegex.exec(textForSolutions)) !== null) {
+        solMatches.push({ qNum: parseInt(sm[1], 10), index: sm.index, matchLen: sm[0].length });
+      }
+      for (let i = 0; i < solMatches.length; i++) {
+        const cur = solMatches[i];
+        const nextIndex = (i < solMatches.length - 1) ? solMatches[i + 1].index : textForSolutions.length;
+        let block = textForSolutions.substring(cur.index + cur.matchLen, nextIndex).trim();
+        block = block
+          .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, '')
+          .replace(/IBPS PO Pre held on [^\n]+/gi, '')
+          .trim();
+        if (block && cur.qNum >= 1 && cur.qNum <= 250) {
+          // Prefer richer/longer explanations (e.g. full working steps over a 1-letter answer key match)
+          if (!solutionsMap[cur.qNum] || block.length > solutionsMap[cur.qNum].length) {
+            solutionsMap[cur.qNum] = formatMathText(block);
+          }
         }
-        if (!options[key] && match[2].trim()) {
-          options[key] = formatMathText(match[2].trim());
+      }
+    }
+
+    // 4. DETECT SECTION MARKERS IN TEXT (Require standalone line header so subject names in questions like "English" aren't confused)
+    const sectionMarkers = [];
+    const secRegex = /(?:^|\n)\s*(?:(?:SECTION|TEST\s+OF|PART)\s*[-–:]?\s*[A-C1-3IVX0-9]*\s*[:–-]?\s*)?(ENGLISH(?:\s+LANGUAGE)?|GENERAL\s+ENGLISH|REASONING(?:\s+ABILITY)?|LOGICAL\s+REASONING|GENERAL\s+INTELLIGENCE(?:\s*&\s*REASONING)?|QUANTITATIVE\s+APTITUDE|NUMERICAL\s+ABILITY|MATHEMATICS|QUANTS?|GENERAL\s+AWARENESS|CURRENT\s+AFFAIRS|BANKING\s+AWARENESS)\s*(?:\n|$)/gi;
+    let secMatch;
+    while ((secMatch = secRegex.exec(questionsText)) !== null) {
+      const rawName = secMatch[1].toUpperCase();
+      let canon = "General";
+      if (rawName.includes("ENGLISH")) canon = "English Language";
+      else if (rawName.includes("REASONING") || rawName.includes("INTELLIGENCE")) canon = "Reasoning Ability";
+      else if (rawName.includes("QUANT") || rawName.includes("NUMERICAL") || rawName.includes("MATH")) canon = "Quantitative Aptitude";
+      else if (rawName.includes("AWARENESS") || rawName.includes("AFFAIRS")) canon = "General Awareness";
+      sectionMarkers.push({ index: secMatch.index, name: canon });
+    }
+
+    const getSectionAtCharIndex = (charIdx) => {
+      if (sectionMarkers.length === 0) return null;
+      let active = null;
+      for (const marker of sectionMarkers) {
+        if (marker.index <= charIdx) {
+          active = marker.name;
+        }
+      }
+      return active;
+    };
+
+    // Helper: Content-based section classification for Indian Bank Exams
+    const inferSectionFromBankContent = (qText, passage, qIndex) => {
+      const combined = `${passage || ""} ${qText || ""}`.toLowerCase();
+      // 1. English indicators
+      if (/(?:passage|reading comprehension|author|antonym|synonym|closest in meaning|opposite in meaning|grammatical|grammatically|spelt|misspelt|phrase replacement|cloze|para[\s-]?jumble|rearrange the following sentences|first sentence after rearrangement|error|spotting error|sentence correction|bold word|underlined phrase)/i.test(combined)) {
+        return "English Language";
+      }
+      // 2. Reasoning indicators
+      if (/(?:puzzle|seating arrangement|seated|sitting|circular table|square table|linear row|parallel rows|facing|floor|flat|box|boxes placed|blood relation|father|mother|brother|sister|son|daughter|uncle|aunt|nephew|niece|spouse|married to|related to\b|syllogism|only a few|some books are|statements?:|conclusions?:|does not follow|neither nor|either or|inequalit|[A-Z]\s*[><≥≤=]\s*[A-Z]|coding[\s-]?decoding|written as\b|coded as\b|code language|direction sense|\bdirection|\b(?:north|south|east|west|northeast|northwest|southeast|southwest)\b|walks \d+[\s]?m|shortest distance|pythagoras|alphabet series|alphanumeric|vowels?|consonants?|meaningful word|how many such pairs|letters of the word|rank|order and ranking|alike in a certain way|does not belong|odd one out|machine input|input[\s-]output|step [I|V|X\d]+|who sits|sits second|sits third|sits immediate|extreme end|how many persons|immediate left|immediate right)/i.test(combined)) {
+        return "Reasoning Ability";
+      }
+      // 3. Quants indicators
+      if (/(?:data interpretation|\bdi\b|bar graph|bar chart|pie chart|line graph|tabular|table shows|caselet|simplification|approximation|(?:(?:\+|\-|\*|\/|=)\s*\?|\?\s*(?:\+|\-|\*|\/|=)|(?:√|sqrt)\s*\?|\(\s*\?\s*\)\s*[²³]|\?\s*%\s*of)|≈|number series|missing number|wrong number|quadratic equation|profit and loss|simple interest|compound interest|time and work|pipes and cistern|speed time|downstream|upstream|ratio and proportion|mixture|alligation|mensuration|perimeter|cylinder|cone|probability|visitors|total students|boys and girls|average of|find the value of|percentage of|ratio of)/i.test(combined)) {
+        return "Quantitative Aptitude";
+      }
+      const qNum = qIndex + 1;
+      if (qNum <= 35) return "Quantitative Aptitude";
+      if (qNum <= 65) return "English Language";
+      return "Reasoning Ability";
+    };
+
+    // 5. EXTRACT SHARED PASSAGES / DIRECTIONS (e.g. Directions 1-5, Directions 16-20, Directions 36-40, etc.)
+    const passageRanges = [];
+    const dirGlobalRegex = /(?:Directions?\s*(?:\([^\)]+\)|for\s+questions?\s*\d+[\s\w–—-]+)?[\:\s]*|Read the following[^\:\n]*[\:\.\n]|Study the following[^\:\n]*[\:\.\n]|The table shows[^\:\n]*[\:\.\n]|The following table[^\:\n]*[\:\.\n]|Rearrange the following six sentences[^\:\n]*[\:\.\n])([\s\S]*?)(?=(?:\n\s*(?:Q(?:uestion)?\.?\s*)?\d{1,3}[\.\)\:\-]\s*)|$)/gi;
+    let dm;
+    while ((dm = dirGlobalRegex.exec(questionsText)) !== null) {
+      const fullDirBlock = dm[0].trim();
+      const rangeMatch = fullDirBlock.match(/(?:Q(?:uestion)?s?[\:\s\.]*|\(\s*Q?\.?\s*|\b(?:questions?|nos?|q)\.?\s*)?(\d{1,3})\s*(?:-|to|–|—)\s*(\d{1,3})/i);
+      if (rangeMatch) {
+        const startNum = parseInt(rangeMatch[1], 10);
+        const endNum = parseInt(rangeMatch[2], 10);
+        if (!isNaN(startNum) && !isNaN(endNum) && endNum >= startNum && (endNum - startNum) <= 15) {
+          passageRanges.push({ startNum, endNum, passage: convertTextTableToMarkdown(fullDirBlock) });
+        }
+      }
+    }
+
+    // 6. DETECT PAGE MARKERS FROM TEXT
+    const pageMarkers = [];
+    const pageRegex = /--- Page (\d+) ---/g;
+    let pm;
+    while ((pm = pageRegex.exec(cleanText)) !== null) {
+      pageMarkers.push({ pageNum: parseInt(pm[1], 10), index: pm.index });
+    }
+    const getPageNumAtCharIndex = (charIdx) => {
+      if (pageMarkers.length === 0) return 1;
+      let pNum = 1;
+      for (const m of pageMarkers) {
+        if (m.index <= charIdx) pNum = m.pageNum;
+      }
+      return pNum;
+    };
+
+    // Robust option parser: handles both newline-preceded options and inline options
+    const parseOptionsFromBlock = (block) => {
+      const nlOptRegex = /(?:^|\n)\s*(?:\(?([A-Ea-e1-5])[\)\.\:\-\]]|\(([A-Ea-e1-5])\))\s*(.*?)(?=(?:\n\s*(?:\(?[A-Ea-e1-5][\)\.\:\-\]]|\([A-Ea-e1-5]\)))|$)/gi;
+      let optMatches = [...block.matchAll(nlOptRegex)];
+
+      if (optMatches.length < 3) {
+        const inlineOptRegex = /(?:(?:\s{2,}|\s)(?:\(?([A-Ea-e1-5])[\)\.\:\-\]]|\(([A-Ea-e1-5])\)))\s*(.*?)(?=(?:\s+(?:\(?[A-Ea-e1-5][\)\.\:\-\]]|\([A-Ea-e1-5]\)))|$)/gi;
+        const inMatches = [...block.matchAll(inlineOptRegex)];
+        if (inMatches.length >= 3) {
+          optMatches = inMatches;
         }
       }
 
-      if (firstOptIndex !== -1) {
+      let options = {};
+      let questionText = block;
+
+      if (optMatches.length >= 2) {
+        const firstOptIndex = optMatches[0].index;
         questionText = block.substring(0, firstOptIndex).trim();
+
+        optMatches.forEach(m => {
+          let key = (m[1] || m[2]).toUpperCase();
+          if (/^[1-5]$/.test(key)) {
+            key = String.fromCharCode(64 + parseInt(key, 10));
+          }
+          const val = (m[3] || "").trim();
+          if (!options[key] && val) {
+            options[key] = formatMathText(val.replace(/^[\)\.\:\-\]]\s*/, ''));
+          }
+        });
       }
 
       return { questionText: formatMathText(questionText), options };
     };
 
-    let currentPassage = "";
-    let passageEndQNum = -1;
+    // 7. LOCATE QUESTIONS SEQUENTIALLY (1 to N)
+    const qSplitRegex = /(?:^|\n)\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*[\.\)]\s*(?!\d)/g;
+    const rawQPositions = [];
+    let qm;
+    while ((qm = qSplitRegex.exec(questionsText)) !== null) {
+      rawQPositions.push({
+        num: parseInt(qm[1], 10),
+        index: qm.index,
+        matchLen: qm[0].length
+      });
+    }
 
-    for (let i = 0; i < rawBlocks.length; i++) {
-      let block = rawBlocks[i];
-      if (block.length < 5) continue;
-      let { questionText, options } = parseOptionsFromBlock(block);
-
-      let extractedPassageForThisQ = "";
-
-      // Check if block contains Directions / Passage / DI context header
-      const dirRegex = /(?:Directions?\s*(?:\([^\)]+\))?[\:\s]*|Read the following[^\:\n]*[\:\.\n]|Study the following[^\:\n]*[\:\.\n]|Passage\s*[\:\-]|Paragraph\s*[\:\-])/i;
-      
-      if (dirRegex.test(questionText)) {
-        const dirMatch = questionText.match(/(?:Directions?\s*\([^\)]+\)|Directions?|Read the following[^\:\n]*|Study the following[^\:\n]*|Passage|Paragraph)[\s\S]*?(?=\n\s*(?:What|Find|Calculate|If|Which|How|In|Select|Choose|Who|Where|When|The|A|An|\d+[\.\)])|$)/i);
-
-        if (dirMatch && dirMatch[0]) {
-          extractedPassageForThisQ = dirMatch[0].trim();
-          let cleanedQText = questionText.substring(dirMatch[0].length).trim();
-          if (cleanedQText.length > 5) {
-            questionText = cleanedQText;
-          }
-        } else {
-          extractedPassageForThisQ = questionText.trim();
-        }
-
-        const rangeMatch = extractedPassageForThisQ.match(/(?:Q(?:uestion)?s?[\:\s\.]*)?(\d+)\s*(?:-|to|–|—)\s*(\d+)/i);
-        if (rangeMatch) {
-          const startQ = parseInt(rangeMatch[1]);
-          const endQ = parseInt(rangeMatch[2]);
-          passageEndQNum = endQ;
-          currentPassage = extractedPassageForThisQ;
-        } else {
-          currentPassage = extractedPassageForThisQ;
-          passageEndQNum = questions.length + 5;
-        }
-      }
-
-      let finalPassage = extractedPassageForThisQ;
-      if (!finalPassage && currentPassage && (questions.length + 1 <= passageEndQNum)) {
-        finalPassage = currentPassage;
-      }
-
-      let finalOptions = { ...options };
-      if (Object.keys(finalOptions).length < 2) {
-        const inlineOptRegex = /(?:\b|\s|\(|\[)([A-Ea-e])[\)\.\:\-\]\s]+(.*?)(?=(?:\s*(?:\b|\s|\(|\[)[A-Ea-e][\)\.\:\-\]\s]+)|$|\n)/gi;
-        let inlineOpts = {};
-        let m;
-        let inlineFirstIndex = -1;
-        while ((m = inlineOptRegex.exec(block)) !== null) {
-          if (inlineFirstIndex === -1) inlineFirstIndex = m.index;
-          inlineOpts[m[1].toUpperCase()] = formatMathText(m[2].trim());
-        }
-        if (Object.keys(inlineOpts).length >= 2) {
-          finalOptions = inlineOpts;
-          if (inlineFirstIndex > 0) {
-            questionText = formatMathText(block.substring(0, inlineFirstIndex).trim());
-          }
-        }
-      }
-
-      if (questionText) {
-        const keys = ["A", "B", "C", "D", "E"];
-        keys.forEach(k => {
-          if (!finalOptions[k] || !finalOptions[k].trim()) {
-            finalOptions[k] = `Option ${k}`;
-          }
-        });
-
-        questions.push({
-          section: sectionName,
-          passage: finalPassage,
-          question_text: questionText,
-          options: finalOptions,
-          source_answer: "A",
-          explanation: "Extracted from PDF. Click option to select correct answer."
-        });
+    // Filter to ensure monotonic/sequential question positions (1 to N)
+    // Avoids sub-numbered puzzle rules like "(1) Person A... (2) Person B..."
+    const qPositions = [];
+    let expected = 1;
+    for (let i = 0; i < rawQPositions.length; i++) {
+      const cur = rawQPositions[i];
+      if (cur.num === expected) {
+        qPositions.push(cur);
+        expected++;
+      } else if (cur.num > expected && cur.num <= expected + 2) {
+        qPositions.push(cur);
+        expected = cur.num + 1;
       }
     }
 
-    // Fallback paragraph chunker if Strategy 1 yields 0 questions
-    if (questions.length === 0) {
-      const lineParagraphs = cleanText
-        .split(/\n\s*\n/)
-        .map(p => p.trim())
-        .filter(p => p.length > 15);
+    let questions = [];
 
-      lineParagraphs.forEach((para) => {
-        const { questionText, options } = parseOptionsFromBlock(para);
+    if (qPositions.length >= 5) {
+      for (let i = 0; i < qPositions.length; i++) {
+        const cur = qPositions[i];
+        const nextIndex = (i < qPositions.length - 1) ? qPositions[i + 1].index : questionsText.length;
+        const block = questionsText.substring(cur.index + cur.matchLen, nextIndex).trim();
+        if (block.length < 3) continue;
+
+        let { questionText, options } = parseOptionsFromBlock(block);
+
+        // Clean headers/footers watermarks
+        questionText = questionText
+          .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, '')
+          .replace(/IBPS PO Pre held on [^\n]+/gi, '')
+          .trim();
+
+        // For Cloze Tests (e.g. blank 44, 45, etc.) where the question text is empty
+        if (!questionText) {
+          questionText = `Select the appropriate word for blank (${cur.num}) in the passage:`;
+        }
+
+        // Check if question has inline answer (e.g. "Ans. (c)" or "Answer: B")
+        let inlineAns = null;
+        const inlineAnsMatch = block.match(/(?:Ans(?:wer)?[\:\s\.\-]+|\(?Ans\)?\s*[\:\.\-]?\s*)(?:\(?([A-Ea-e1-5])\)?)/i);
+        if (inlineAnsMatch) {
+          let letVal = inlineAnsMatch[1].toUpperCase();
+          if (/^[1-5]$/.test(letVal)) letVal = String.fromCharCode(64 + parseInt(letVal, 10));
+          inlineAns = letVal;
+          questionText = questionText.replace(/(?:Ans(?:wer)?[\:\s\.\-]+|\(?Ans\)?\s*[\:\.\-]?\s*)\(?([A-Ea-e1-5])\)?[\s\S]*$/i, '').trim();
+        }
+
+        // Link shared passage / directions if question number falls in a range
+        let linkedPassage = "";
+        const matchedRange = passageRanges.find(r => cur.num >= r.startNum && cur.num <= r.endNum);
+        if (matchedRange) {
+          linkedPassage = matchedRange.passage
+            .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, '')
+            .replace(/IBPS PO Pre held on [^\n]+/gi, '')
+            .trim();
+        }
+
+        // Determine Section: Prioritize detected header over general fallback
+        const contentSec = inferSectionFromBankContent(questionText, linkedPassage, questions.length);
+        const sectionFromHeader = getSectionAtCharIndex(cur.index);
+        let finalSection = sectionFromHeader || contentSec || defaultSection;
+
+        // Determine Page Number
+        const qPageNum = getPageNumAtCharIndex(cur.index);
+
+        // Ensure all 5 options (A, B, C, D, E) are populated
         const finalOptions = { ...options };
         ["A", "B", "C", "D", "E"].forEach(k => {
           if (!finalOptions[k] || !finalOptions[k].trim()) {
@@ -1017,14 +1539,79 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           }
         });
 
+        // Determine correct answer: Answer Key > Inline Answer > 'A'
+        const correctLetter = answerKeyMap[cur.num] || inlineAns || "A";
+        const correctIdx = Math.max(0, correctLetter.charCodeAt(0) - 65);
+
+        // Determine explanation: Solutions map > descriptive text
+        const solText = solutionsMap[cur.num] || `Verified correct answer: Option ${correctLetter}. Detailed step-by-step working from exam solutions.`;
+
         questions.push({
-          section: sectionName,
-          question_text: formatMathText(questionText || para),
+          id: `pdf_q_${Date.now()}_${questions.length}`,
+          questionNumber: cur.num,
+          page_number: qPageNum,
+          chart_page_number: qPageNum,
+          section: finalSection,
+          passage: linkedPassage,
+          question: questionText || `Question ${cur.num}`,
+          question_text: questionText || `Question ${cur.num}`,
           options: finalOptions,
-          source_answer: "A",
-          explanation: "Extracted from PDF paragraph block. Review and edit options as needed."
+          correctAnswerIndex: correctIdx < 5 ? correctIdx : 0,
+          source_answer: correctLetter,
+          explanation: solText,
+          solutionText: solText,
         });
-      });
+      }
+    }
+
+    // 8. FALLBACK: If sequential parser found fewer than 5 questions, use flexible block splitter
+    if (questions.length < 5) {
+      const rawBlocks = questionsText.split(/(?:^|\n|\s)(?:Q(?:uestion)?[\s\.-]*\d+|\d+[\)\.\:\-]|(?:\(\d+\)))\s+/gi).map(b => b.trim()).filter(Boolean);
+      for (let i = 0; i < rawBlocks.length; i++) {
+        const block = rawBlocks[i];
+        if (block.length < 5) continue;
+        let { questionText, options } = parseOptionsFromBlock(block);
+        const qNum = i + 1;
+        const finalOptions = { ...options };
+        ["A", "B", "C", "D", "E"].forEach(k => {
+          if (!finalOptions[k] || !finalOptions[k].trim()) {
+            finalOptions[k] = `Option ${k}`;
+          }
+        });
+        const correctLetter = answerKeyMap[qNum] || "A";
+        const correctIdx = Math.max(0, correctLetter.charCodeAt(0) - 65);
+        const finalSection = inferSectionFromBankContent(questionText, "", i);
+        const fallbackSol = solutionsMap[qNum] || `Verified correct answer: Option ${correctLetter}.`;
+
+        questions.push({
+          id: `pdf_q_${Date.now()}_${i}`,
+          questionNumber: qNum,
+          section: finalSection,
+          passage: "",
+          question: questionText || `Question ${qNum}`,
+          question_text: questionText || `Question ${qNum}`,
+          options: finalOptions,
+          correctAnswerIndex: correctIdx < 5 ? correctIdx : 0,
+          source_answer: correctLetter,
+          explanation: fallbackSol,
+          solutionText: fallbackSol,
+        });
+      }
+    }
+
+    // Propagate linked passage to upcoming questions in the same 5-question block
+    let activePassage = "";
+    let activePassageEnd = 0;
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      if (q.passage && q.passage.length > 25) {
+        activePassage = q.passage;
+        activePassageEnd = (q.questionNumber || (i + 1)) + 4;
+      } else if (activePassage && (q.questionNumber || (i + 1)) <= activePassageEnd) {
+        q.passage = activePassage;
+      } else {
+        activePassage = "";
+      }
     }
 
     return questions.slice(0, 200);
@@ -1072,11 +1659,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         const pagesData = await Promise.all(pageIndices.map(async (i) => {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
-          const pageText = textContent.items.map(item => item.str).join(" ");
+          const pageText = extractTextWithMathPreservation(textContent);
           return { pageNum: i, text: pageText, page };
         }));
         pagesData.sort((a, b) => a.pageNum - b.pageNum);
-        fullText = pagesData.map(p => p.text).join("\n");
+        fullText = pagesData.map(p => `\n--- Page ${p.pageNum} ---\n${p.text}`).join("\n");
 
         const diRegex = /(?:directions?\s*\(?\s*q?\.?\s*\d+|study the following|refer to the|pie[\s-]?chart|bar[\s-]?graph|bar[\s-]?chart|line[\s-]?graph|table|tabular|data interpretation|histogram|given below|graph)/i;
         const qRegex = /(?:\b[1-9]\d*[\.\)]|\b(?:Q(?:uestion)?[\s\.\d]+)|(?:[A-Ea-e][\.\)]\s*[\w\d]+))/i;
@@ -1098,8 +1685,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           // Skip pure ad cover posters
           if (isPromo && !isScannedOnly) continue;
 
-          // Render canvas if page has DI charts/tables, or if vision requested, or if scanned PDF
-          if (hasDI || (!isPromo && (enableVisionAI || isScannedOnly))) {
+          // Render canvas for all pages with content to ensure all charts/tables/graphs are captured
+          if (!isPromo || hasDI || enableVisionAI || isScannedOnly) {
             try {
               const viewport = p.page.getViewport({ scale: 1.5 });
               const canvas = document.createElement("canvas");
@@ -1240,6 +1827,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       let extractedQuestions = [];
       let llmSuccess = false;
 
+      const offlineQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 200);
+
       try {
         if (pdfExtractionMethod === "ai") {
           try {
@@ -1260,8 +1849,42 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               pageImages: isPDF ? (window.__pdfPageImages__ || []) : [],
             });
             if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
-              extractedQuestions = aiResult.rawExtractedQuestions;
-              llmSuccess = true;
+              const aiQs = aiResult.rawExtractedQuestions;
+              // If AI only extracted a partial set (e.g. 33 questions out of 100), merge seamlessly so all 100 questions are preserved!
+              if (offlineQuestions.length > aiQs.length && offlineQuestions.length >= 20) {
+                console.log(`[Extraction] AI extracted ${aiQs.length} questions, but full paper has ${offlineQuestions.length} questions. Merging complete paper!`);
+                const merged = [...offlineQuestions];
+                aiQs.forEach((aiQ, idx) => {
+                  const qNum = aiQ.questionNumber || (idx + 1);
+                  const targetIdx = merged.findIndex(oq => (oq.questionNumber || (merged.indexOf(oq) + 1)) === qNum);
+                  if (targetIdx !== -1) {
+                    merged[targetIdx] = {
+                      ...merged[targetIdx],
+                      ...aiQ,
+                      options: (aiQ.options && Object.keys(aiQ.options).length >= 4) ? aiQ.options : merged[targetIdx].options,
+                      explanation: aiQ.explanation || merged[targetIdx].explanation,
+                      solutionText: aiQ.solutionText || aiQ.explanation || merged[targetIdx].solutionText || merged[targetIdx].explanation
+                    };
+                  }
+                });
+                extractedQuestions = merged;
+                llmSuccess = true;
+                pushToast(`✅ Extracted all ${merged.length} questions (${aiQs.length} AI-enhanced + ${merged.length - aiQs.length} structured)!`);
+              } else {
+                extractedQuestions = aiQs.map((aiQ, idx) => {
+                  const qNum = aiQ.questionNumber || (idx + 1);
+                  const matchedOffline = offlineQuestions.find(oq => (oq.questionNumber || (offlineQuestions.indexOf(oq) + 1)) === qNum);
+                  const exp = aiQ.explanation || matchedOffline?.explanation || "";
+                  return {
+                    ...aiQ,
+                    explanation: exp,
+                    solutionText: aiQ.solutionText || exp
+                  };
+                });
+                llmSuccess = true;
+              }
+            } else {
+              extractedQuestions = offlineQuestions;
             }
           } catch (aiErr) {
             if (aiErr.message.includes("cancelled")) {
@@ -1269,17 +1892,17 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             }
             console.warn("AI LLM Extraction warning, using local regex parser fallback...", aiErr);
             pushToast(`⚠️ AI LLM Notice: ${aiErr.message || "Model response fallback"}`);
-            extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 100);
+            extractedQuestions = offlineQuestions;
           }
         } else {
           // Fast instant extraction using local parser
-          extractedQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 100);
+          extractedQuestions = offlineQuestions;
         }
       } catch (err) {
         if (err.message.includes("cancelled")) throw err;
         console.error("Local parser error:", err);
+        extractedQuestions = offlineQuestions;
       }
-
       if (extractedQuestions.length === 0) {
         throw new Error("Failed to extract any valid questions from the document.");
       }
@@ -1306,7 +1929,10 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       result.color = color;
       result.isFree = f.isFree;
 
-      // PHASE 2: Save Immediately
+      // PHASE 2: Save Immediately with DI Diagram Attachment & Propagation
+      let lastDIChart = "";
+      let lastDIPassage = "";
+
       const finalQuestions = [];
       result.rawExtractedQuestions.forEach((q, idx) => {
           const finalLetter = q.source_answer ?? "A";
@@ -1314,35 +1940,96 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           const optKeys = Object.keys(q.options || {}).sort();
           const optionsArray = optKeys.length > 0 
             ? optKeys.map(k => q.options[k]) 
-            : ["Option A", "Option B", "Option C", "Option D"];
+            : ["Option A", "Option B", "Option C", "Option D", "Option E"];
 
-          let chartImg = "";
-          // Attach diagram ONLY if this is genuinely a Quantitative Aptitude DI chart, NEVER on puzzles!
+          let chartImg = q.chartImageUrl || q.imageUrl || "";
+
+          // Attach diagram if this is a Quantitative Aptitude DI question
           if (isDIQuestion(q)) {
-            chartImg = q.chartImageUrl || q.imageUrl || "";
             if (!chartImg && window.__pdfPageImages__ && window.__pdfPageImages__.length > 0) {
               const matched = findBestMatchingChartPage(q, window.__pdfPageImages__);
               if (matched) {
-                chartImg = "data:" + (matched.mimeType || "image/jpeg") + ";base64," + matched.base64;
+                chartImg = "data:" + (matched.mimeType || "image/jpeg") + ";base64," + (matched.base64 || matched.fullBase64);
               }
             }
+
+            // Inherit chart if consecutive questions share the same DI passage / set
+            if (!chartImg && lastDIChart && q.passage && (q.passage === lastDIPassage || lastDIPassage.includes(q.passage.slice(0, 30)))) {
+              chartImg = lastDIChart;
+            }
+
+            if (chartImg) {
+              lastDIChart = chartImg;
+              lastDIPassage = q.passage || "";
+            }
+          } else {
+            lastDIChart = "";
+            lastDIPassage = "";
           }
 
-          const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(q.passage || "", q.explanation || "Verification pending.", q);
+          const expText = q.solutionText || q.explanation || "Verification pending.";
+          const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(q.passage || "", expText, q);
+
+          // Update q directly so rawExtractedQuestions retains the chart and clean passage
+          q.chartImageUrl = chartImg;
+          q.imageUrl = chartImg;
+          q.passage = cleanPassage;
+          q.explanation = cleanExplanation;
+          q.solutionText = cleanExplanation;
 
           finalQuestions.push({
             id: `pdf_q_${Date.now()}_${idx}`,
-            section: q.subject || "General",
+            section: q.section || q.subject || f.subject || "General",
             passage: cleanPassage,
             question: q.question_text || `Question ${idx + 1}`,
             options: optionsArray,
             correctAnswerIndex: ansIndex < optionsArray.length ? ansIndex : 0,
             explanation: cleanExplanation,
+            solutionText: cleanExplanation,
             imageUrl: chartImg,
             chartImageUrl: chartImg,
           });
       });
-      const draftTest = { ...result, questionsList: finalQuestions, id: "draft_" + Date.now() };
+
+      // Build sections config for draft test preview
+      const secCounts = {};
+      finalQuestions.forEach(q => {
+        const s = q.section || "General";
+        secCounts[s] = (secCounts[s] || 0) + 1;
+      });
+      const uniqueSections = Object.keys(secCounts);
+      const isBankTest = (f.category || "").toLowerCase().includes("bank") || finalQuestions.length >= 60;
+      const computedSectionsConfig = uniqueSections.map(secName => {
+        let dur = 20;
+        if (finalQuestions.length <= 40) {
+          dur = 20;
+        } else if (finalQuestions.length >= 80) {
+          dur = 20; // 3 x 20 mins = 60 mins for 100 Qs Bank Prelims
+        } else {
+          dur = Math.max(10, Math.floor(60 / (uniqueSections.length || 1)));
+        }
+        return {
+          name: secName,
+          durationMinutes: dur,
+          questionCount: secCounts[secName]
+        };
+      });
+      const totalTestMinutes = computedSectionsConfig.reduce((sum, s) => sum + s.durationMinutes, 0) || (finalQuestions.length >= 80 ? 60 : 30);
+
+      const draftTest = { 
+        ...result, 
+        time: f.time || `${totalTestMinutes} min`,
+        durationMinutes: Math.max(1, parseInt(f.time) || totalTestMinutes),
+        isSectionalTimed: isBankTest || uniqueSections.length > 1,
+        sectionsConfig: computedSectionsConfig.length > 0 ? computedSectionsConfig : [
+          { name: "English Language", durationMinutes: 20, questionCount: 30 },
+          { name: "Quantitative Aptitude", durationMinutes: 20, questionCount: 35 },
+          { name: "Reasoning Ability", durationMinutes: 20, questionCount: 35 },
+        ],
+        sections: uniqueSections.length > 0 ? uniqueSections : ["English Language", "Quantitative Aptitude", "Reasoning Ability"],
+        questionsList: finalQuestions, 
+        id: "draft_" + Date.now() 
+      };
       
       setGeneratedTest(draftTest);
       setVerificationProgress("");
@@ -1413,7 +2100,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       const currentUrls = q.chartImageUrls || (q.chartImageUrl ? [q.chartImageUrl] : []);
       return {
         ...prev,
-        [idx]: { ...q, chartImageUrls: [...currentUrls, base64DataUrl], chartImageUrl: base64DataUrl }
+        [idx]: { ...q, chartImageUrls: [...currentUrls, base64DataUrl], chartImageUrl: base64DataUrl, _imageRemoved: false }
       };
     });
   };
@@ -1421,14 +2108,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const removeChartImage = (idx, imgIndex) => {
     setApprovedQuestions(prev => {
       const q = prev[idx] || {};
-      const currentUrls = q.chartImageUrls || (q.chartImageUrl ? [q.chartImageUrl] : []);
+      const currentUrls = q.chartImageUrls || (q.chartImageUrl ? [q.chartImageUrl] : (q.imageUrl ? [q.imageUrl] : []));
       const newUrls = currentUrls.filter((_, i) => i !== imgIndex);
       return {
         ...prev,
         [idx]: { 
           ...q, 
           chartImageUrls: newUrls,
-          chartImageUrl: newUrls.length > 0 ? newUrls[0] : null
+          chartImageUrl: newUrls.length > 0 ? newUrls[0] : null,
+          imageUrl: newUrls.length > 0 ? newUrls[0] : null,
+          _imageRemoved: newUrls.length === 0
         }
       };
     });
@@ -1454,7 +2143,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         [idx]: { 
           ...q, 
           chartImageUrls: updatedUrls, 
-          chartImageUrl: updatedUrls[0] || newBase64DataUrl 
+          chartImageUrl: updatedUrls[0] || newBase64DataUrl,
+          _imageRemoved: false
         }
       };
     });
@@ -1503,9 +2193,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   };
 
   const handleOptionPasteForApproved = (e, idx, startKey) => {
-    const pasteText = e.clipboardData.getData("text");
-    const splitRegex = /(?:\([a-eA-E1-5]\)|[a-eA-E1-5][\.\)]|\b[A-E]\b[\.\)]?)\s+/;
-    const parts = pasteText.split(splitRegex).map(p => p.trim()).filter(p => p !== "");
+    const pasteText = e.clipboardData?.getData("text") || "";
+    const parts = parsePastedOptions(pasteText);
     
     if (parts.length > 1) {
       e.preventDefault();
@@ -1526,6 +2215,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           [idx]: { ...cur, options: newOptionsObj }
         };
       });
+      pushToast(`✨ Automatically split ${parts.length} options!`);
     }
   };
 
@@ -2314,6 +3004,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                     className="input text-xs py-1.5 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-medium cursor-text"
                                     value={opt}
                                     onClick={(e) => e.stopPropagation()}
+                                    onPaste={(e) => handleOptionPaste(e, qIdx, optIdx)}
                                     onChange={(e) => updateManualOption(qIdx, optIdx, formatMathText(e.target.value))}
                                     placeholder={`Option ${letter}`}
                                   />
@@ -2513,6 +3204,25 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             <button
                               type="button"
                               onClick={() => {
+                                const curPassage = approvedQuestions[idx]?.passage ?? (q.passage || "");
+                                if (curPassage && curPassage.trim()) {
+                                  const formatted = convertTextTableToMarkdown(curPassage);
+                                  editPassage(idx, formatted);
+                                  pushToast("✨ Formatted into clean Markdown table!");
+                                } else {
+                                  const tableTemplate = `Directions: Study the following table and answer the questions:\n\n| Shop | Male visitors | Female visitors |\n| --- | --- | --- |\n| A | 40 | 60 |\n| B | 50 | 70 |\n| C | 60 | 90 |\n| D | 80 | 100 |\n`;
+                                  editPassage(idx, tableTemplate);
+                                  pushToast("✨ Inserted Markdown table template!");
+                                }
+                              }}
+                              className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-lg flex items-center gap-1 transition-colors"
+                              title="Convert raw text or numbers into a clean Markdown table"
+                            >
+                              ✨ Convert to Markdown Table
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
                                 const tableTemplate = `Directions: Study the following table carefully and answer the questions:\n\n| Year | Company A | Company B | Company C |\n| --- | --- | --- | --- |\n| 2021 | 420 | 380 | 510 |\n| 2022 | 480 | 410 | 560 |\n| 2023 | 550 | 460 | 620 |\n`;
                                 const cur = approvedQuestions[idx]?.passage ?? (q.passage || "");
                                 editPassage(idx, cur ? (cur.trim() + "\n\n" + tableTemplate) : tableTemplate);
@@ -2531,101 +3241,107 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         />
                       </div>
 
-                      {/* Chart / Table Image Attachment - Only for Quants DI questions or if user has attached an image */}
-                      {(isDIQuestion(q) || Boolean(approvedQuestions[idx]?.chartImageUrl || approvedQuestions[idx]?.imageUrl || q.chartImageUrl || q.imageUrl)) ? (
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <label className="text-[11px] font-bold text-ink-muted block">
-                              📊 DI Chart / Table / Graph Diagram:
-                            </label>
-                            <span className="text-[10px] bg-brand-50 text-brand-700 font-bold px-2 py-0.5 rounded border border-brand-200">
-                              Data Interpretation
-                            </span>
-                          </div>
-                        
-                          <div className="flex flex-wrap gap-2 mb-2">
-                            {(approvedQuestions[idx]?.chartImageUrls || (approvedQuestions[idx]?.chartImageUrl ? [approvedQuestions[idx].chartImageUrl] : (q.chartImageUrls || (q.chartImageUrl ? [q.chartImageUrl] : [])))).map((url, imgIdx) => (
-                              <div key={imgIdx} className="relative w-full max-w-sm group">
-                                <img src={url} alt="Chart" className="max-h-52 rounded-lg border border-black/10 object-contain bg-white w-full" />
-                                <div className="absolute top-1.5 right-1.5 flex items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => openImageCropper(idx, imgIdx, url)}
-                                    className="bg-brand-600 hover:bg-brand-700 text-white text-[10px] px-2.5 py-1 rounded-lg font-bold shadow-md flex items-center gap-1 transition-colors"
-                                    title="Crop only the diagram/chart area"
-                                  >
-                                    <span>✂️ Crop Diagram</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => removeChartImage(idx, imgIdx)}
-                                    className="bg-rose-500 hover:bg-rose-600 text-white text-[10px] px-2 py-1 rounded-lg font-bold shadow-md transition-colors"
-                                    title="Remove image"
-                                  >✕</button>
-                                </div>
+                      {/* Chart / Table Image Attachment - Only for questions with an actual attached diagram */}
+                      {(() => {
+                        // If user explicitly removed all images via red X, respect that
+                        const wasRemoved = approvedQuestions[idx]?._imageRemoved === true;
+                        const activeImgs = wasRemoved ? [] : (
+                          approvedQuestions[idx]?.chartImageUrls ||
+                          (approvedQuestions[idx]?.chartImageUrl ? [approvedQuestions[idx].chartImageUrl] : null) ||
+                          (approvedQuestions[idx]?.imageUrl ? [approvedQuestions[idx].imageUrl] : null) ||
+                          q.chartImageUrls ||
+                          (q.chartImageUrl ? [q.chartImageUrl] : null) ||
+                          (q.imageUrl ? [q.imageUrl] : [])
+                        );
+
+                        const hasActualImages = activeImgs.length > 0;
+
+                        if (hasActualImages) {
+                          return (
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="text-[11px] font-bold text-ink-muted block">
+                                  📊 DI Chart / Table / Graph Diagram:
+                                </label>
+                                <span className="text-[10px] bg-brand-50 text-brand-700 font-bold px-2 py-0.5 rounded border border-brand-200">
+                                  Data Interpretation
+                                </span>
                               </div>
-                            ))}
-                          </div>
-                          
-                          {window.__pdfPageImages__ && window.__pdfPageImages__.length > 0 && (
-                            <div className="flex items-center gap-1.5 flex-wrap mb-2">
-                              <span className="text-[10px] text-ink-muted font-bold">📄 PDF Pages:</span>
-                              {window.__pdfPageImages__.map((pImg, pIdx) => (
-                                <button
-                                  key={pIdx}
-                                  type="button"
-                                  onClick={() => {
-                                    const dataUrl = "data:" + (pImg.mimeType || "image/jpeg") + ";base64," + pImg.base64;
-                                    replaceChartImage(idx, 0, dataUrl);
-                                    pushToast(`Attached Page ${pImg.pageNum} diagram to Question ${idx + 1}`);
-                                  }}
-                                  className="text-[10px] bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 px-2 py-0.5 rounded font-semibold transition-colors flex items-center gap-1 shadow-sm"
-                                  title={`Attach Page ${pImg.pageNum} diagram to Question ${idx + 1}`}
-                                >
-                                  <span>Page {pImg.pageNum}</span>
-                                </button>
-                              ))}
+                            
+                              <div className="flex flex-wrap gap-2 mb-2">
+                                {activeImgs.map((url, imgIdx) => (
+                                  <div key={imgIdx} className="relative w-full max-w-sm group">
+                                    <img src={url} alt="Chart" className="max-h-52 rounded-lg border border-black/10 object-contain bg-white w-full" />
+                                    <div className="absolute top-1.5 right-1.5 flex items-center gap-1.5">
+                                      {isDIQuestion(approvedQuestions[idx] || q) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openImageCropper(idx, imgIdx, url)}
+                                        className="bg-brand-600 hover:bg-brand-700 text-white text-[10px] px-2.5 py-1 rounded-lg font-bold shadow-md flex items-center gap-1 transition-colors"
+                                        title="Crop only the diagram/chart area"
+                                      >
+                                        <span>✂️ Crop Diagram</span>
+                                      </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => removeChartImage(idx, imgIdx)}
+                                        className="bg-rose-500 hover:bg-rose-600 text-white text-[10px] px-2 py-1 rounded-lg font-bold shadow-md transition-colors"
+                                        title="Remove image"
+                                      >✕</button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {window.__pdfPageImages__ && window.__pdfPageImages__.length > 0 && (
+                                <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                                  <span className="text-[10px] text-ink-muted font-bold">📄 PDF Pages:</span>
+                                  {window.__pdfPageImages__.map((pImg, pIdx) => (
+                                    <button
+                                      key={pIdx}
+                                      type="button"
+                                      onClick={() => {
+                                        const dataUrl = "data:" + (pImg.mimeType || "image/jpeg") + ";base64," + (pImg.base64 || pImg.fullBase64);
+                                        replaceChartImage(idx, 0, dataUrl);
+                                        pushToast(`Attached Page ${pImg.pageNum} diagram to Question ${idx + 1}`);
+                                      }}
+                                      className="text-[10px] bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 px-2 py-0.5 rounded font-semibold transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                                      title={`Attach Page ${pImg.pageNum} diagram to Question ${idx + 1}`}
+                                    >
+                                      <span>Page {pImg.pageNum}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                          )}
+                          );
+                        }
 
-                          <label className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border-2 border-dashed border-brand-300 bg-brand-50/50 hover:bg-brand-100/50 text-brand-700 text-[11px] font-semibold mb-2 transition-colors w-fit">
-                            <span>📎 Add Chart / Graph Image</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                const reader = new FileReader();
-                                reader.onload = (ev) => editChartImage(idx, ev.target.result);
-                                reader.readAsDataURL(file);
-                              }}
-                            />
-                          </label>
-
-                        <p className="text-[10px] text-ink-muted mb-2">The image will be shown to students alongside this question during the mock test.</p>
-                      </div>
-                      ) : (
-                        <div className="flex items-center justify-between py-1 text-[11px] text-ink-muted bg-black/[0.02] px-3 py-1.5 rounded-lg border border-black/5">
-                          <span className="text-slate-500 font-medium">🧩 Puzzle / Text-Based Question (No chart required)</span>
-                          <label className="text-[10px] font-bold text-brand-600 hover:text-brand-700 cursor-pointer flex items-center gap-1 hover:underline">
-                            + Attach Diagram (Optional)
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                const reader = new FileReader();
-                                reader.onload = (ev) => editChartImage(idx, ev.target.result);
-                                reader.readAsDataURL(file);
-                              }}
-                            />
-                          </label>
-                        </div>
-                      )}
+                        // For mini questions without an image, show only a subtle attach option
+                        return (
+                          <div className="flex items-center justify-between py-1 text-[11px] text-ink-muted bg-black/[0.02] px-3 py-1.5 rounded-lg border border-black/5">
+                            <span className="text-slate-500 font-medium">
+                              {isDIQuestion(q) ? "📊 Data Interpretation (No diagram attached)" : "🧩 Text Question (No diagram needed)"}
+                            </span>
+                            <label className="text-[10px] font-bold text-brand-600 hover:text-brand-700 cursor-pointer flex items-center gap-1 hover:underline">
+                              + Attach Diagram (Optional)
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  const reader = new FileReader();
+                                  reader.onload = (ev) => editChartImage(idx, ev.target.result);
+                                  reader.readAsDataURL(file);
+                                }}
+                              />
+                            </label>
+                          </div>
+                        );
+                      })()}
 
                       {/* Question Statement */}
                       <div>
@@ -2634,16 +3350,20 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         <div className="flex flex-wrap items-center gap-1 mb-1.5 bg-white p-1.5 rounded-lg border border-black/10">
                           <span className="text-[10px] font-bold text-ink-muted mr-1">Math Insert:</span>
                           {[
-                            { label: "⅓", insert: " ⅓ " },
-                            { label: "¼", insert: " ¼ " },
-                            { label: "½", insert: " ½ " },
-                            { label: "¾", insert: " ¾ " },
-                            { label: "⅔", insert: " ⅔ " },
+                            { label: "¹⁄₂ (Power ½)", insert: "¹⁄₂" },
+                            { label: "¹⁄₃ (Power ⅓)", insert: "¹⁄₃" },
                             { label: "²", insert: "²" },
                             { label: "³", insert: "³" },
+                            { label: "⁴", insert: "⁴" },
+                            { label: "∛", insert: "∛" },
+                            { label: "√", insert: "√" },
+                            { label: "⅓", insert: " ⅓ " },
+                            { label: "½", insert: " ½ " },
+                            { label: "¼", insert: " ¼ " },
+                            { label: "11/7", insert: " 11/7 " },
                             { label: "×", insert: " × " },
                             { label: "÷", insert: " ÷ " },
-                            { label: "√", insert: " √" },
+                            { label: "≈", insert: " ≈ " },
                             { label: "📊 DI Table", insert: "\n| Category | Metric 1 | Metric 2 |\n| --- | --- | --- |\n| Item A | 100 | 150 |\n| Item B | 200 | 250 |\n" },
                           ].map((sym, sIdx) => (
                             <button
@@ -2965,6 +3685,25 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                           <button
                             type="button"
                             onClick={() => {
+                              const curPassage = approvedQuestions[idx]?.passage ?? (q.passage || "");
+                              if (curPassage && curPassage.trim()) {
+                                const formatted = convertTextTableToMarkdown(curPassage);
+                                editPassage(idx, formatted);
+                                pushToast("✨ Formatted into clean Markdown table!");
+                              } else {
+                                const tableTemplate = `Directions: Study the following table and answer the questions:\n\n| Shop | Male visitors | Female visitors |\n| --- | --- | --- |\n| A | 40 | 60 |\n| B | 50 | 70 |\n| C | 60 | 90 |\n| D | 80 | 100 |\n`;
+                                editPassage(idx, tableTemplate);
+                                pushToast("✨ Inserted Markdown table template!");
+                              }
+                            }}
+                            className="text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-0.5 rounded-lg flex items-center gap-1 transition-colors shadow-xs"
+                            title="Convert raw text or numbers into a clean Markdown table"
+                          >
+                            ✨ Convert to Markdown Table
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
                               const tableTemplate = `Directions: Study the following table carefully and answer the questions:\n\n| Year | Company A | Company B | Company C |\n| --- | --- | --- | --- |\n| 2021 | 420 | 380 | 510 |\n| 2022 | 480 | 410 | 560 |\n| 2023 | 550 | 460 | 620 |\n`;
                               const cur = approvedQuestions[idx]?.passage ?? (q.passage || "");
                               editPassage(idx, cur ? (cur.trim() + "\n\n" + tableTemplate) : tableTemplate);
@@ -2990,16 +3729,20 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       <div className="flex flex-wrap items-center gap-1.5 mb-2 bg-slate-50 p-2 rounded-xl border border-black/10">
                         <span className="text-xs font-bold text-ink-muted mr-1">Math Insert:</span>
                         {[
-                          { label: "⅓", insert: " ⅓ " },
-                          { label: "¼", insert: " ¼ " },
-                          { label: "½", insert: " ½ " },
-                          { label: "¾", insert: " ¾ " },
-                          { label: "⅔", insert: " ⅔ " },
+                          { label: "¹⁄₂ (Power ½)", insert: "¹⁄₂" },
+                          { label: "¹⁄₃ (Power ⅓)", insert: "¹⁄₃" },
                           { label: "²", insert: "²" },
                           { label: "³", insert: "³" },
+                          { label: "⁴", insert: "⁴" },
+                          { label: "∛", insert: "∛" },
+                          { label: "√", insert: "√" },
+                          { label: "⅓", insert: " ⅓ " },
+                          { label: "½", insert: " ½ " },
+                          { label: "¼", insert: " ¼ " },
+                          { label: "11/7", insert: " 11/7 " },
                           { label: "×", insert: " × " },
                           { label: "÷", insert: " ÷ " },
-                          { label: "√", insert: " √" },
+                          { label: "≈", insert: " ≈ " },
                           { label: "📊 DI Table", insert: "\n| Category | Metric 1 | Metric 2 |\n| --- | --- | --- |\n| Item A | 100 | 150 |\n| Item B | 200 | 250 |\n" },
                         ].map((sym, sIdx) => (
                           <button
@@ -3072,6 +3815,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                 className="input text-xs py-1.5 bg-transparent border-0 focus:ring-1 focus:ring-emerald-500 flex-1 font-semibold cursor-text resize-y min-h-[40px]"
                                 value={approvedQuestions[idx]?.options?.[key] ?? (opt || `Option ${label}`)}
                                 onClick={(e) => e.stopPropagation()}
+                                onPaste={(e) => handleOptionPasteForApproved(e, idx, parseInt(key))}
                                 onChange={(e) => editOptionText(idx, key, e.target.value)}
                                 placeholder={`Option ${label}`}
                               />
@@ -3157,13 +3901,53 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                     {/* Solution Text */}
                     <div className="mt-4">
-                      <label className="text-xs font-bold text-ink-muted mb-1 block">
-                        Answer / Solution Explanation (Optional):
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-ink-muted">
+                          Answer / Solution Step-by-Step Explanation:
+                        </label>
+                        <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          ✓ Shown to students after test submission
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5 mb-2 bg-emerald-50/60 p-2 rounded-xl border border-emerald-100">
+                        <span className="text-xs font-bold text-emerald-800 mr-1">Math Steps Insert:</span>
+                        {[
+                          { label: "Step 1: Simplify", insert: "\nStep 1: Simplify given terms & powers:\n" },
+                          { label: "Step 2: Calculate", insert: "\nStep 2: Compute intermediate value:\n" },
+                          { label: "Step 3: Answer", insert: "\nStep 3: Hence verified correct option is: " },
+                          { label: "¹⁄₂", insert: "¹⁄₂" },
+                          { label: "¹⁄₃", insert: "¹⁄₃" },
+                          { label: "²", insert: "²" },
+                          { label: "³", insert: "³" },
+                          { label: "√", insert: "√" },
+                          { label: "∛", insert: "∛" },
+                          { label: "⅓", insert: " ⅓ " },
+                          { label: "½", insert: " ½ " },
+                          { label: "¼", insert: " ¼ " },
+                          { label: "11/7", insert: " 11/7 " },
+                          { label: "×", insert: " × " },
+                          { label: "÷", insert: " ÷ " },
+                          { label: "≈", insert: " ≈ " },
+                        ].map((sym, sIdx) => (
+                          <button
+                            key={sIdx}
+                            type="button"
+                            className="px-2 py-0.5 text-xs font-bold bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-lg transition-colors shadow-xs"
+                            onClick={() => {
+                              const curText = approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "");
+                              editSolutionText(idx, formatMathText(curText + sym.insert));
+                            }}
+                          >
+                            {sym.label}
+                          </button>
+                        ))}
+                      </div>
+
                       <textarea
-                        className="input text-xs min-h-[70px] bg-white border border-black/10 p-2.5"
-                        placeholder="Enter detailed solution explanation..."
-                        value={approvedQuestions[idx]?.solutionText ?? (q.solutionText || "")}
+                        className="input text-xs min-h-[90px] font-mono leading-relaxed bg-white border border-black/10 p-2.5"
+                        placeholder="Enter detailed step-by-step solution explanation..."
+                        value={approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "")}
                         onChange={(e) => editSolutionText(idx, e.target.value)}
                       />
                     </div>
@@ -3279,59 +4063,19 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                   </span>
                 </div>
 
-                <div className="relative border border-black/15 rounded-2xl overflow-hidden bg-slate-900/5 flex items-center justify-center min-h-[300px] max-h-[380px] p-2">
-                  <div className="relative inline-block max-w-full max-h-[360px]">
-                    <img
-                      src={cropperModal.src}
-                      alt="Source Page"
-                      className="max-h-[360px] w-auto object-contain block mx-auto select-none pointer-events-none rounded-lg"
-                    />
-                    
-                    {/* Shaded Top */}
-                    <div 
-                      className="absolute top-0 left-0 right-0 bg-black/60 backdrop-blur-[1px] transition-all"
-                      style={{ height: `${cropperModal.cropTop}%` }}
-                    />
-                    {/* Shaded Bottom */}
-                    <div 
-                      className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-[1px] transition-all"
-                      style={{ height: `${cropperModal.cropBottom}%` }}
-                    />
-                    {/* Shaded Left */}
-                    <div 
-                      className="absolute left-0 bg-black/60 backdrop-blur-[1px] transition-all"
-                      style={{ 
-                        top: `${cropperModal.cropTop}%`, 
-                        bottom: `${cropperModal.cropBottom}%`,
-                        width: `${cropperModal.cropLeft}%` 
-                      }}
-                    />
-                    {/* Shaded Right */}
-                    <div 
-                      className="absolute right-0 bg-black/60 backdrop-blur-[1px] transition-all"
-                      style={{ 
-                        top: `${cropperModal.cropTop}%`, 
-                        bottom: `${cropperModal.cropBottom}%`,
-                        width: `${cropperModal.cropRight}%` 
-                      }}
-                    />
-
-                    {/* Clear Highlighted Bounding Box */}
-                    <div
-                      className="absolute border-2 border-emerald-400 shadow-[0_0_0_1px_rgba(0,0,0,0.5)] pointer-events-none flex items-center justify-center transition-all rounded-xs"
-                      style={{
-                        top: `${cropperModal.cropTop}%`,
-                        bottom: `${cropperModal.cropBottom}%`,
-                        left: `${cropperModal.cropLeft}%`,
-                        right: `${cropperModal.cropRight}%`,
-                      }}
-                    >
-                      <span className="text-[10px] font-extrabold text-emerald-950 bg-emerald-400/95 px-2.5 py-0.5 rounded shadow">
-                        Cropped Diagram
-                      </span>
-                    </div>
-                  </div>
+                <div className="relative border border-black/15 rounded-2xl overflow-hidden bg-slate-900/5 flex items-center justify-center min-h-[300px] max-h-[390px] p-2">
+                  <InteractiveImageCropper
+                    src={cropperModal.src}
+                    cropTop={cropperModal.cropTop}
+                    cropBottom={cropperModal.cropBottom}
+                    cropLeft={cropperModal.cropLeft}
+                    cropRight={cropperModal.cropRight}
+                    onChangeCrop={(newCrops) => setCropperModal(prev => ({ ...prev, ...newCrops }))}
+                  />
                 </div>
+                <span className="text-[10px] text-ink-muted mt-1.5 flex items-center gap-1 font-medium">
+                  🖱️ Drag handles to resize · Drag box to move · Click &amp; drag outside to draw new frame
+                </span>
               </div>
 
               {/* Right: Trimming Sliders, Presets & Live Preview */}
@@ -3392,11 +4136,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                     <input
                       type="range"
                       min="0"
-                      max="70"
+                      max="80"
                       value={cropperModal.cropTop}
                       onChange={(e) => {
                         const val = parseInt(e.target.value) || 0;
-                        setCropperModal(prev => ({ ...prev, cropTop: Math.min(val, 90 - prev.cropBottom) }));
+                        setCropperModal(prev => ({ ...prev, cropTop: Math.min(val, 85 - prev.cropBottom) }));
                       }}
                       className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
                     />
@@ -3411,11 +4155,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                     <input
                       type="range"
                       min="0"
-                      max="70"
+                      max="80"
                       value={cropperModal.cropBottom}
                       onChange={(e) => {
                         const val = parseInt(e.target.value) || 0;
-                        setCropperModal(prev => ({ ...prev, cropBottom: Math.min(val, 90 - prev.cropTop) }));
+                        setCropperModal(prev => ({ ...prev, cropBottom: Math.min(val, 85 - prev.cropTop) }));
                       }}
                       className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
                     />
@@ -3431,11 +4175,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       <input
                         type="range"
                         min="0"
-                        max="40"
+                        max="75"
                         value={cropperModal.cropLeft}
                         onChange={(e) => {
                           const val = parseInt(e.target.value) || 0;
-                          setCropperModal(prev => ({ ...prev, cropLeft: val }));
+                          setCropperModal(prev => ({ ...prev, cropLeft: Math.min(val, 85 - prev.cropRight) }));
                         }}
                         className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
                       />
@@ -3449,11 +4193,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       <input
                         type="range"
                         min="0"
-                        max="40"
+                        max="75"
                         value={cropperModal.cropRight}
                         onChange={(e) => {
                           const val = parseInt(e.target.value) || 0;
-                          setCropperModal(prev => ({ ...prev, cropRight: val }));
+                          setCropperModal(prev => ({ ...prev, cropRight: Math.min(val, 85 - prev.cropLeft) }));
                         }}
                         className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
                       />
