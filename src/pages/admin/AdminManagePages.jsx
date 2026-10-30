@@ -1477,23 +1477,28 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
     // Helper: Content-based section classification for Indian Bank Exams
     const inferSectionFromBankContent = (qText, passage, qIndex) => {
-      const combined = `${passage || ""} ${qText || ""}`.toLowerCase();
-      // 1. English indicators
-      if (/(?:passage|reading comprehension|author|antonym|synonym|closest in meaning|opposite in meaning|grammatical|grammatically|spelt|misspelt|phrase replacement|cloze|para[\s-]?jumble|rearrange the following sentences|first sentence after rearrangement|error|spotting error|sentence correction|bold word|underlined phrase)/i.test(combined)) {
-        return "English Language";
+      const qNum = typeof qIndex === "number" ? qIndex + 1 : null;
+      // 1. Standard 100-Question Bank Exam structure
+      if (qNum && qNum <= 100) {
+        if (qNum <= 35) return "Quantitative Aptitude";
+        if (qNum <= 65) return "English Language";
+        return "Reasoning Ability";
       }
-      // 2. Reasoning indicators
-      if (/(?:puzzle|seating arrangement|seated|sitting|circular table|square table|linear row|parallel rows|facing|floor|flat|box|boxes placed|blood relation|father|mother|brother|sister|son|daughter|uncle|aunt|nephew|niece|spouse|married to|related to\b|syllogism|only a few|some books are|statements?:|conclusions?:|does not follow|neither nor|either or|inequalit|[A-Z]\s*[><≥≤=]\s*[A-Z]|coding[\s-]?decoding|written as\b|coded as\b|code language|direction sense|\bdirection|\b(?:north|south|east|west|northeast|northwest|southeast|southwest)\b|walks \d+[\s]?m|shortest distance|pythagoras|alphabet series|alphanumeric|vowels?|consonants?|meaningful word|how many such pairs|letters of the word|rank|order and ranking|alike in a certain way|does not belong|odd one out|machine input|input[\s-]output|step [I|V|X\d]+|who sits|sits second|sits third|sits immediate|extreme end|how many persons|immediate left|immediate right)/i.test(combined)) {
+
+      const combined = `${passage || ""} ${qText || ""}`.toLowerCase();
+      // 2. Reasoning indicators (Check first so puzzles/syllogisms/relations/schedules are NEVER misclassified as English)
+      if (/(?:puzzle|seating arrangement|seated|sitting|circular table|square table|linear row|parallel rows|facing\s+(?:centre|center|outside|north|south)|floor|flat|box|boxes placed|blood relation|father|mother|brother|sister|son|daughter|uncle|aunt|nephew|niece|spouse|married to|related to\b|syllogism|only a few|some books are|statements?:|conclusions?:|does not follow|neither nor|either or|inequalit|[A-Z]\s*[><≥≤=]\s*[A-Z]|coding[\s-]?decoding|written as\b|coded as\b|code language|direction sense|\bdirection |\b(?:north|south|east|west|northeast|northwest|southeast|southwest)\b|walks \d+[\s]?m|shortest distance|pythagoras|alphabet series|alphanumeric|vowels?|consonants?|meaningful word|how many such pairs|letters of the word|rank|order and ranking|alike in a certain way|does not belong|odd one out|machine input|input[\s-]output|step [I|V|X\d]+|who sits|sits second|sits third|sits immediate|extreme end|how many persons|immediate left|immediate right|scheduled starting from|exams?\s+(?:maths|science|history|economics|english|hindi)|scheduled on (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))/i.test(combined)) {
         return "Reasoning Ability";
       }
       // 3. Quants indicators
       if (/(?:data interpretation|\bdi\b|bar graph|bar chart|pie chart|line graph|tabular|table shows|caselet|simplification|approximation|(?:(?:\+|\-|\*|\/|=)\s*\?|\?\s*(?:\+|\-|\*|\/|=)|(?:√|sqrt)\s*\?|\(\s*\?\s*\)\s*[²³]|\?\s*%\s*of)|≈|number series|missing number|wrong number|quadratic equation|profit and loss|simple interest|compound interest|time and work|pipes and cistern|speed time|downstream|upstream|ratio and proportion|mixture|alligation|mensuration|perimeter|cylinder|cone|probability|visitors|total students|boys and girls|average of|find the value of|percentage of|ratio of)/i.test(combined)) {
         return "Quantitative Aptitude";
       }
-      const qNum = qIndex + 1;
-      if (qNum <= 35) return "Quantitative Aptitude";
-      if (qNum <= 65) return "English Language";
-      return "Reasoning Ability";
+      // 4. English indicators (Strict English keywords, never standalone 'passage')
+      if (/(?:reading comprehension|author|antonym|synonym|closest in meaning|opposite in meaning|grammatical|grammatically|spelt|misspelt|phrase replacement|cloze|para[\s-]?jumble|rearrange the following sentences|first sentence after rearrangement|error|spotting error|sentence correction|bold word|underlined phrase|idiom|idiomatic|vocabulary|fill in the blank)/i.test(combined)) {
+        return "English Language";
+      }
+      return "General";
     };
 
     // 5. EXTRACT SHARED PASSAGES / DIRECTIONS (e.g. Directions 1-5, Directions 16-20, Directions 36-40, etc.)
@@ -1959,17 +1964,20 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             });
             if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
               const aiQs = aiResult.rawExtractedQuestions;
-              // If AI only extracted a partial set (e.g. 7 questions out of 30), merge seamlessly so all questions are preserved!
-              if (offlineQuestions.length > aiQs.length && offlineQuestions.length > 0) {
-                console.log(`[Extraction] AI extracted ${aiQs.length} questions, but full paper has ${offlineQuestions.length} questions. Merging complete paper!`);
+              // If AI extracted a different count (e.g. partial set or extra puzzle clues), or full paper has >= 90 questions,
+              // anchor on the sequential offline paper structure and enhance every question with AI solutions!
+              if (offlineQuestions.length > 0 && (offlineQuestions.length >= 90 || offlineQuestions.length !== aiQs.length)) {
+                console.log(`[Extraction] Aligning ${aiQs.length} AI question enhancements to ${offlineQuestions.length} paper questions!`);
                 const merged = [...offlineQuestions];
                 aiQs.forEach((aiQ, idx) => {
                   const qNum = aiQ.questionNumber || (idx + 1);
                   const targetIdx = merged.findIndex(oq => (oq.questionNumber || (merged.indexOf(oq) + 1)) === qNum);
                   if (targetIdx !== -1) {
+                    const assignedSec = merged[targetIdx].section || inferSectionFromBankContent(merged[targetIdx].question, merged[targetIdx].passage, targetIdx);
                     merged[targetIdx] = {
                       ...merged[targetIdx],
                       ...aiQ,
+                      section: assignedSec,
                       options: (aiQ.options && Object.keys(aiQ.options).length >= 4) ? aiQ.options : merged[targetIdx].options,
                       explanation: aiQ.explanation || merged[targetIdx].explanation,
                       solutionText: aiQ.solutionText || aiQ.explanation || merged[targetIdx].solutionText || merged[targetIdx].explanation
@@ -1984,8 +1992,10 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                   const qNum = aiQ.questionNumber || (idx + 1);
                   const matchedOffline = offlineQuestions.find(oq => (oq.questionNumber || (offlineQuestions.indexOf(oq) + 1)) === qNum);
                   const exp = aiQ.explanation || matchedOffline?.explanation || "";
+                  const assignedSec = matchedOffline?.section || inferSectionFromBankContent(aiQ.question, aiQ.passage, idx);
                   return {
                     ...aiQ,
+                    section: assignedSec || aiQ.section,
                     explanation: exp,
                     solutionText: aiQ.solutionText || exp
                   };

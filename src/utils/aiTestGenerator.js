@@ -324,17 +324,21 @@ If no charts/tables/graphs are present, return an empty string.`;
 // NVIDIA Nemotron Parse / Vision (Primary model for charts, tables, and document layout)
 async function callNvidiaVisionPage(apiKey, base64Image, mimeType = "image/jpeg") {
   if (!apiKey || !base64Image) return null;
+  // If base64Image is larger than 3.5MB, bypass Vercel proxy to avoid 500/400 payload limits
+  if (base64Image.length > 3500000) {
+    console.warn("[AI Vision] Page image too large for NVIDIA proxy (>3.5MB), falling back to Gemini Vision.");
+    return null;
+  }
   const candidateModels = [
     getEnvKey("VITE_NVIDIA_PARSE_MODEL"),
     getEnvKey("VITE_NVIDIA_VISION_MODEL"),
     NVIDIA_PARSE_MODEL,
-    "nvidia/nemotron-3.5-super-vl-120b-a12b",
-    "nvidia/nemotron-parse"
+    "nvidia/nemotron-parse-2.0"
   ].filter(Boolean);
 
   for (const model of candidateModels) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 35000);
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
       const response = await fetch("/api/nvidia/v1/chat/completions", {
         method: "POST",
@@ -347,7 +351,7 @@ async function callNvidiaVisionPage(apiKey, base64Image, mimeType = "image/jpeg"
             { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
           ] }],
           temperature: 0.1,
-          max_tokens: 4000,
+          max_tokens: 3000,
         }),
       });
       clearTimeout(timeoutId);
@@ -355,6 +359,13 @@ async function callNvidiaVisionPage(apiKey, base64Image, mimeType = "image/jpeg"
         const data = await response.json();
         const content = (data.choices?.[0]?.message?.content || "").trim();
         if (content && content.length > 30) return content;
+      } else {
+        const status = response.status;
+        console.warn(`[AI Vision] NVIDIA model ${model} responded with status ${status}`);
+        if (status === 500 || status === 400 || status === 413) {
+          // Payload or proxy issue: return null so Gemini Vision seamlessly takes over
+          return null;
+        }
       }
     } catch (err) {
       clearTimeout(timeoutId);
@@ -436,16 +447,13 @@ async function callNvidia(apiKey, prompt) {
     getEnvKey("VITE_NVIDIA_MODEL"),
     "nvidia/nemotron-3-ultra-550b-a55b",
     "nvidia/nemotron-3.5-bolt-e4b",
-    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-    "nvidia/nemotron-3.5-lightning-30b-a3b",
-    "minimaxai/minimax-m3.1-flash",
     NVIDIA_REASONING_MODEL
   ].filter(Boolean);
 
   let lastError = null;
   for (const model of candidateModels) {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 45000); // 45-second timeout
+    const id = setTimeout(() => controller.abort(), 60000); // 60-second timeout
 
     try {
       const response = await fetch("/api/nvidia/v1/chat/completions", {
@@ -466,12 +474,10 @@ async function callNvidia(apiKey, prompt) {
 
       if (!response.ok) {
         const errBody = await response.text().catch(() => "");
-        if (response.status === 404 || response.status === 400 || response.status === 410 || response.status === 422) {
-          console.warn(`[AI] NVIDIA model ${model} unavailable (${response.status}), trying next candidate...`);
-          lastError = new Error(`NVIDIA API error (${response.status}): ${errBody || response.statusText}`);
-          continue;
-        }
-        throw new Error(`NVIDIA API error (${response.status}): ${errBody || response.statusText}`);
+        console.warn(`[AI] NVIDIA model ${model} unavailable (${response.status}), trying next candidate...`);
+        lastError = new Error(`NVIDIA API error (${response.status}): ${errBody || response.statusText}`);
+        if (response.status === 401) break; // Bad key
+        continue;
       }
       const data = await response.json();
       const text = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "{}";
@@ -488,7 +494,7 @@ async function callNvidia(apiKey, prompt) {
     } catch (err) {
       clearTimeout(id);
       lastError = err;
-      if (err.name === "AbortError") throw err;
+      console.warn(`[AI] NVIDIA model ${model} attempt failed:`, err.message);
       if (err.message.includes("401") || err.message.includes("API Key")) throw err;
     }
   }
@@ -1481,28 +1487,35 @@ export function convertTextTableToMarkdown(rawText) {
   return rawText;
 }
 
-export function inferSectionFromContent(questionText = "", passageText = "") {
-  const text = `${passageText || ""} ${questionText || ""}`.toLowerCase();
-  
-  // 1. English indicators
-  if (
-    /(?:passage|reading comprehension|author|antonym|synonym|closest in meaning|opposite in meaning|grammatical|grammatically|spelt|misspelt|phrase replacement|cloze|para[\s-]?jumble|rearrange the following sentences|first sentence after rearrangement|error|spotting error|sentence correction|bold word|underlined phrase)/i.test(text)
-  ) {
-    return "English Language";
+export function inferSectionFromContent(questionText = "", passageText = "", questionNumber = null) {
+  // If sequential question number is known in a standard 100Q Indian Bank exam
+  if (typeof questionNumber === "number" && questionNumber > 0 && questionNumber <= 100) {
+    if (questionNumber <= 35) return "Quantitative Aptitude";
+    if (questionNumber <= 65) return "English Language";
+    return "Reasoning Ability";
   }
 
-  // 2. Reasoning indicators (Check first before Quants so puzzles/syllogisms/relations are NEVER misclassified as math)
+  const text = `${passageText || ""} ${questionText || ""}`.toLowerCase();
+  
+  // 1. Reasoning indicators (Check first so puzzles/syllogisms/relations/schedules mentioning "English" or "passage" are NEVER misclassified as English)
   if (
-    /(?:puzzle|seating arrangement|seated|sitting|circular table|square table|linear row|parallel rows|facing|floor|flat|box|boxes placed|blood relation|father|mother|brother|sister|son|daughter|uncle|aunt|nephew|niece|spouse|married to|related to\b|syllogism|only a few|some books are|statements?:|conclusions?:|does not follow|neither nor|either or|inequalit|[A-Z]\s*[><≥≤=]\s*[A-Z]|coding[\s-]?decoding|written as\b|coded as\b|code language|direction sense|\bdirection\b|\b(?:north|south|east|west|northeast|northwest|southeast|southwest)\b|walks \d+[\s]?m|shortest distance|pythagoras|alphabet series|alphanumeric|vowels?|consonants?|meaningful word|how many such pairs|letters of the word|rank|order and ranking|alike in a certain way|does not belong|odd one out|machine input|input[\s-]output|step [I|V|X\d]+|who sits|sits second|sits third|sits immediate|extreme end|how many persons|immediate left|immediate right)/i.test(text)
+    /(?:puzzle|seating arrangement|seated|sitting|circular table|square table|linear row|parallel rows|facing\s+(?:centre|center|outside|north|south)|floor|flat|box|boxes placed|blood relation|father|mother|brother|sister|son|daughter|uncle|aunt|nephew|niece|spouse|married to|related to\b|syllogism|only a few|some books are|statements?:|conclusions?:|does not follow|neither nor|either or|inequalit|[A-Z]\s*[><≥≤=]\s*[A-Z]|coding[\s-]?decoding|written as\b|coded as\b|code language|direction sense|\bdirection\b|\b(?:north|south|east|west|northeast|northwest|southeast|southwest)\b|walks \d+[\s]?m|shortest distance|pythagoras|alphabet series|alphanumeric|vowels?|consonants?|meaningful word|how many such pairs|letters of the word|rank|order and ranking|alike in a certain way|does not belong|odd one out|machine input|input[\s-]output|step [I|V|X\d]+|who sits|sits second|sits third|sits immediate|extreme end|how many persons|immediate left|immediate right|scheduled starting from|exams?\s+(?:maths|science|history|economics|english|hindi)|scheduled on (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))/i.test(text)
   ) {
     return "Reasoning Ability";
   }
 
-  // 3. Quants indicators (Strict math terms, NO standalone question mark '?')
+  // 2. Quants indicators (Strict math terms, NO standalone question mark '?')
   if (
     /(?:data interpretation|\bdi\b|bar graph|bar chart|pie chart|line graph|tabular|table shows|caselet|simplification|approximation|(?:(?:\+|\-|\*|\/|=)\s*\?|\?\s*(?:\+|\-|\*|\/|=)|(?:√|sqrt)\s*\?|\(\s*\?\s*\)\s*[²³]|\?\s*%\s*of)|≈|number series|missing number|wrong number|quadratic equation|profit and loss|simple interest|compound interest|time and work|pipes and cistern|speed time|downstream|upstream|ratio and proportion|mixture|alligation|mensuration|perimeter|cylinder|cone|probability|visitors|total students|boys and girls|average of|find the value of|percentage of|ratio of)/i.test(text)
   ) {
     return "Quantitative Aptitude";
+  }
+
+  // 3. English indicators (Require actual English linguistics keywords, NOT standalone 'passage' or 'english')
+  if (
+    /(?:reading comprehension|author|antonym|synonym|closest in meaning|opposite in meaning|grammatical|grammatically|spelt|misspelt|phrase replacement|cloze|para[\s-]?jumble|rearrange the following sentences|first sentence after rearrangement|error|spotting error|sentence correction|bold word|underlined phrase|idiom|idiomatic|vocabulary|fill in the blank)/i.test(text)
+  ) {
+    return "English Language";
   }
 
   return "General";
@@ -1686,8 +1699,9 @@ export function isolateQuestionsAndSolutions(fullText) {
   return { questionsText, solutionsText, solutionsMap, leadingPassage, passageRanges };
 }
 
-const buildExtractionPrompt = (pdfChunk, expectedCount) => `You are a strict data extractor and expert solver for Indian competitive exam question papers (SBI PO/Clerk, IBPS PO/Clerk, RRB, Banking).
-The text below contains exactly ${expectedCount} question block${expectedCount === 1 ? "" : "s"}. Extract EVERY block, in source order, without combining or omitting one. Keep question wording and options faithful to the source.
+const buildExtractionPrompt = (pdfChunk, expectedCount, startQ = null, endQ = null) => `You are a strict data extractor and expert solver for Indian competitive exam question papers (SBI PO/Clerk, IBPS PO/Clerk, RRB, Banking).
+The text below contains ${startQ && endQ ? `questions numbered ${startQ} through ${endQ} (total ${expectedCount} questions)` : `exactly ${expectedCount} question block${expectedCount === 1 ? "" : "s"}`}. Extract EVERY numbered question in source order without combining or omitting one.
+STRICT RULE: Do NOT extract sub-numbered puzzle clue items (e.g. (1) Person A..., (2) Person B... (13) B is a cricketer) as separate questions! Keep those clues inside the "passage" property of the actual questions.
 Output a JSON object. No markdown, no extra text outside the JSON block.
 
 STRICT EXTRACTION INTEGRITY RULES:
@@ -1729,14 +1743,15 @@ STEP-BY-STEP SOLUTION & DIAGRAM MANDATE:
 
 BANK EXAM 3-SECTION MANDATE:
 Categorize each question into one of the 3 standard Bank sections:
-- "English Language": Reading Comprehension, Para Jumbles, Cloze Test, Error Spotting, Fillers, Sentence Improvement.
-- "Reasoning Ability": Puzzles, Seating Arrangements, Syllogisms, Inequalities, Coding-Decoding, Blood Relations, Direction Sense.
-- "Quantitative Aptitude": Data Interpretation (Bar/Pie/Line/Table/Caselet), Simplification, Approximation, Number Series, Quadratic Equations, Arithmetic.
+- If question number is between 1 and 35: "Quantitative Aptitude" (Data Interpretation, Simplification, Approximation, Number Series, Quadratic Equations, Arithmetic)
+- If question number is between 36 and 65: "English Language" (Reading Comprehension, Para Jumbles, Cloze Test, Error Spotting, Fillers, Sentence Improvement)
+- If question number is between 66 and 100: "Reasoning Ability" (Puzzles, Seating Arrangements, Syllogisms, Inequalities, Coding-Decoding, Blood Relations, Direction Sense, Scheduling)
 
 FORMAT:
 {
   "questions": [
     {
+      "question_number": ${startQ || 1},
       "section": "English Language" | "Reasoning Ability" | "Quantitative Aptitude",
       "topic": "short topic name or empty string",
       "passage": "Shared directions/passage only. Copy it exactly; do not solve it.",
@@ -1790,10 +1805,8 @@ ${JSON.stringify(questionJson, null, 2)}
 async function callGroq(apiKey, prompt) {
   const models = [
     getEnvKey("VITE_GROQ_MODEL"),
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "qwen/qwen3.8-27b",
-    "openai/gpt-oss-120b"
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b"
   ].filter(Boolean);
   let lastErr = null;
   for (const model of models) {
@@ -1808,22 +1821,24 @@ async function callGroq(apiKey, prompt) {
           model: model,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.1,
-          max_tokens: 1800,
+          max_tokens: 3500,
         }),
       });
 
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
-        if (response.status === 429 || response.status === 401) {
-          throw new Error(`Groq Rate Limit or Auth Error (${response.status}): ${errText}`); // Fast fail to next provider
+        if (response.status === 401) {
+          throw new Error(`Groq Auth Error (401): ${errText}`);
         }
-        throw new Error(`Groq API Error (${response.status}): ${errText || response.statusText}`);
+        console.warn(`[AI] Groq model ${model} returned ${response.status}, trying next model...`);
+        lastErr = new Error(`Groq API Error (${response.status}): ${errText || response.statusText}`);
+        continue;
       }
 
       const data = await response.json();
       const choice = data.choices?.[0];
 
-      const text = choice?.message?.content || "{}";
+      const text = choice?.message?.content || choice?.message?.reasoning_content || "{}";
       const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
       const jsonStart = cleaned.indexOf("[");
       const jsonEnd = cleaned.lastIndexOf("]");
@@ -1852,8 +1867,8 @@ async function callGroq(apiKey, prompt) {
     } catch (err) {
       console.warn(`[AI] Groq model ${model} failed:`, err.message);
       lastErr = err;
-      if (err.message.includes("Rate Limit or Auth Error")) {
-        break; // Break the model loop and fallback to Gemini/NVIDIA
+      if (err.message.includes("401") || err.message.includes("Invalid API Key")) {
+        break; // Bad API key
       }
     }
   }
@@ -1921,8 +1936,65 @@ function chunkText(text, maxLen = 12000) {
 // Keep each LLM request aligned to complete questions. Character-only chunks can
 // split a question from its options, which was the main reason questions vanished.
 function chunkQuestions(text, maxQuestions = 6, maxChars = 5000) {
-  // Some PDFs run the question number directly into the text (for example,
-  // "51.Which..."). A look-ahead preserves both that form, "51. Which...", "Q.51:", and "(51)".
+  // First, find true sequential question positions (1 to N) to avoid splitting on sub-numbered
+  // puzzle clues like (1)-(13) or table ratios like "3 : 2"
+  const qSplitRegex = /(?:^|\n)\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*[\.\)]\s*(?!\d)/g;
+  const rawQPositions = [];
+  let qm;
+  while ((qm = qSplitRegex.exec(text)) !== null) {
+    rawQPositions.push({
+      num: parseInt(qm[1], 10),
+      index: qm.index,
+      matchLen: qm[0].length
+    });
+  }
+
+  const qPositions = [];
+  let expected = 1;
+  for (let i = 0; i < rawQPositions.length; i++) {
+    const cur = rawQPositions[i];
+    if (cur.num === expected) {
+      qPositions.push(cur);
+      expected++;
+    } else if (cur.num > expected && cur.num <= expected + 2) {
+      qPositions.push(cur);
+      expected = cur.num + 1;
+    }
+  }
+
+  // If sequential parser found at least 5 questions, chunk strictly along true question boundaries!
+  if (qPositions.length >= 5) {
+    const prefix = text.slice(0, qPositions[0].index).trim();
+    const blocks = qPositions.map((pos, index) => {
+      const nextIndex = index + 1 < qPositions.length ? qPositions[index + 1].index : text.length;
+      return text.slice(pos.index, nextIndex).trim();
+    });
+
+    const chunks = [];
+    let current = prefix;
+    let count = 0;
+    let startQ = qPositions[0].num;
+    let endQ = qPositions[0].num;
+
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      const qNum = qPositions[i].num;
+      const wouldExceed = count > 0 && (count >= maxQuestions || current.length + block.length > maxChars);
+      if (wouldExceed) {
+        chunks.push({ text: current.trim(), expectedCount: count, startQ, endQ });
+        current = "";
+        count = 0;
+        startQ = qNum;
+      }
+      current += `${current ? "\n\n" : ""}${block}`;
+      endQ = qNum;
+      count++;
+    }
+    if (count > 0) chunks.push({ text: current.trim(), expectedCount: count, startQ, endQ });
+    return chunks;
+  }
+
+  // Fallback for non-standard formats
   const marker = /(^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*\d{1,3}\s*[\.\)\:\-]\s*|\(\d{1,3}\)\s*)(?=\s*\S)/gim;
   const starts = [];
   let match;
@@ -2334,7 +2406,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
   async function processChunk(chunkInfo, index, workerIndex) {
     if (signal?.aborted) throw new Error("Extraction cancelled by user.");
-    const { text: chunk, expectedCount } = chunkInfo;
+    const { text: chunk, expectedCount, startQ, endQ } = chunkInfo;
 
     // Fast-skip non-question chunks (promo, instruction pages, copyright notices) in 0ms
     const hasQMarkers = /(?:[1-9]\d*[\.\)]|\b(?:Q|Question)[\s\.]*\d+|[A-Ea-e][\.\)]\s*\w+)/i.test(chunk);
@@ -2348,8 +2420,8 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     let chunkQuestions = [];
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        console.log(`[AI] Chunk ${index + 1}: Requesting ${expectedCount} questions (Worker ${workerIndex}, attempt ${attempt + 1})...`);
-        const prompt = buildExtractionPrompt(chunk, expectedCount);
+        console.log(`[AI] Chunk ${index + 1}: Requesting ${expectedCount} questions ${startQ && endQ ? `(Q${startQ}-Q${endQ})` : ""} (Worker ${workerIndex}, attempt ${attempt + 1})...`);
+        const prompt = buildExtractionPrompt(chunk, expectedCount, startQ, endQ);
         let response = await callWithPreferredProvider(prompt, workerIndex);
         
         let parsedQuestions = Array.isArray(response) ? response : (response.questions || []);
@@ -2359,6 +2431,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
           if (!q) return null;
           const qText = (q.question || q.question_text || "").trim();
           if (!qText) return null;
+          const assignedNum = q.question_number || (startQ ? (startQ + qIndex) : null);
 
           // Normalize options to an array of 5 options
           let opts = [];
@@ -2390,6 +2463,7 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
           return {
             ...q,
+            questionNumber: assignedNum,
             question: qText,
             question_text: qText,
             options: opts,
@@ -2514,13 +2588,14 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
       uniqueQuestions.push({
         id: q.id || `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
+        questionNumber: q.questionNumber || (uniqueQuestions.length + 1),
         question: qText,
         question_text: qText,
         options: q.options,
         correctAnswerIndex: q.correctAnswerIndex,
         source_answer: String.fromCharCode(65 + q.correctAnswerIndex),
         passage: finalPassage,
-        section: q.section || inferSectionFromContent(qText, finalPassage) || (category?.includes("Bank") ? "Reasoning Ability" : (category || "General")),
+        section: q.section || inferSectionFromContent(qText, finalPassage, q.questionNumber || (uniqueQuestions.length + 1)) || (category?.includes("Bank") ? "Reasoning Ability" : (category || "General")),
         topic: q.topic || "",
         explanation: sanitized.explanation || q.explanation || "",
         imageUrl: attachedChartImg || "",
@@ -2530,10 +2605,18 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
   }
 
-  // 1. Assign passage from passageRanges or leadingPassage when missing or incomplete
+  // 1. Assign passage and accurate section
   for (let i = 0; i < uniqueQuestions.length; i++) {
     const q = uniqueQuestions[i];
-    const qNum = i + 1;
+    const qNum = q.questionNumber || (i + 1);
+    q.questionNumber = qNum;
+
+    // Standard Bank 100-Question section assignment
+    const correctSection = inferSectionFromContent(q.question, q.passage, qNum);
+    if (correctSection && correctSection !== "General") {
+      q.section = correctSection;
+    }
+
     const curP = (q.passage || "").trim();
     if (!curP || curP.length < 25) {
       const matchedRange = passageRanges.find(r => qNum >= r.startNum && qNum <= r.endNum);
@@ -2556,6 +2639,11 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         q.correctAnswerIndex = solEntry.answerLetter.toUpperCase().charCodeAt(0) - 65;
       }
     }
+  }
+
+  // Cap to 100 questions if paper was a standard 100-question paper
+  if (uniqueQuestions.length > 100) {
+    uniqueQuestions = uniqueQuestions.slice(0, 100);
   }
 
   // 3. Robust group propagation: propagate shared passage across sets of 5 questions (e.g. Puzzle / RC / DI)
