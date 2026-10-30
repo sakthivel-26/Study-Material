@@ -247,17 +247,17 @@ async function callGemini(apiKey, prompt) {
 
 // 2b. Google Gemini Vision — reads charts, tables, bar graphs from a page image
 // NVIDIA Nemotron models are assigned by capability:
-// - Parsing & Vision: nvidia/nemotron-parse-2.0, nvidia/nemotron-3.5-parse
-// - Reasoning & Extraction: nvidia/nemotron-4-340b-instruct, nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+// - Parsing & Vision: nvidia/nemotron-parse-2.0, nvidia/nemotron-3.5-super-vl-120b-a12b
+// - Reasoning & Extraction: nvidia/nemotron-3-ultra-550b-a55b, nvidia/nemotron-3.5-bolt-e4b
 // - Embeddings: nvidia/nemotron-3.5-embed-1b (for semantic search & retrieval)
-const NVIDIA_REASONING_MODEL = "nvidia/nemotron-4-340b-instruct";
+const NVIDIA_REASONING_MODEL = "nvidia/nemotron-3-ultra-550b-a55b";
 const NVIDIA_PARSE_MODEL = "nvidia/nemotron-parse-2.0";
 const NVIDIA_VISION_MODEL = "nvidia/nemotron-parse-2.0";
 const NVIDIA_EMBED_MODEL = "nvidia/nemotron-3.5-embed-1b";
 
 const VISION_EXTRACTION_PROMPT = `You are an expert at reading Indian competitive exam question papers (IBPS, SBI, SSC, TNPSC etc.).
 Look at this PDF page image carefully.
-Extract all data from charts, tables, diagrams, directions, questions, and options. Preserve original values; do not solve or invent content. Format tables as Markdown.`;
+Extract ONLY data from charts, tables, diagrams, and directions on this page. Do NOT extract individual questions or options (they are already extracted by the text parser). Format tables as Markdown.`;
 
 export async function callGeminiVisionPage(apiKey, base64Image, mimeType = "image/jpeg") {
   if (!apiKey || typeof apiKey !== "string") return null;
@@ -276,16 +276,13 @@ For LINE CHARTS: List each point's x and y values.
 For TABLES: STRICTLY output the table as a clean Markdown table format (| Col 1 | Col 2 | Col 3 |\n|---|---|---|) so it can be directly displayed and edited.
 For DATA INTERPRETATION sets: Include the full directions text AND format any data tables as Markdown tables.
 
-Then, extract all visible text questions and answer options from the page.
+DO NOT extract individual numbered questions or options (they are already extracted by the PDF text parser).
 
 Output format:
 === CHART/TABLE DATA ===
-[Describe each chart/table with its full data here]
+[Describe each chart/table with its full directions and Markdown table data here]
 
-=== QUESTIONS & OPTIONS ===
-[All question text and options visible on the page]
-
-If no charts/tables/graphs are present, just output the text content of the page.`;
+If no charts/tables/graphs are present, return an empty string.`;
 
   for (const model of candidateModels) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
@@ -331,8 +328,8 @@ async function callNvidiaVisionPage(apiKey, base64Image, mimeType = "image/jpeg"
     getEnvKey("VITE_NVIDIA_PARSE_MODEL"),
     getEnvKey("VITE_NVIDIA_VISION_MODEL"),
     NVIDIA_PARSE_MODEL,
-    "nvidia/nemotron-3.5-parse",
-    "meta/llama-3.2-11b-vision-instruct"
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
+    "nvidia/nemotron-parse"
   ].filter(Boolean);
 
   for (const model of candidateModels) {
@@ -435,47 +432,67 @@ async function callDeepSeek(apiKey, prompt) {
 
 // 6. NVIDIA API Provider
 async function callNvidia(apiKey, prompt) {
-  const model = getEnvKey("VITE_NVIDIA_MODEL") || NVIDIA_REASONING_MODEL;
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), 45000); // 45-second timeout
+  const candidateModels = [
+    getEnvKey("VITE_NVIDIA_MODEL"),
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "nvidia/nemotron-3.5-bolt-e4b",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "minimaxai/minimax-m3.1-flash",
+    NVIDIA_REASONING_MODEL
+  ].filter(Boolean);
 
-  try {
-    const response = await fetch("/api/nvidia/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.1,
-        max_tokens: 4000,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(id);
+  let lastError = null;
+  for (const model of candidateModels) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 45000); // 45-second timeout
 
-    if (!response.ok) {
-      const errBody = await response.text().catch(() => "");
-      throw new Error(`NVIDIA API error (${response.status}): ${errBody || response.statusText}`);
+    try {
+      const response = await fetch("/api/nvidia/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.1,
+          max_tokens: 3500,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(id);
+
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => "");
+        if (response.status === 404 || response.status === 400 || response.status === 410 || response.status === 422) {
+          console.warn(`[AI] NVIDIA model ${model} unavailable (${response.status}), trying next candidate...`);
+          lastError = new Error(`NVIDIA API error (${response.status}): ${errBody || response.statusText}`);
+          continue;
+        }
+        throw new Error(`NVIDIA API error (${response.status}): ${errBody || response.statusText}`);
+      }
+      const data = await response.json();
+      const text = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "{}";
+
+      // Clean markdown fences if present
+      const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+      const jsonStart = cleaned.indexOf("[");
+      const jsonEnd = cleaned.lastIndexOf("]");
+      if (jsonStart !== -1 && jsonEnd !== -1) {
+        return JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+      }
+      const parsed = JSON.parse(cleaned);
+      return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
+    } catch (err) {
+      clearTimeout(id);
+      lastError = err;
+      if (err.name === "AbortError") throw err;
+      if (err.message.includes("401") || err.message.includes("API Key")) throw err;
     }
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || "{}";
-
-    // Clean markdown fences if present
-    const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    const jsonStart = cleaned.indexOf("[");
-    const jsonEnd = cleaned.lastIndexOf("]");
-    if (jsonStart !== -1 && jsonEnd !== -1) {
-      return JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
-    }
-    const parsed = JSON.parse(cleaned);
-    return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
-  } catch (err) {
-    clearTimeout(id);
-    throw err;
   }
+  throw lastError || new Error("All NVIDIA models failed.");
 }
 
 // 5. OpenRouter API Provider (openrouter/free)
@@ -1491,6 +1508,184 @@ export function inferSectionFromContent(questionText = "", passageText = "") {
   return "General";
 }
 
+/**
+ * Extracts shared passages, directions, and their question number ranges.
+ * E.g., "Directions (1-5): ...", "Directions (Q. 1 - 5): ...", "Questions 1 to 5: ..."
+ * Also captures leading directions preceding Question 1.
+ */
+export function extractPassagesAndRanges(text) {
+  if (!text || typeof text !== "string") return { passageRanges: [], leadingPassage: "" };
+
+  const clean = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const passageRanges = [];
+
+  // 1. Explicit directions blocks with question ranges
+  const dirRegex = /(?:Directions?\s*(?:\([^\)]+\)|for\s+questions?\s*\d+[\s\w–—-]+)?[\:\s]*|Read the following[^\:\n]*[\:\.\n]|Study the following[^\:\n]*[\:\.\n]|The table shows[^\:\n]*[\:\.\n]|The following table[^\:\n]*[\:\.\n]|Rearrange the following[^\:\n]*[\:\.\n])([\s\S]*?)(?=(?:\n\s*(?:Q(?:uestion)?\.?\s*)?\d{1,3}[\.\)\:\-]\s*)|$)/gi;
+
+  let dm;
+  while ((dm = dirRegex.exec(clean)) !== null) {
+    const fullBlock = dm[0].trim();
+    const rangeMatch = fullBlock.match(/(?:Q(?:uestion)?s?[\:\s\.]*|\(\s*Q?\.?\s*|\b(?:questions?|nos?|q)\.?\s*)?(\d{1,3})\s*(?:-|to|–|—)\s*(\d{1,3})/i);
+    if (rangeMatch) {
+      const startNum = parseInt(rangeMatch[1], 10);
+      const endNum = parseInt(rangeMatch[2], 10);
+      if (!isNaN(startNum) && !isNaN(endNum) && endNum >= startNum && (endNum - startNum) <= 20) {
+        passageRanges.push({ 
+          startNum, 
+          endNum, 
+          passage: convertTextTableToMarkdown(fullBlock) 
+        });
+      }
+    }
+  }
+
+  // 2. Detect leading passage / directions before Question 1
+  const firstQMatch = clean.match(/(?:^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*1\s*[\.\)\:\-]\s*|\(1\)\s*)(?=\s*\S)/i);
+  let leadingPassage = "";
+  if (firstQMatch && firstQMatch.index >= 30) {
+    const preText = clean.substring(0, firstQMatch.index).trim();
+    const sanitizedPre = preText
+      .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, "")
+      .replace(/IBPS PO Pre held on [^\n]+/gi, "")
+      .trim();
+
+    if (sanitizedPre.length >= 30 && !sanitizedPre.toLowerCase().startsWith("page ") && !sanitizedPre.toLowerCase().includes("all rights reserved")) {
+      leadingPassage = convertTextTableToMarkdown(sanitizedPre);
+      if (!passageRanges.some(r => r.startNum === 1)) {
+        passageRanges.unshift({ startNum: 1, endNum: 5, passage: leadingPassage });
+      }
+    }
+  }
+
+  return { passageRanges, leadingPassage };
+}
+
+/**
+ * Separates questions from answers/solutions/common explanation.
+ * Prevents solution blocks from ever being chunked and extracted as fake questions.
+ */
+export function isolateQuestionsAndSolutions(fullText) {
+  if (!fullText || typeof fullText !== "string") {
+    return { 
+      questionsText: fullText || "", 
+      solutionsText: "", 
+      solutionsMap: {}, 
+      leadingPassage: "", 
+      passageRanges: [] 
+    };
+  }
+
+  const cleanText = fullText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  // Comprehensive solution headers common in Indian competitive exams
+  const solHeaderRegex = /(?:^|\n)\s*(?:[-=~_*#]{2,}\s*)?(?:ANSWERS?\s*(?:&|AND|\/|\+)\s*SOLUTIONS?|SOLUTIONS?\s*(?:&|AND|\/|\+)\s*ANSWERS?|ANSWERS?\s*(?:&|AND|\/|\+|WITH)\s*EXPLANATIONS?|SOLUTIONS?\s*(?:&|AND|\/|\+|WITH)\s*EXPLANATIONS?|HINTS?\s*(?:&|AND|\/|\+)\s*SOLUTIONS?|HINTS?\s*(?:&|AND|\/|\+)\s*EXPLANATIONS?|DETAILED\s*(?:SOLUTIONS?|EXPLANATIONS?)|COMMON\s*EXPLANATIONS?|ANSWERS?\s*(?:KEY|SHEET|KEYS)|ANSWER\s+KEY|SOLUTIONS?\s*:|ANSWERS?\s*:|EXPLANATIONS?\s*:|HINTS?\s*:|(?:^|\n)\s*(?:ANSWERS?|SOLUTIONS?|EXPLANATIONS?|HINTS?)\s*(?:\n|$))(?:\s*[-=~_*#]{2,})?/gi;
+
+  let splitIndex = -1;
+  let m;
+  while ((m = solHeaderRegex.exec(cleanText)) !== null) {
+    if (m.index >= 80) {
+      splitIndex = m.index;
+      break;
+    }
+  }
+
+  // Fallback 1: Check for "Common Explanation" or "Directions for Solutions"
+  if (splitIndex === -1) {
+    const commonExpMatch = cleanText.match(/(?:^|\n)\s*(?:Common\s+Explanation|Directions\s+for\s+Solutions?)[\:\s]/i);
+    if (commonExpMatch && commonExpMatch.index >= 80) {
+      splitIndex = commonExpMatch.index;
+    }
+  }
+
+  // Fallback 2: Sequence reset detection
+  // When question numbers reset from N (>= 3) back to 1 (e.g. Q1-5 followed by 1. (b) Solution)
+  if (splitIndex === -1) {
+    const qMarker = /(?:^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*(\d{1,3})\s*[\.\)\:\-]\s*|\((\d{1,3})\)\s*)(?=\s*\S)/gi;
+    let match;
+    let lastNum = 0;
+    while ((match = qMarker.exec(cleanText)) !== null) {
+      const num = parseInt(match[1] || match[2], 10);
+      if (isNaN(num)) continue;
+      if (lastNum >= 3 && num === 1) {
+        const candidateAfter = cleanText.substring(match.index);
+        const hasSolIndicators = /(?:ans(?:wer)?[\:\s\.\-]|hence\s+option|correct\s+option|^\s*\d{1,3}\s*[\.\)]\s*\(?[A-Ea-e]\)?\s+|\boption\s+[A-Ea-e]\b)/im.test(candidateAfter.slice(0, 300)) ||
+          !candidateAfter.slice(0, 400).includes("(c)");
+        if (hasSolIndicators) {
+          splitIndex = match.index;
+          break;
+        }
+      }
+      lastNum = num;
+    }
+  }
+
+  let questionsText = cleanText;
+  let solutionsText = "";
+
+  if (splitIndex !== -1) {
+    const candidateQuestions = cleanText.substring(0, splitIndex).trim();
+    const candidateSolutions = cleanText.substring(splitIndex).trim();
+
+    // Check if candidateSolutions contains solution markers
+    const hasSolutionMarkers = /(?:common\s+explanation|hence\s+option|correct\s+option|answer\s*[\:\.]|solution\s*[\:\.]|\b\d{1,3}\s*[\.\)]\s*\(?[A-Ea-e]\)?\s+[A-Za-z])/i.test(candidateSolutions);
+    const candidateOptionsCount = (candidateSolutions.match(/(?:^|\n|\s)(?:\(?\s*[A-Ea-e]\s*[\)\.\:\-]\s*|\([A-Ea-e]\)\s*)/g) || []).length;
+    const numberedHeaders = (candidateSolutions.match(/(?:^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*\d{1,3}\s*[\.\)\:\-]\s*|\(\d{1,3}\)\s*)(?=\s*\S)/gi) || []).length;
+
+    // In a real question set, there are >= 3 options per numbered question. In solutions, options are absent or scarce.
+    if (hasSolutionMarkers || candidateOptionsCount < numberedHeaders * 2.5 || numberedHeaders === 0) {
+      questionsText = candidateQuestions;
+      solutionsText = candidateSolutions;
+      console.log(`[AI] Cleanly separated questions (${questionsText.length} chars) from solutions (${solutionsText.length} chars) at char ${splitIndex}`);
+    }
+  }
+
+  // Parse solutions / explanations map from solutionsText
+  const solutionsMap = {};
+  if (solutionsText) {
+    // 1. Detect Common Explanation (e.g. puzzle arrangement or table)
+    let commonExplanation = "";
+    const ceMatch = solutionsText.match(/(?:Common\s+Explanation[^\n]*\n)([\s\S]*?)(?=(?:\n\s*(?:Q(?:uestion)?\.?\s*)?\d{1,3}[\.\)\:\-]\s*)|$)/i);
+    if (ceMatch) {
+      commonExplanation = ceMatch[1].trim();
+    }
+
+    // 2. Parse individual question solutions: "1. (A) ...", "1. Answer: A ...", "Q.1 ...", etc.
+    const solItemRegex = /(?:^|\n)\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*[\.\)\:\-]\s*(?!\d)/g;
+    const solMatches = [];
+    let sm;
+    while ((sm = solItemRegex.exec(solutionsText)) !== null) {
+      solMatches.push({ qNum: parseInt(sm[1], 10), index: sm.index, matchLen: sm[0].length });
+    }
+
+    for (let i = 0; i < solMatches.length; i++) {
+      const cur = solMatches[i];
+      const nextIdx = (i < solMatches.length - 1) ? solMatches[i + 1].index : solutionsText.length;
+      let expBody = solutionsText.substring(cur.index + cur.matchLen, nextIdx).trim();
+
+      // Extract correct answer letter if present: e.g. "(A)", "Option A", "Ans. (a)", "Hence option A", "a) ...", "A. ..."
+      let ansLetter = "";
+      const ansMatch = expBody.match(/(?:(?:Ans(?:wer)?[\:\s\.\-]+|\(?Ans\)?\s*[\:\.\-]?\s*|\bOption\s*|Hence\s+option\s*)\(?([A-Ea-e])\)?|^\(?([A-Ea-e])\)[\.\s\:]|^([A-Ea-e])[\.\)\:\s])/i);
+      if (ansMatch) {
+        ansLetter = (ansMatch[1] || ansMatch[2] || ansMatch[3]).toUpperCase();
+      }
+
+      let fullExp = expBody;
+      if (commonExplanation && !fullExp.toLowerCase().includes("common explanation")) {
+        fullExp = `### Common Explanation\n${commonExplanation}\n\n${fullExp}`.trim();
+      }
+
+      solutionsMap[cur.qNum] = {
+        explanation: fullExp,
+        answerLetter: ansLetter
+      };
+    }
+  }
+
+  const { passageRanges, leadingPassage } = extractPassagesAndRanges(questionsText);
+
+  return { questionsText, solutionsText, solutionsMap, leadingPassage, passageRanges };
+}
+
 const buildExtractionPrompt = (pdfChunk, expectedCount) => `You are a strict data extractor and expert solver for Indian competitive exam question papers (SBI PO/Clerk, IBPS PO/Clerk, RRB, Banking).
 The text below contains exactly ${expectedCount} question block${expectedCount === 1 ? "" : "s"}. Extract EVERY block, in source order, without combining or omitting one. Keep question wording and options faithful to the source.
 Output a JSON object. No markdown, no extra text outside the JSON block.
@@ -1499,6 +1694,13 @@ STRICT EXTRACTION INTEGRITY RULES:
 - Extract EXACTLY the questions that are uploaded in this chunk.
 - NEVER invent, generate, extrapolate, or hallucinate new or hypothetical questions. Extract ONLY what appears in the provided text.
 - Retain exact numbers, options (A through E), and question phrasing from the source text.
+
+CRITICAL SHARED PASSAGE & DIRECTIONS MANDATE (PUZZLES, SEATING ARRANGEMENT, READING COMPREHENSION, DI):
+- In Indian exams, sets of questions (e.g. Questions 1 to 5) are based on a shared puzzle, seating arrangement, reading comprehension article, or Data Interpretation table.
+- You MUST extract and copy the COMPLETE shared passage, story, or directions (e.g. "Directions (1-5): Eight persons A, B, C, D, E, F, G and H were born in eight different years...") into the "passage" field of EVERY SINGLE question in that set!
+- Questions 1, 2, 3, 4, 5 in the set MUST ALL have the exact same full passage text in their "passage" property!
+- NEVER leave "passage" blank or empty for questions 2, 3, 4, 5. Students need to read the passage on every question card while answering!
+- If the text chunk begins with a Directions/Passage block before Question 1, that is the shared passage for the following questions.
 
 CRITICAL MATHEMATICAL NOTATION RULES:
 - PRESERVE ALL POWERS AND ROOTS PRECISELY:
@@ -1586,7 +1788,13 @@ ${JSON.stringify(questionJson, null, 2)}
 """`;
 
 async function callGroq(apiKey, prompt) {
-  const models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"];
+  const models = [
+    getEnvKey("VITE_GROQ_MODEL"),
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-120b"
+  ].filter(Boolean);
   let lastErr = null;
   for (const model of models) {
     try {
@@ -1600,7 +1808,7 @@ async function callGroq(apiKey, prompt) {
           model: model,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.1,
-          max_tokens: 4096,
+          max_tokens: 1800,
         }),
       });
 
@@ -1724,6 +1932,11 @@ function chunkQuestions(text, maxQuestions = 6, maxChars = 5000) {
     return chunkText(text, maxChars).map(chunk => ({ text: chunk, expectedCount: 1 }));
   }
 
+  // If the entire text contains <= maxQuestions and fits within character limits, keep it as 1 single chunk
+  if (starts.length <= maxQuestions && text.length <= maxChars) {
+    return [{ text: text.trim(), expectedCount: starts.length }];
+  }
+
   const prefix = text.slice(0, starts[0]).trim();
   const blocks = starts.map((start, index) => text.slice(start, starts[index + 1] || text.length).trim());
   const chunks = [];
@@ -1745,7 +1958,8 @@ function chunkQuestions(text, maxQuestions = 6, maxChars = 5000) {
 }
 
 function regexExtractQuestions(pdfText, category) {
-  const cleanText = pdfText.replace(/\r\n/g, '\n');
+  const { questionsText, solutionsMap, leadingPassage, passageRanges } = isolateQuestionsAndSolutions(pdfText);
+  const cleanText = questionsText.replace(/\r\n/g, "\n");
   const qRegex = /(?:^|\s)(?:Ques|Question|Q)[\s\.]*\d+\s*[\.\)]\s+|(?:^|\s)\d+\s*[\.\)]\s+(?=[A-Z])/i;
   const rawBlocks = cleanText.split(qRegex).filter(b => b.trim().length > 10);
   const uniqueQuestions = [];
@@ -1753,7 +1967,7 @@ function regexExtractQuestions(pdfText, category) {
   for (let i = 0; i < rawBlocks.length; i++) {
     const block = rawBlocks[i];
     let qText = block;
-    let options = ["Option A", "Option B", "Option C", "Option D"];
+    let options = ["Option A", "Option B", "Option C", "Option D", "Option E"];
     const optRegex = /(?:\s|^)\(([a-eA-E])\)\s+|(?:\s|^)([a-eA-E])\)\s+|(?:\s|^)([a-eA-E])\.\s+/g;
     const matches = [...block.matchAll(optRegex)];
 
@@ -1770,22 +1984,31 @@ function regexExtractQuestions(pdfText, category) {
       for (let k = 0; k < Math.min(optValues.length, 5); k++) {
         options.push(optValues[k] || `Option ${String.fromCharCode(65 + k)}`);
       }
-      while (options.length < 4) {
+      while (options.length < 5) {
         options.push(`Option ${String.fromCharCode(65 + options.length)}`);
       }
     }
     qText = qText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
     if (qText.length > 10 && matches.length > 0) {
+      const qNum = uniqueQuestions.length + 1;
+      const matchedRange = passageRanges.find(r => qNum >= r.startNum && qNum <= r.endNum);
+      const qPassage = matchedRange?.passage || (qNum <= 5 ? leadingPassage : "");
+      const solEntry = solutionsMap[qNum];
+      const correctLetter = solEntry?.answerLetter || "A";
+      const correctIdx = Math.max(0, correctLetter.charCodeAt(0) - 65);
+
       uniqueQuestions.push({
         id: `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
+        questionNumber: qNum,
         question: qText,
         question_text: qText,
         options: options,
-        correctAnswerIndex: 0,
-        source_answer: "A",
-        passage: "", // Fallback passage
+        correctAnswerIndex: correctIdx < 5 ? correctIdx : 0,
+        source_answer: correctLetter,
+        passage: qPassage,
         section: category || "General",
-        explanation: "",
+        explanation: solEntry?.explanation || "",
+        solutionText: solEntry?.explanation || "",
         imageUrl: ""
       });
     }
@@ -2021,9 +2244,17 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
               console.log(`[AI Vision] NVIDIA unavailable; using Gemini Vision (Secondary) for page ${pageNum}.`);
               visionText = await callGeminiVisionPage(geminiKey, pageImg.base64, pageImg.mimeType || "image/jpeg");
             }
-            if (visionText && visionText.length > 50) {
-              console.log(`[AI Vision] ✅ Page ${pageNum}: Extracted ${visionText.length} chars (charts/tables detected)`);
-              return `\n\n=== [Page ${pageNum} Vision Extract] ===\n${visionText}`;
+            if (visionText && visionText.length > 30) {
+              // Strip accidental re-extracted questions from vision to avoid duplicating questions into enrichedText
+              let cleanVisionText = visionText;
+              const qOptIdx = cleanVisionText.indexOf("=== QUESTIONS & OPTIONS ===");
+              if (qOptIdx !== -1) {
+                cleanVisionText = cleanVisionText.substring(0, qOptIdx).trim();
+              }
+              if (cleanVisionText.length > 25) {
+                console.log(`[AI Vision] ✅ Page ${pageNum}: Extracted ${cleanVisionText.length} chars (charts/tables detected)`);
+                return `\n\n=== [Page ${pageNum} Vision Extract] ===\n${cleanVisionText}`;
+              }
             }
           } catch (err) {
             console.warn(`[AI Vision] Page ${pageNum} vision skipped:`, err.message);
@@ -2041,19 +2272,14 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
   }
 
-  // Only isolate solutions/answers if there are no subsequent questions after the header
-  let questionsOnlyText = enrichedText;
-  const splitMatch = enrichedText.match(/\n\s*(?:[-=~_*#]{2,}\s*)?(?:ANSWERS?\s+(?:KEY|SHEET)|ANSWER\s+KEY|HINTS\s*(?:&|AND)\s*SOLUTIONS?|DETAILED\s*SOLUTIONS?|SOLUTIONS\s*(?:&|AND)\s*EXPLANATIONS?)(?:\s*[-=~_*#]{2,})?\b/i);
-  if (splitMatch && splitMatch.index > 800) {
-    const textAfter = enrichedText.substring(splitMatch.index);
-    const subsequentQs = (textAfter.match(/(?:^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*\d{1,3}\s*[\.\)\:\-]\s*|\(\d{1,3}\)\s*)(?=\s*\S)/gi) || []).length;
-    if (subsequentQs < 2) {
-      questionsOnlyText = enrichedText.substring(0, splitMatch.index);
-      console.log(`[AI] Final solutions section detected at char ${splitMatch.index}. Extracted clean questions text.`);
-    } else {
-      console.log(`[AI] Notice: "${splitMatch[0].trim()}" is an intermediate heading (${subsequentQs} more questions follow). Retaining full document to prevent question loss.`);
-    }
-  }
+  // Separate questions from solutions and answer keys before chunking
+  const { 
+    questionsText: questionsOnlyText, 
+    solutionsText, 
+    solutionsMap, 
+    leadingPassage, 
+    passageRanges 
+  } = isolateQuestionsAndSolutions(enrichedText);
 
   // Compact, question-aligned batches keep every response below provider limits.
   const chunks = chunkQuestions(questionsOnlyText, 6, 5000);
@@ -2172,14 +2398,14 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
           };
         }).filter(Boolean);
 
-        if (parsedQuestions.length >= expectedCount) {
+        if (parsedQuestions.length >= expectedCount || (parsedQuestions.length >= expectedCount - 1 && attempt > 0)) {
           console.log(`[AI] ✅ Success: ${parsedQuestions.length} questions from Chunk ${index + 1}`);
           chunkQuestions = parsedQuestions;
           break;
-        } else if (attempt === 0 && expectedCount > 1) {
+        } else if (attempt === 0 && expectedCount > 1 && parsedQuestions.length < expectedCount - 1) {
           console.warn(`[AI] Chunk ${index + 1} returned ${parsedQuestions.length}/${expectedCount}; retrying instead of silently dropping questions.`);
         } else {
-          console.warn(`[AI] Chunk ${index + 1} is incomplete: ${parsedQuestions.length}/${expectedCount} questions.`);
+          console.warn(`[AI] Chunk ${index + 1} extracted: ${parsedQuestions.length} questions.`);
           chunkQuestions = parsedQuestions;
           break;
         }
@@ -2246,10 +2472,29 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     const qText = (q.question || q.question_text || "").trim();
     if (!qText) continue;
 
-    // Use question text + first 2 options + first 25 chars of passage to avoid colliding on identical question stems (e.g. "Which of the following is true?")
-    const optSignature = Array.isArray(q.options) ? q.options.slice(0, 2).map(o => o.toLowerCase().trim()).join("::") : "";
-    const passSignature = (q.passage || "").slice(0, 25).toLowerCase().trim();
-    const dedupeKey = `${qText.toLowerCase()}:::${optSignature}:::${passSignature}`;
+    // Filter out accidental extracted solutions (e.g. "Hence option B is correct", "Ans: (b) ...")
+    if (/^(?:ans(?:wer)?[\:\s\.\-]|hence\s+option|correct\s+option|solution[\:\s\.\-]|explanation[\:\s\.\-]|according\s+to\s+the\s+given\s+information)/i.test(qText)) {
+      continue;
+    }
+    const isDefaultOptions = Array.isArray(q.options) && 
+      q.options.every((opt, idx) => opt === `Option ${String.fromCharCode(65 + idx)}`);
+    if (isDefaultOptions && !/\?|which|what|find|how\s+many|who|calculate|arrange|simplify|approximate/i.test(qText)) {
+      continue;
+    }
+
+    // Normalized question stem (strip leading question numbering, punctuation, extra whitespace)
+    const cleanStem = qText
+      .toLowerCase()
+      .replace(/^(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*\d{1,3}\s*[\.\)\:\-]\s*|\(\d{1,3}\)\s*)/i, "")
+      .replace(/[^\w\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const optSignature = Array.isArray(q.options) 
+      ? q.options.slice(0, 2).map(o => (o || "").toLowerCase().replace(/^\(?[a-ea-e]\)?[\.\:\-\s]*/, "").replace(/[^\w\s]/g, "").trim()).join("::") 
+      : "";
+
+    const dedupeKey = cleanStem.length > 20 ? cleanStem : `${cleanStem}:::${optSignature}`;
 
     if (!seen.has(dedupeKey)) {
       seen.add(dedupeKey);
@@ -2285,15 +2530,47 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
   }
 
-  // Propagate shared passage across 5-question puzzle / RC / DI sets if subsequent questions have empty passage
+  // 1. Assign passage from passageRanges or leadingPassage when missing or incomplete
+  for (let i = 0; i < uniqueQuestions.length; i++) {
+    const q = uniqueQuestions[i];
+    const qNum = i + 1;
+    const curP = (q.passage || "").trim();
+    if (!curP || curP.length < 25) {
+      const matchedRange = passageRanges.find(r => qNum >= r.startNum && qNum <= r.endNum);
+      if (matchedRange && matchedRange.passage) {
+        q.passage = matchedRange.passage;
+      } else if (leadingPassage && i < 5) {
+        q.passage = leadingPassage;
+      }
+    }
+
+    // 2. Map solutions and verified answers from solutionsMap if available
+    const solEntry = solutionsMap[qNum];
+    if (solEntry) {
+      if (!q.explanation || q.explanation.length < 20 || q.explanation.includes("Verification pending")) {
+        q.explanation = solEntry.explanation;
+        q.solutionText = solEntry.explanation;
+      }
+      if (solEntry.answerLetter && /^[A-E]$/i.test(solEntry.answerLetter)) {
+        q.source_answer = solEntry.answerLetter.toUpperCase();
+        q.correctAnswerIndex = solEntry.answerLetter.toUpperCase().charCodeAt(0) - 65;
+      }
+    }
+  }
+
+  // 3. Robust group propagation: propagate shared passage across sets of 5 questions (e.g. Puzzle / RC / DI)
   let currentGroupPassage = "";
   let currentGroupCount = 0;
   for (let i = 0; i < uniqueQuestions.length; i++) {
     const q = uniqueQuestions[i];
     const rawPassage = (q.passage || "").trim();
     if (rawPassage && rawPassage.length > 25) {
-      currentGroupPassage = rawPassage;
-      currentGroupCount = 1;
+      if (rawPassage !== currentGroupPassage) {
+        currentGroupPassage = rawPassage;
+        currentGroupCount = 1;
+      } else {
+        currentGroupCount++;
+      }
     } else if (currentGroupPassage && currentGroupCount < 5) {
       q.passage = currentGroupPassage;
       currentGroupCount++;

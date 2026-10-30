@@ -69,12 +69,13 @@ export default async function handler(req, res) {
     if (nvidiaKey) {
       try {
         const candidateModels = [
-          process.env.VITE_NVIDIA_PARSE_MODEL,
           process.env.VITE_NVIDIA_MODEL,
-          "nvidia/nemotron-parse-2.0",
-          "nvidia/nemotron-3.5-parse",
-          "nvidia/nemotron-4-340b-instruct",
-          "meta/llama-3.1-70b-instruct"
+          "nvidia/nemotron-3-ultra-550b-a55b",
+          "nvidia/nemotron-3.5-bolt-e4b",
+          "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+          "nvidia/nemotron-3.5-lightning-30b-a3b",
+          process.env.VITE_NVIDIA_PARSE_MODEL,
+          "nvidia/nemotron-parse-2.0"
         ].filter(Boolean);
 
         for (const mod of candidateModels) {

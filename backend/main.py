@@ -192,7 +192,7 @@ async def extract_questions(file: UploadFile = File(...)):
             
             try:
                 response = client.chat.completions.create(
-                    model="nvidia/nemotron-3.5-lightning-30b-a3b",
+                    model=os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"),
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": chunk_text}

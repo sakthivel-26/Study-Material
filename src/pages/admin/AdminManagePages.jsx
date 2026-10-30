@@ -11,7 +11,7 @@ import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
 import { CATEGORIES, COURSE_PROGRESS } from "../../data.js";
 import { Badge, ProgressBar } from "../../components/ui.jsx";
-import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findBestMatchingChartPage, isDIQuestion, sanitizeDIPassageAndExplanation, convertTextTableToMarkdown } from "../../utils/aiTestGenerator.js";
+import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findBestMatchingChartPage, isDIQuestion, sanitizeDIPassageAndExplanation, convertTextTableToMarkdown, isolateQuestionsAndSolutions, extractPassagesAndRanges } from "../../utils/aiTestGenerator.js";
 import { extractTextWithMathPreservation } from "../../utils/pdfParser.js";
 import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
@@ -1398,26 +1398,15 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
     const cleanText = fullText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-    // 1. ISOLATE QUESTIONS TEXT & SOLUTIONS TEXT
-    // Distinguish between pure ANSWER KEY headers and HINTS & SOLUTIONS headers
-    const detailedSolMatch = cleanText.match(/\n\s*(?:[-=~_*#]{2,}\s*)?(?:HINTS?\s*(?:&|AND)\s*SOLUTIONS?|DETAILED\s*SOLUTIONS?|SOLUTIONS?\s*(?:&|AND)\s*EXPLANATIONS?|HINTS?\s*(?:&|AND)\s*EXPLANATIONS?)(?:\s*[-=~_*#]{2,})?\b/i);
-    const ansKeyMatch = cleanText.match(/\n\s*(?:[-=~_*#]{2,}\s*)?(?:ANSWERS?\s+(?:KEY|SHEET)|ANSWER\s+KEY)(?:\s*[-=~_*#]{2,})?\b/i);
-
-    const firstSplitIndex = [ansKeyMatch?.index, detailedSolMatch?.index].filter(idx => typeof idx === "number" && idx > 500).sort((a,b) => a - b)[0];
-    
-    let questionsText = cleanText;
-    let solutionsText = cleanText;
-    let detailedSolText = detailedSolMatch ? cleanText.substring(detailedSolMatch.index) : cleanText;
-
-    if (firstSplitIndex) {
-      const textAfter = cleanText.substring(firstSplitIndex);
-      const subsequentQs = (textAfter.match(/(?:^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*\d{1,3}\s*[\.\)\:\-]\s*|\(\d{1,3}\)\s*)(?=\s*\S)/gi) || []).length;
-      if (subsequentQs < 2) {
-        questionsText = cleanText.substring(0, firstSplitIndex);
-        solutionsText = cleanText.substring(firstSplitIndex);
-        detailedSolText = detailedSolMatch && detailedSolMatch.index > 500 ? cleanText.substring(detailedSolMatch.index) : solutionsText;
-      }
-    }
+    // 1. ISOLATE QUESTIONS TEXT & SOLUTIONS TEXT USING ROBUST ENGINE
+    const { 
+      questionsText, 
+      solutionsText, 
+      solutionsMap: robustSolMap, 
+      leadingPassage, 
+      passageRanges: robustPassageRanges 
+    } = isolateQuestionsAndSolutions(cleanText);
+    const detailedSolText = solutionsText;
 
     // 2. EXTRACT ANSWER KEY MAP (e.g. 1. d.) 2401, 2. d) 248, 6.d, 11. b, 16. (Option A), 81. a)
     const answerKeyMap = {};
