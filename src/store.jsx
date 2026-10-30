@@ -52,37 +52,39 @@ export function AppProvider({ children }) {
   });
 
   const [mockTests, setMockTests] = useState(() => {
-    if (useRealtimeBackend) return [];
     try {
       const saved = localStorage.getItem("ken_ias_mocktests");
-      if (!saved) return sortTestsByRecent(MOCK_TESTS);
-      const parsed = JSON.parse(saved);
-      const existingIds = new Set(parsed.map(t => t.id));
-      const missingDefaults = MOCK_TESTS.filter(t => !existingIds.has(t.id));
-      return sortTestsByRecent([...parsed, ...missingDefaults]);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return sortTestsByRecent(parsed);
+        }
+      }
     } catch {
-      return sortTestsByRecent(MOCK_TESTS);
+      // fallback
     }
+    if (useRealtimeBackend) return [];
+    return sortTestsByRecent(MOCK_TESTS);
   });
   const [testHistory, setTestHistory] = useState(MOCK_TESTS_HISTORY);
-  const [testAttempts, setTestAttempts] = useState(() => {
+  const getAttemptStorageKey = (uid) => uid ? `ken_ias_test_attempts_${uid}` : "ken_ias_test_attempts_guest";
+
+  const loadLocalAttemptsForUser = (uid) => {
     try {
-      const saved = localStorage.getItem("ken_ias_test_attempts");
+      const userKey = getAttemptStorageKey(uid);
+      const saved = localStorage.getItem(userKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          // Purge any old hardcoded sample attempts (att_sample_1, att_sample_2, att_sample_3)
-          const realAttempts = parsed.filter(a => a && !String(a.id || "").startsWith("att_sample_"));
-          try {
-            localStorage.setItem("ken_ias_test_attempts", JSON.stringify(realAttempts));
-          } catch (e) {}
-          return realAttempts;
+          return parsed.filter(a => a && (!a.userId || !uid || a.userId === uid) && !String(a.id || "").startsWith("att_sample_"));
         }
       }
-      return [];
-    } catch {
-      return [];
-    }
+    } catch (e) {}
+    return [];
+  };
+
+  const [testAttempts, setTestAttempts] = useState(() => {
+    return loadLocalAttemptsForUser(user?.id);
   });
   const [bookmarks, setBookmarks] = useState([]);
   const [downloads, setDownloads] = useState(() => {
@@ -281,6 +283,7 @@ export function AppProvider({ children }) {
     try {
       localStorage.removeItem("shakthi_session");
       localStorage.removeItem("shakthi_users");
+      localStorage.removeItem("ken_ias_test_attempts");
     } catch {
       /* ignore */
     }
@@ -546,16 +549,23 @@ export function AppProvider({ children }) {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
-  // Sync test attempts from Firestore
+  // Sync test attempts from Firestore & switch local storage per user
   useEffect(() => {
-    if (isAuthed && user?.id && isFirebaseConfigured) {
-      fsGetTestAttempts(user.id).then(attempts => {
-        if (Array.isArray(attempts) && attempts.length > 0) {
+    const currentUid = user?.id || null;
+    const localAttempts = loadLocalAttemptsForUser(currentUid);
+    setTestAttempts(localAttempts);
+
+    if (isAuthed && currentUid && isFirebaseConfigured) {
+      fsGetTestAttempts(currentUid).then(attempts => {
+        if (Array.isArray(attempts)) {
           setTestAttempts(prev => {
-            const existingIds = new Set(prev.map(p => p.id));
-            const newOnes = attempts.filter(a => !existingIds.has(a.id));
-            const merged = [...newOnes, ...prev];
-            localStorage.setItem("ken_ias_test_attempts", JSON.stringify(merged));
+            const currentUsersPrev = prev.filter(a => a && (!a.userId || a.userId === currentUid));
+            const existingIds = new Set(currentUsersPrev.map(p => p.id));
+            const newOnes = attempts.filter(a => a && !existingIds.has(a.id));
+            const merged = [...newOnes, ...currentUsersPrev];
+            try {
+              localStorage.setItem(getAttemptStorageKey(currentUid), JSON.stringify(merged));
+            } catch (e) {}
             return merged;
           });
         }
@@ -564,10 +574,11 @@ export function AppProvider({ children }) {
   }, [isAuthed, user?.id]);
 
   const saveTestAttempt = async (attempt) => {
+    const currentUid = user?.id || "guest";
     const attemptWithMeta = {
       ...attempt,
       id: attempt.id || ("att_" + Date.now()),
-      userId: user?.id || "guest",
+      userId: currentUid,
       userName: user?.name || "Student",
       timestamp: Date.now(),
       completedAt: attempt.completedAt || new Date().toLocaleString("en-IN", {
@@ -582,9 +593,9 @@ export function AppProvider({ children }) {
     };
 
     setTestAttempts(prev => {
-      const next = [attemptWithMeta, ...prev.filter(a => a.id !== attemptWithMeta.id)];
+      const next = [attemptWithMeta, ...prev.filter(a => a.id !== attemptWithMeta.id && (!a.userId || a.userId === currentUid))];
       try {
-        localStorage.setItem("ken_ias_test_attempts", JSON.stringify(next));
+        localStorage.setItem(getAttemptStorageKey(currentUid === "guest" ? null : currentUid), JSON.stringify(next));
       } catch (e) {
         console.warn("Failed to save attempt to localStorage", e);
       }
@@ -620,7 +631,9 @@ export function AppProvider({ children }) {
 
   const getLatestAttempt = (testId, testTitle) => {
     if (!testAttempts || testAttempts.length === 0) return null;
+    const currentUid = user?.id || null;
     return testAttempts.find(a => {
+      if (currentUid && a.userId && a.userId !== currentUid) return false;
       if (testId != null && a.testId != null && String(a.testId) === String(testId)) return true;
       if (testTitle && a.testTitle) {
         const t1 = String(a.testTitle).toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -633,7 +646,9 @@ export function AppProvider({ children }) {
 
   const getAllAttempts = (testId, testTitle) => {
     if (!testAttempts || testAttempts.length === 0) return [];
+    const currentUid = user?.id || null;
     return testAttempts.filter(a => {
+      if (currentUid && a.userId && a.userId !== currentUid) return false;
       if (testId != null && a.testId != null && String(a.testId) === String(testId)) return true;
       if (testTitle && a.testTitle) {
         const t1 = String(a.testTitle).toLowerCase().replace(/[^a-z0-9]/g, "");

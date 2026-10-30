@@ -52,13 +52,33 @@ export async function subscribeBackend(user, { onUploads, onTests, onNotificatio
   try {
     const testsQuery = query(collection(db, COLLECTIONS.mockTests), orderBy("createdAt", "desc"));
     unsubs.push(
-      onSnapshot(testsQuery, handleTestsSnap, (err) => {
-        console.warn("Firestore ordered mockTests subscription fallback:", err);
-        unsubs.push(onSnapshot(collection(db, COLLECTIONS.mockTests), handleTestsSnap));
-      })
+      onSnapshot(
+        testsQuery,
+        handleTestsSnap,
+        (err) => {
+          console.warn("Firestore ordered mockTests subscription fallback:", err);
+          unsubs.push(
+            onSnapshot(
+              collection(db, COLLECTIONS.mockTests),
+              handleTestsSnap,
+              (fallbackErr) => {
+                console.warn("Firestore unordered mockTests subscription fallback error:", fallbackErr);
+              }
+            )
+          );
+        }
+      )
     );
-  } catch {
-    unsubs.push(onSnapshot(collection(db, COLLECTIONS.mockTests), handleTestsSnap));
+  } catch (err) {
+    unsubs.push(
+      onSnapshot(
+        collection(db, COLLECTIONS.mockTests),
+        handleTestsSnap,
+        (fallbackErr) => {
+          console.warn("Firestore fallback mockTests subscription error:", fallbackErr);
+        }
+      )
+    );
   }
   unsubs.push(
     onSnapshot(query(collection(db, COLLECTIONS.notifications), orderBy("createdAt", "desc")), (snap) =>

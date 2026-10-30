@@ -18,7 +18,7 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
     match /mockTests/{id} {
-      allow read: if signedIn();
+      allow read: if true;
       allow create, update, delete: if isAdmin();
     }
     match /notifications/{id} {

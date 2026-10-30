@@ -115,12 +115,15 @@ export default async function handler(req, res) {
 
     // 2. SECONDARY: Google Gemini Fallback
     if (!completionText && geminiKey) {
-      const candidateGemini = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-2.5-flash"];
+      const candidateGemini = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
       for (const modelName of candidateGemini) {
         try {
-          const apiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`, {
+          const apiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": geminiKey
+            },
             body: JSON.stringify({
               systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
               contents: [{ parts: [{ text: `Extract exact questions from the following text (do not invent or alter questions):\n\n${truncatedText}` }] }]

@@ -50,9 +50,12 @@ export default async function handler(req, res) {
       const result = await apiRes.json();
       completionText = result.choices?.[0]?.message?.content || "";
     } else if (geminiKey) {
-      const apiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${geminiKey}`, {
+      const apiRes = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": geminiKey,
+        },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }]
         }),

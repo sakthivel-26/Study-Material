@@ -185,72 +185,221 @@ async function callGemma7B(apiKey, prompt, customEndpoint) {
   return JSON.parse(text);
 }
 
-// 2. Google Gemini API Provider
-async function callGemini(apiKey, prompt) {
-  if (!apiKey || typeof apiKey !== "string") {
-    throw new Error("Invalid API key provided for Google Gemini.");
+// Global Session State for AI Providers
+export const aiSessionState = {
+  nvidiaDisabled: false,
+  nvidiaDisabledReason: "",
+  modelCooldowns: {}, // modelName -> timestamp ms
+  groqCooldownUntil: 0,
+  providerStats: {
+    NVIDIA: 0,
+    Gemini: 0,
+    Groq: 0,
+    Other: 0,
+  },
+};
+
+// Global Gemini Rate Limiter Queue (max 10 requests/min = minimum 6000ms between requests)
+class GeminiRateLimiter {
+  constructor(maxPerMinute = 10) {
+    this.minIntervalMs = Math.ceil(60000 / maxPerMinute); // 6000ms
+    this.lastRequestTime = 0;
+    this.queue = [];
+    this.processing = false;
   }
 
-  const cleanKey = apiKey.trim();
+  async acquire() {
+    return new Promise((resolve) => {
+      this.queue.push(resolve);
+      this.processQueue();
+    });
+  }
 
+  async processQueue() {
+    if (this.processing || this.queue.length === 0) return;
+    this.processing = true;
+
+    const now = Date.now();
+    const timeSinceLast = now - this.lastRequestTime;
+    const waitTime = Math.max(0, this.minIntervalMs - timeSinceLast);
+
+    if (waitTime > 0) {
+      await new Promise((r) => setTimeout(r, waitTime));
+    }
+
+    this.lastRequestTime = Date.now();
+    const nextResolve = this.queue.shift();
+    if (nextResolve) nextResolve();
+
+    this.processing = false;
+    if (this.queue.length > 0) {
+      this.processQueue();
+    }
+  }
+}
+
+const geminiRateLimiter = new GeminiRateLimiter(10);
+
+// Helper: parse retryDelay from 429 response body or Retry-After header
+function parseRetryDelay(errText, headers) {
+  const retryHeader = headers?.get ? headers.get("retry-after") : null;
+  if (retryHeader) {
+    const secs = parseFloat(retryHeader);
+    if (!isNaN(secs) && secs > 0) return Math.ceil(secs * 1000);
+  }
+  if (typeof errText === "string") {
+    const match = errText.match(/retryDelay["']?\s*:\s*["']?(\d+(?:\.\d+)?)s/i);
+    if (match && match[1]) {
+      return Math.ceil(parseFloat(match[1]) * 1000);
+    }
+    const match2 = errText.match(/retry\s+after\s+(\d+(?:\.\d+)?)\s*s/i);
+    if (match2 && match2[1]) {
+      return Math.ceil(parseFloat(match2[1]) * 1000);
+    }
+  }
+  return 60000; // Default 60s cooldown on 429
+}
+
+// Helper: 503 retry with exponential backoff & jitter (1s, 2s, 4s, max 3 tries)
+async function fetchWith503Retry(fn, maxRetries = 3) {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      const response = await fn();
+      if (response && response.status === 503) {
+        attempt++;
+        if (attempt >= maxRetries) return response;
+        const delay = Math.pow(2, attempt - 1) * 1000 + Math.floor(Math.random() * 500);
+        console.warn(`[AI] 503 High Demand received. Retrying attempt ${attempt}/${maxRetries} after ${delay}ms...`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      return response;
+    } catch (err) {
+      if (err.message && err.message.includes("503")) {
+        attempt++;
+        if (attempt >= maxRetries) throw err;
+        const delay = Math.pow(2, attempt - 1) * 1000 + Math.floor(Math.random() * 500);
+        console.warn(`[AI] 503 network error. Retrying attempt ${attempt}/${maxRetries} after ${delay}ms...`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+// Helper: downscale/compress base64 image (max 1500px, JPEG 0.7) to respect Vercel's 4.5MB limit
+async function compressBase64Image(base64Str, maxDimension = 1500, quality = 0.7) {
+  if (typeof window === "undefined" || !base64Str) return base64Str;
+  try {
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        const commaIdx = dataUrl.indexOf(",");
+        resolve(commaIdx !== -1 ? dataUrl.substring(commaIdx + 1) : dataUrl);
+      };
+      img.onerror = () => resolve(base64Str);
+      img.src = `data:image/jpeg;base64,${base64Str}`;
+    });
+  } catch (e) {
+    return base64Str;
+  }
+}
+
+// 2. Google Gemini API Provider (Serverless /api/gemini with Rate Limiter & Cooldowns)
+async function callGemini(apiKey, prompt) {
   const candidateModels = [
-    { name: "gemini-3.5-flash-lite", isThinking: false },
-    { name: "gemini-flash-lite-latest", isThinking: false },
-    { name: "gemini-3.6-flash", isThinking: true },
-    { name: "gemini-3.7-flash", isThinking: true },
-    { name: "gemini-3.8-flash", isThinking: true },
-    { name: "gemini-3.5-flash", isThinking: true },
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
   ];
 
   let lastErr = null;
 
-  for (const m of candidateModels) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${m.name}:generateContent?key=${cleanKey}`;
+  for (const model of candidateModels) {
+    const cooldownUntil = aiSessionState.modelCooldowns[model] || 0;
+    if (Date.now() < cooldownUntil) {
+      const remainingSecs = Math.ceil((cooldownUntil - Date.now()) / 1000);
+      console.warn(`[AI] Model ${model} is on cooldown for ${remainingSecs}s, skipping to next model...`);
+      continue;
+    }
+
+    // Acquire slot from rate limiter (max 10 requests/min)
+    await geminiRateLimiter.acquire();
+
     try {
       const genConfig = {
         responseMimeType: "application/json",
         temperature: 0.1,
       };
-      if (m.isThinking) {
-        genConfig.thinkingConfig = { thinkingBudget: 0 };
+
+      const response = await fetchWith503Retry(() =>
+        fetch("/api/gemini", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model,
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: genConfig,
+          }),
+        })
+      );
+
+      if (response.status === 429) {
+        const errText = await response.text().catch(() => "");
+        const delayMs = parseRetryDelay(errText, response.headers);
+        aiSessionState.modelCooldowns[model] = Date.now() + delayMs;
+        console.warn(`[AI] Model ${model} hit 429 rate limit. Cooling down for ${Math.round(delayMs / 1000)}s.`);
+        lastErr = new Error(`Gemini 429 Rate Limit for ${model}: ${errText}`);
+        continue;
       }
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: genConfig,
-        }),
-      });
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
-        throw new Error(`Gemini ${m.name} error (${response.status}): ${errText || response.statusText}`);
+        throw new Error(`Gemini ${model} error (${response.status}): ${errText || response.statusText}`);
       }
+
       const data = await response.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
       const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
       const jsonStart = cleaned.indexOf("[");
       const jsonEnd = cleaned.lastIndexOf("]");
       if (jsonStart !== -1 && jsonEnd !== -1) {
-        return JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+        const parsed = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+        aiSessionState.providerStats.Gemini += Array.isArray(parsed) ? parsed.length : 1;
+        return parsed;
       }
       const parsed = JSON.parse(cleaned);
-      return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
+      const resArr = Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
+      aiSessionState.providerStats.Gemini += resArr.length;
+      return resArr;
     } catch (err) {
-      console.warn(`Gemini model ${m.name} failed, trying next...`, err.message);
+      console.warn(`Gemini model ${model} failed, trying next...`, err.message);
       lastErr = err;
     }
   }
-  throw lastErr || new Error("All Gemini model endpoints failed. Please check your Google Gemini API key at https://aistudio.google.com/app/apikey");
+  throw lastErr || new Error("All valid Gemini models failed or are currently cooled down.");
 }
 
 // 2b. Google Gemini Vision — reads charts, tables, bar graphs from a page image
-// NVIDIA Nemotron models are assigned by capability:
-// - Parsing & Vision: nvidia/nemotron-parse-2.0, nvidia/nemotron-3.5-super-vl-120b-a12b
-// - Reasoning & Extraction: nvidia/nemotron-3-ultra-550b-a55b, nvidia/nemotron-3.5-bolt-e4b
-// - Embeddings: nvidia/nemotron-3.5-embed-1b (for semantic search & retrieval)
-const NVIDIA_REASONING_MODEL = "nvidia/nemotron-3-ultra-550b-a55b";
+const NVIDIA_REASONING_MODEL = "nvidia/nemotron-4-340b-instruct";
 const NVIDIA_PARSE_MODEL = "nvidia/nemotron-parse-2.0";
 const NVIDIA_VISION_MODEL = "nvidia/nemotron-parse-2.0";
 const NVIDIA_EMBED_MODEL = "nvidia/nemotron-3.5-embed-1b";
@@ -260,9 +409,10 @@ Look at this PDF page image carefully.
 Extract ONLY data from charts, tables, diagrams, and directions on this page. Do NOT extract individual questions or options (they are already extracted by the text parser). Format tables as Markdown.`;
 
 export async function callGeminiVisionPage(apiKey, base64Image, mimeType = "image/jpeg") {
-  if (!apiKey || typeof apiKey !== "string") return null;
-  const cleanKey = apiKey.trim();
-  const candidateModels = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"];
+  if (!base64Image) return null;
+  const compressedBase64 = await compressBase64Image(base64Image, 1500, 0.7);
+
+  const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
 
   const prompt = `You are an expert at reading Indian competitive exam question papers (IBPS, SBI, SSC, TNPSC etc.).
 Look at this PDF page image carefully.
@@ -273,7 +423,7 @@ Return a structured text description of each chart/table/graph found, followed b
 For PIE CHARTS: List each segment label and its percentage value.
 For BAR CHARTS: List each bar's category and its value/height.
 For LINE CHARTS: List each point's x and y values.
-For TABLES: STRICTLY output the table as a clean Markdown table format (| Col 1 | Col 2 | Col 3 |\n|---|---|---|) so it can be directly displayed and edited.
+For TABLES: STRICTLY output the table as a clean Markdown table format (| Col 1 | Col 2 | Col 3 |) so it can be directly displayed and edited.
 For DATA INTERPRETATION sets: Include the full directions text AND format any data tables as Markdown tables.
 
 DO NOT extract individual numbered questions or options (they are already extracted by the PDF text parser).
@@ -285,35 +435,56 @@ Output format:
 If no charts/tables/graphs are present, return an empty string.`;
 
   for (const model of candidateModels) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
+    const cooldownUntil = aiSessionState.modelCooldowns[model] || 0;
+    if (Date.now() < cooldownUntil) continue;
+
+    await geminiRateLimiter.acquire();
+
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout max
-      const response = await fetch(url, {
-        method: "POST",
-        signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { inline_data: { mime_type: mimeType, data: base64Image } },
-              { text: prompt }
-            ]
-          }],
-          generationConfig: {
-            temperature: 0.1,
-            thinkingConfig: { thinkingBudget: 0 }
-          },
-        }),
-      });
+      const timeoutId = setTimeout(() => {
+        controller.abort(new Error("Gemini Vision timed out after 50s"));
+      }, 50000); // 50 seconds timeout
+
+      const response = await fetchWith503Retry(() =>
+        fetch("/api/gemini", {
+          method: "POST",
+          signal: controller.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model,
+            contents: [{
+              parts: [
+                { inline_data: { mime_type: "image/jpeg", data: compressedBase64 } },
+                { text: prompt }
+              ]
+            }],
+            generationConfig: {
+              temperature: 0.1,
+            },
+          }),
+        })
+      );
       clearTimeout(timeoutId);
-      if (!response.ok) {
-        console.warn(`[AI Vision] Model ${model} returned status ${response.status}`);
+
+      if (response && response.status === 429) {
+        const errText = await response.text().catch(() => "");
+        const delayMs = parseRetryDelay(errText, response.headers);
+        aiSessionState.modelCooldowns[model] = Date.now() + delayMs;
+        console.warn(`[AI Vision] Gemini ${model} hit 429, cooling down for ${Math.round(delayMs / 1000)}s.`);
+        continue;
+      }
+
+      if (!response || !response.ok) {
+        console.warn(`[AI Vision] Model ${model} returned status ${response?.status}`);
         continue;
       }
       const data = await response.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (text.trim()) return text.trim();
+      if (text.trim()) {
+        aiSessionState.providerStats.Gemini += 1;
+        return text.trim();
+      }
     } catch (err) {
       console.warn(`[AI Vision] Model ${model} failed: ${err.message}`);
     }
@@ -321,55 +492,59 @@ If no charts/tables/graphs are present, return an empty string.`;
   return null;
 }
 
-// NVIDIA Nemotron Parse / Vision (Primary model for charts, tables, and document layout)
+// NVIDIA Nemotron Parse / Vision
 async function callNvidiaVisionPage(apiKey, base64Image, mimeType = "image/jpeg") {
-  if (!apiKey || !base64Image) return null;
-  // If base64Image is larger than 3.5MB, bypass Vercel proxy to avoid 500/400 payload limits
-  if (base64Image.length > 3500000) {
-    console.warn("[AI Vision] Page image too large for NVIDIA proxy (>3.5MB), falling back to Gemini Vision.");
-    return null;
-  }
-  const candidateModels = [
-    getEnvKey("VITE_NVIDIA_PARSE_MODEL"),
-    getEnvKey("VITE_NVIDIA_VISION_MODEL"),
-    NVIDIA_PARSE_MODEL,
-    "nvidia/nemotron-parse-2.0"
-  ].filter(Boolean);
+  if (aiSessionState.nvidiaDisabled || !base64Image) return null;
+
+  const compressedBase64 = await compressBase64Image(base64Image, 1500, 0.7);
+  const configuredModel = getEnvKey("VITE_NVIDIA_PARSE_MODEL") || getEnvKey("VITE_NVIDIA_VISION_MODEL") || NVIDIA_PARSE_MODEL;
+  const candidateModels = [configuredModel, "nvidia/nemotron-parse-2.0"].filter(Boolean);
 
   for (const model of candidateModels) {
+    if (aiSessionState.nvidiaDisabled) return null;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
+    const timeoutId = setTimeout(() => controller.abort(new Error("NVIDIA Vision timed out after 50s")), 50000);
     try {
       const response = await fetch("/api/nvidia/v1/chat/completions", {
         method: "POST",
         signal: controller.signal,
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: model,
           messages: [{ role: "user", content: [
             { type: "text", text: VISION_EXTRACTION_PROMPT },
-            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${compressedBase64}` } }
           ] }],
           temperature: 0.1,
-          max_tokens: 3000,
+          max_tokens: 2500,
         }),
       });
       clearTimeout(timeoutId);
+
+      if (response.status === 404) {
+        const errBody = await response.text().catch(() => "");
+        if (errBody.includes("Not found for account") || errBody.includes("Function") || response.status === 404) {
+          aiSessionState.nvidiaDisabled = true;
+          aiSessionState.nvidiaDisabledReason = `Vision model '${model}' not enabled for account (404)`;
+          console.warn(`[AI Vision] ⚠️ NVIDIA disabled for remainder of session: ${aiSessionState.nvidiaDisabledReason}`);
+          return null;
+        }
+      }
+
       if (response.ok) {
         const data = await response.json();
         const content = (data.choices?.[0]?.message?.content || "").trim();
-        if (content && content.length > 30) return content;
-      } else {
-        const status = response.status;
-        console.warn(`[AI Vision] NVIDIA model ${model} responded with status ${status}`);
-        if (status === 500 || status === 400 || status === 413) {
-          // Payload or proxy issue: return null so Gemini Vision seamlessly takes over
-          return null;
+        if (content && content.length > 30) {
+          aiSessionState.providerStats.NVIDIA += 1;
+          return content;
         }
+      } else {
+        console.warn(`[AI Vision] NVIDIA model ${model} responded with status ${response.status}`);
       }
     } catch (err) {
       clearTimeout(timeoutId);
       console.warn(`[AI Vision] NVIDIA model ${model} skipped:`, err.message);
+      if (aiSessionState.nvidiaDisabled) return null;
     }
   }
   return null;
@@ -443,58 +618,77 @@ async function callDeepSeek(apiKey, prompt) {
 
 // 6. NVIDIA API Provider
 async function callNvidia(apiKey, prompt) {
+  if (aiSessionState.nvidiaDisabled) {
+    throw new Error(`NVIDIA is disabled for this session: ${aiSessionState.nvidiaDisabledReason}`);
+  }
+
+  const configuredModel = getEnvKey("VITE_NVIDIA_MODEL") || getEnvKey("NVIDIA_MODEL");
   const candidateModels = [
-    getEnvKey("VITE_NVIDIA_MODEL"),
-    "nvidia/nemotron-3-ultra-550b-a55b",
-    "nvidia/nemotron-3.5-bolt-e4b",
+    configuredModel,
+    "nvidia/nemotron-4-340b-instruct",
+    "meta/llama-3.1-70b-instruct",
     NVIDIA_REASONING_MODEL
   ].filter(Boolean);
 
   let lastError = null;
   for (const model of candidateModels) {
+    if (aiSessionState.nvidiaDisabled) break;
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 60000); // 60-second timeout
+    const id = setTimeout(() => controller.abort(new Error("NVIDIA request timed out after 50s")), 50000);
 
     try {
       const response = await fetch("/api/nvidia/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: model,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.1,
-          max_tokens: 3500,
+          max_tokens: 3000,
         }),
         signal: controller.signal,
       });
       clearTimeout(id);
 
+      if (response.status === 404) {
+        const errBody = await response.text().catch(() => "");
+        if (errBody.includes("Not found for account") || errBody.includes("Function") || response.status === 404) {
+          aiSessionState.nvidiaDisabled = true;
+          aiSessionState.nvidiaDisabledReason = `Model '${model}' not enabled for account (404)`;
+          console.warn(`[AI] ⚠️ NVIDIA disabled for remainder of session: ${aiSessionState.nvidiaDisabledReason}`);
+          throw new Error(aiSessionState.nvidiaDisabledReason);
+        }
+      }
+
       if (!response.ok) {
         const errBody = await response.text().catch(() => "");
         console.warn(`[AI] NVIDIA model ${model} unavailable (${response.status}), trying next candidate...`);
         lastError = new Error(`NVIDIA API error (${response.status}): ${errBody || response.statusText}`);
-        if (response.status === 401) break; // Bad key
+        if (response.status === 401) break;
         continue;
       }
       const data = await response.json();
       const text = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "{}";
 
-      // Clean markdown fences if present
       const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
       const jsonStart = cleaned.indexOf("[");
       const jsonEnd = cleaned.lastIndexOf("]");
       if (jsonStart !== -1 && jsonEnd !== -1) {
-        return JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+        const parsed = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+        aiSessionState.providerStats.NVIDIA += Array.isArray(parsed) ? parsed.length : 1;
+        return parsed;
       }
       const parsed = JSON.parse(cleaned);
-      return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
+      const resArr = Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
+      aiSessionState.providerStats.NVIDIA += resArr.length;
+      return resArr;
     } catch (err) {
       clearTimeout(id);
       lastError = err;
       console.warn(`[AI] NVIDIA model ${model} attempt failed:`, err.message);
+      if (aiSessionState.nvidiaDisabled) throw err;
       if (err.message.includes("401") || err.message.includes("API Key")) throw err;
     }
   }
@@ -1803,27 +1997,43 @@ ${JSON.stringify(questionJson, null, 2)}
 """`;
 
 async function callGroq(apiKey, prompt) {
+  if (Date.now() < aiSessionState.groqCooldownUntil) {
+    const remainingSecs = Math.ceil((aiSessionState.groqCooldownUntil - Date.now()) / 1000);
+    throw new Error(`Groq is currently on cooldown for ${remainingSecs}s due to rate limits`);
+  }
+
+  const configuredModel = getEnvKey("VITE_GROQ_MODEL");
   const models = [
-    getEnvKey("VITE_GROQ_MODEL"),
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b"
+    configuredModel,
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it"
   ].filter(Boolean);
+
   let lastErr = null;
   for (const model of models) {
     try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      const response = await fetch("/api/groq", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: model,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.1,
-          max_tokens: 3500,
+          max_tokens: 750, // Strict limit <= 800 to prevent Groq OTPM 1000 exhaustion
         }),
       });
+
+      if (response.status === 429) {
+        const errText = await response.text().catch(() => "");
+        const delayMs = parseRetryDelay(errText, response.headers);
+        aiSessionState.groqCooldownUntil = Date.now() + delayMs;
+        console.warn(`[AI] Groq model ${model} hit 429 OTPM limit. Cooling down for ${Math.round(delayMs / 1000)}s.`);
+        lastErr = new Error(`Groq 429 Rate Limit: ${errText}`);
+        break;
+      }
 
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
@@ -1863,53 +2073,50 @@ async function callGroq(apiKey, prompt) {
         }
       }
       
-      return Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed || [];
+      const resArr = Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || parsed || [];
+      aiSessionState.providerStats.Groq += resArr.length;
+      return resArr;
     } catch (err) {
       console.warn(`[AI] Groq model ${model} failed:`, err.message);
       lastErr = err;
+      if (err.message.includes("429")) {
+        break;
+      }
       if (err.message.includes("401") || err.message.includes("Invalid API Key")) {
-        break; // Bad API key
+        break;
       }
     }
   }
   throw lastErr || new Error("All Groq models failed.");
 }
 
-
-
 async function callLLMChain(prompt) {
-  const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
-  const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
-  const groqKey = getEnvKey("VITE_GROQ_API_KEY") || getEnvKey("GROQ_API_KEY");
-  
   const providers = [];
-  if (nvidiaKey) providers.push({ name: "NVIDIA", fn: () => callNvidia(nvidiaKey, prompt) });
-  if (geminiKey) providers.push({ name: "Gemini", fn: () => callGemini(geminiKey, prompt) });
-  if (groqKey)   providers.push({ name: "Groq",   fn: () => callGroq(groqKey, prompt) });
-
-  if (providers.length === 0) {
-    throw new Error("No API key configured. Add at least one of: VITE_NVIDIA_API_KEY, VITE_GEMINI_API_KEY, or VITE_GROQ_API_KEY in your .env file.");
+  if (!aiSessionState.nvidiaDisabled) {
+    providers.push({ name: "NVIDIA", fn: () => callNvidia("", prompt) });
   }
+  providers.push({ name: "Gemini", fn: () => callGemini("", prompt) });
+  providers.push({ name: "Groq",   fn: () => callGroq("", prompt) });
 
   let lastError = null;
   for (let i = 0; i < providers.length; i++) {
     const { name, fn } = providers[i];
     try {
       const result = await fn();
-      if (i > 0) console.log(`[AI] ✅ ${name} succeeded as fallback.`);
+      if (i > 0) console.log(`[AI] ✅ ${name} succeeded as fallback in chain.`);
       return result;
     } catch (err) {
       lastError = err;
       const nextProvider = providers[i + 1]?.name;
       if (nextProvider) {
-        console.warn(`[AI] ${name} failed: ${err.message}. Falling back to ${nextProvider}...`);
+        console.warn(`[AI] ${name} failed in chain: ${err.message}. Falling back to ${nextProvider}...`);
       } else {
-        console.error(`[AI] ${name} failed: ${err.message}. No more providers to try.`);
+        console.error(`[AI] ${name} failed in chain: ${err.message}. No more providers to try.`);
       }
     }
   }
 
-  throw lastError || new Error("All AI providers failed.");
+  throw lastError || new Error("All AI providers in chain failed.");
 }
 
 /**
@@ -2375,12 +2582,14 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
   // Create an array of available provider callers: NVIDIA (Primary), Gemini (Secondary), Groq (Fallback)
   const providerCallers = [];
-  if (nvidiaKey) providerCallers.push({ name: "NVIDIA", call: (prompt) => callNvidia(nvidiaKey, prompt) });
-  if (geminiKey) providerCallers.push({ name: "Gemini", call: (prompt) => callGemini(geminiKey, prompt) });
-  if (groqKey)   providerCallers.push({ name: "Groq",   call: (prompt) => callGroq(groqKey, prompt) });
+  if (!aiSessionState.nvidiaDisabled) {
+    providerCallers.push({ name: "NVIDIA", call: (prompt) => callNvidia("", prompt) });
+  }
+  providerCallers.push({ name: "Gemini", call: (prompt) => callGemini("", prompt) });
+  providerCallers.push({ name: "Groq",   call: (prompt) => callGroq("", prompt) });
 
-  // How many parallel workers = min(number of providers, 3)
-  const CONCURRENCY = Math.min(providerCallers.length, 3) || 1;
+  // Concurrency limited to 1-2 to protect Gemini/Groq rate limits
+  const CONCURRENCY = Math.min(providerCallers.length, 2) || 1;
   console.log(`[AI] 🚀 Fast extraction active with ${CONCURRENCY} worker(s) (${providerCallers.map(p => p.name).join(" + ") || "Fallback Chain"})`);
 
   // Each worker gets a preferred provider, with the full chain as fallback
@@ -2472,14 +2681,15 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
           };
         }).filter(Boolean);
 
-        if (parsedQuestions.length >= expectedCount || (parsedQuestions.length >= expectedCount - 1 && attempt > 0)) {
+        // Accept >= 4 questions per chunk to eliminate quota-burning retries
+        if (parsedQuestions.length >= expectedCount || parsedQuestions.length >= 4 || (expectedCount <= 3 && parsedQuestions.length >= expectedCount - 1)) {
           console.log(`[AI] ✅ Success: ${parsedQuestions.length} questions from Chunk ${index + 1}`);
           chunkQuestions = parsedQuestions;
           break;
-        } else if (attempt === 0 && expectedCount > 1 && parsedQuestions.length < expectedCount - 1) {
-          console.warn(`[AI] Chunk ${index + 1} returned ${parsedQuestions.length}/${expectedCount}; retrying instead of silently dropping questions.`);
+        } else if (attempt === 0 && expectedCount > 3 && parsedQuestions.length < 4) {
+          console.warn(`[AI] Chunk ${index + 1} returned ${parsedQuestions.length}/${expectedCount}; retrying...`);
         } else {
-          console.warn(`[AI] Chunk ${index + 1} extracted: ${parsedQuestions.length} questions.`);
+          console.warn(`[AI] Chunk ${index + 1} accepted: ${parsedQuestions.length} questions.`);
           chunkQuestions = parsedQuestions;
           break;
         }
@@ -2676,6 +2886,17 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   if (uniqueQuestions.length === 0) {
     throw new Error("Extraction failed. No valid questions were found in the PDF by both AI and fallback engines.");
   }
+
+  // Summary log of AI question extraction
+  console.log("%c=== 📊 AI QUESTION GENERATION SUMMARY ===", "color: #10B981; font-weight: bold; font-size: 14px;");
+  console.log(`Total questions extracted: ${uniqueQuestions.length}`);
+  console.log("Questions by Provider:");
+  const anyGeminiCooldown = Object.keys(aiSessionState.modelCooldowns).some(m => aiSessionState.modelCooldowns[m] > Date.now());
+  const groqCooldown = Date.now() < aiSessionState.groqCooldownUntil;
+  console.log(`  • Gemini: ${aiSessionState.providerStats.Gemini} questions (Status: ${anyGeminiCooldown ? "Some models in cooldown" : "Active"})`);
+  console.log(`  • Groq: ${aiSessionState.providerStats.Groq} questions (Status: ${groqCooldown ? "Cooled Down" : "Active"})`);
+  console.log(`  • NVIDIA: ${aiSessionState.providerStats.NVIDIA} questions (Status: ${aiSessionState.nvidiaDisabled ? `Disabled (${aiSessionState.nvidiaDisabledReason})` : "Active"})`);
+  console.log("==========================================");
 
   return {
     id: `mock_${Date.now()}`,
