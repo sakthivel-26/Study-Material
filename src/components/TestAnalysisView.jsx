@@ -15,8 +15,7 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
   const { pushToast } = useApp();
   const { user } = useAuth();
 
-  const [activeTab, setActiveTab] = useState(initialTab); // "overview" | "solution" | "compare" | "strongWeak" | "speed"
-  const [marksAnalysisSubtab, setMarksAnalysisSubtab] = useState("topper"); // "topper" | "past"
+  const [activeTab, setActiveTab] = useState(initialTab === 'solution' ? 'solution' : 'overview');
   const [selectedRating, setSelectedRating] = useState(0);
   const [showRatingModal, setShowRatingModal] = useState(false);
 
@@ -295,11 +294,7 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
         <div className="max-w-7xl mx-auto flex items-center gap-6 text-xs md:text-sm font-bold text-slate-600">
           {[
             { id: "overview", label: "Overview" },
-            { id: "solution", label: "Solution" },
-            { id: "compare", label: "Compare" },
-            { id: "strongWeak", label: "Strong Vs Weak Areas" },
-            { id: "speed", label: "Speed & Accuracy" },
-            { id: "marksPercentile", label: "Marks vs Percentile" }
+            { id: "solution", label: "Solution" }
           ].map(tab => (
             <button
               key={tab.id}
@@ -533,120 +528,6 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
                 </div>
               </div>
 
-              {/* Marks Analysis Section (Topper vs You) */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                  <h3 className="font-extrabold text-base text-slate-900">Marks Analysis</h3>
-                  <div className="flex items-center gap-2 text-xs font-bold">
-                    <button
-                      onClick={() => setMarksAnalysisSubtab("topper")}
-                      className={`px-3 py-1 rounded-lg transition-colors ${
-                        marksAnalysisSubtab === "topper"
-                          ? "bg-[#1B4F72] text-white"
-                          : "bg-white border text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      Topper vs You
-                    </button>
-                    <button
-                      onClick={() => setMarksAnalysisSubtab("past")}
-                      className={`px-3 py-1 rounded-lg transition-colors ${
-                        marksAnalysisSubtab === "past"
-                          ? "bg-[#1B4F72] text-white"
-                          : "bg-white border text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      Your Past vs You
-                    </button>
-                  </div>
-                </div>
-
-                {marksAnalysisSubtab === "topper" ? (
-                  <div className="grid md:grid-cols-3 gap-4">
-                    {/* Topper Card */}
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
-                      <div className="flex items-center justify-between text-xs font-bold text-amber-600">
-                        <span>Rank #1 (Topper)</span>
-                        <Award size={16} />
-                      </div>
-                      <div className="text-2xl font-black text-slate-900">
-                        91.25 <span className="text-xs text-slate-400">/ 100</span>
-                      </div>
-                      <div className="space-y-1.5 text-xs text-slate-600 pt-2 border-t border-slate-100">
-                        <p className="flex justify-between">
-                          <span>Accuracy:</span>
-                          <strong className="text-emerald-600">96.8%</strong>
-                        </p>
-                        <p className="flex justify-between">
-                          <span>Time / Question:</span>
-                          <strong>38s</strong>
-                        </p>
-                        <p className="flex justify-between">
-                          <span>Attempted:</span>
-                          <strong>94 Qs</strong>
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Average Candidate */}
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
-                      <div className="flex items-center justify-between text-xs font-bold text-blue-600">
-                        <span>Average Performer</span>
-                        <BarChart2 size={16} />
-                      </div>
-                      <div className="text-2xl font-black text-slate-900">
-                        48.50 <span className="text-xs text-slate-400">/ 100</span>
-                      </div>
-                      <div className="space-y-1.5 text-xs text-slate-600 pt-2 border-t border-slate-100">
-                        <p className="flex justify-between">
-                          <span>Accuracy:</span>
-                          <strong className="text-blue-600">68.4%</strong>
-                        </p>
-                        <p className="flex justify-between">
-                          <span>Time / Question:</span>
-                          <strong>52s</strong>
-                        </p>
-                        <p className="flex justify-between">
-                          <span>Attempted:</span>
-                          <strong>62 Qs</strong>
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Your Performance */}
-                    <div className="bg-white rounded-2xl border-2 border-[#1B4F72] p-5 space-y-3 relative shadow-xs">
-                      <div className="flex items-center justify-between text-xs font-bold text-[#1B4F72]">
-                        <span>Your Performance</span>
-                        <Target size={16} />
-                      </div>
-                      <div className="text-2xl font-black text-[#1B4F72]">
-                        {score} <span className="text-xs text-slate-400">/ {totalMarks}</span>
-                      </div>
-                      <div className="space-y-1.5 text-xs text-slate-600 pt-2 border-t border-slate-100">
-                        <p className="flex justify-between">
-                          <span>Accuracy:</span>
-                          <strong className="text-purple-700">{accuracy}%</strong>
-                        </p>
-                        <p className="flex justify-between">
-                          <span>Time / Question:</span>
-                          <strong>{Math.max(1, Math.round((attempt.timeSpentSeconds || 3600) / totalQuestions))}s</strong>
-                        </p>
-                        <p className="flex justify-between">
-                          <span>Attempted:</span>
-                          <strong>{totalCorrect + totalIncorrect} Qs</strong>
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center space-y-2">
-                    <p className="font-bold text-sm text-slate-800">Historical Comparison Active</p>
-                    <p className="text-xs text-slate-500 max-w-md mx-auto">
-                      All your previous attempts are tracked on the KEN IAS Academy database. Attempt this mock test again to view your progress trend graph!
-                    </p>
-                  </div>
-                )}
-              </div>
             </div>
           )}
 
@@ -864,49 +745,6 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
             </div>
           )}
 
-          {/* TAB 3: COMPARE & ANALYTICS */}
-          {(activeTab === "compare" || activeTab === "strongWeak" || activeTab === "speed" || activeTab === "marksPercentile") && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-6 shadow-xs">
-              <div className="border-b border-slate-200 pb-3">
-                <h3 className="font-black text-base text-slate-900">
-                  {activeTab === "compare" ? "Comprehensive Peer & Topper Comparison" : activeTab === "strongWeak" ? "Strong vs Weak Topic Areas" : "Speed & Accuracy Distribution"}
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Detailed analytics computed from live test-taker cohorts across Tamil Nadu and National banking aspirants.
-                </p>
-              </div>
-
-              <div className="grid md:grid-cols-3 gap-6">
-                <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2">
-                  <p className="text-xs font-bold text-emerald-800">Your Strongest Section</p>
-                  <p className="text-lg font-black text-emerald-900">
-                    {sections.slice().sort((a, b) => (b.score || 0) - (a.score || 0))[0]?.name || "Reasoning"}
-                  </p>
-                  <p className="text-xs text-emerald-700">
-                    Higher accuracy achieved with steady time management.
-                  </p>
-                </div>
-
-                <div className="p-4 bg-rose-50 rounded-xl border border-rose-200 space-y-2">
-                  <p className="text-xs font-bold text-rose-800">Needs Focus Area</p>
-                  <p className="text-lg font-black text-rose-900">
-                    {sections.slice().sort((a, b) => (a.score || 0) - (b.score || 0))[0]?.name || "Quantitative Aptitude"}
-                  </p>
-                  <p className="text-xs text-rose-700">
-                    Target increasing question attempt speed and reducing negative penalty.
-                  </p>
-                </div>
-
-                <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 space-y-2">
-                  <p className="text-xs font-bold text-blue-800">Overall Accuracy</p>
-                  <p className="text-lg font-black text-blue-900">{accuracy}%</p>
-                  <p className="text-xs text-blue-700">
-                    Aim for 85%+ accuracy for clearing Bank PO & Clerk Prelims cutoffs.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 

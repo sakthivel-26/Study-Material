@@ -30,7 +30,7 @@ export function extractTextWithMathPreservation(textContent) {
       const w = it.width || (it.str.length * 6);
       const h = it.height || Math.abs(transform[0]) || 10;
       return {
-        str: it.str,
+        str: it.str.normalize('NFKC'),
         x,
         y,
         w,
@@ -41,25 +41,45 @@ export function extractTextWithMathPreservation(textContent) {
 
   if (rawItems.length === 0) return "";
 
-  // Sort items from top of page to bottom of page (Y descending in standard PDF coords)
-  rawItems.sort((a, b) => b.y - a.y || a.x - b.x);
+  // A stacked fraction may span three visual lines. Join its small numerator
+  // and denominator before line clustering, so mixed fractions stay with the
+  // surrounding question instead of becoming stray lines.
+  const consumed = new Set();
+  const fractions = [];
+  for (let i = 0; i < rawItems.length; i++) {
+    const top = rawItems[i];
+    if (consumed.has(i) || !/^\d+$/.test(top.str.trim()) || top.h > 11) continue;
+    const partner = rawItems.findIndex((bottom, j) => j !== i && !consumed.has(j) &&
+      /^\d+$/.test(bottom.str.trim()) && bottom.h <= 11 &&
+      Math.abs(top.x - bottom.x) < 5 && top.y - bottom.y >= 10 && top.y - bottom.y <= 24 &&
+      rawItems.some(base => base.h >= 12 && Math.abs(base.y - (top.y + bottom.y) / 2) < 4 &&
+        base.x < top.x && top.x - (base.x + base.w) < 40));
+    if (partner < 0) continue;
+    const bottom = rawItems[partner];
+    consumed.add(i);
+    consumed.add(partner);
+    fractions.push({ ...top, str: `${top.str.trim()}/${bottom.str.trim()}`,
+      y: (top.y + bottom.y) / 2, h: 13, w: Math.max(top.w, bottom.w) });
+  }
+  const layoutItems = rawItems.filter((_, index) => !consumed.has(index)).concat(fractions);
 
-  // Cluster items into visual lines (tolerance: 8 points to catch baselines + sub/superscripts)
+  // Sort items from top of page to bottom of page (Y descending in standard PDF coords)
+  layoutItems.sort((a, b) => b.y - a.y || a.x - b.x);
+
+  // Powers in this paper sit up to 11 points above the baseline.
   const lines = [];
-  for (const item of rawItems) {
+  for (const item of layoutItems) {
     let matchedLine = null;
     for (const line of lines) {
-      if (Math.abs(line.baseY - item.y) <= 8) {
+      if (Math.abs(line.baseY - item.y) <= 13) {
         matchedLine = line;
         break;
       }
     }
     if (matchedLine) {
       matchedLine.items.push(item);
-      // Keep baseY anchored to dominant standard font items (height >= 9)
-      if (item.h >= 9) {
-        matchedLine.baseY = (matchedLine.baseY * matchedLine.items.length + item.y) / (matchedLine.items.length + 1);
-      }
+      // Anchor to normal-size text, never to a small superscript.
+      if (item.h >= 12) matchedLine.baseY = item.y;
     } else {
       lines.push({ baseY: item.y, items: [item] });
     }
@@ -68,9 +88,55 @@ export function extractTextWithMathPreservation(textContent) {
   // Sort lines from top to bottom
   lines.sort((a, b) => b.baseY - a.baseY);
 
+  // Banking papers commonly use two independent columns. PDF.js returns both
+  // columns at the same Y coordinate, so a plain Y/X sort interleaves Q3 with
+  // Q7 and corrupts passages, options, and solutions. Locate the gutter from
+  // repeated Q/S number markers, then read the complete left column before the
+  // complete right column. Pages without strong two-column evidence retain
+  // their original full-width order.
+  const orderColumns = (sourceLines) => {
+    const markerXs = sourceLines.flatMap(line => line.items)
+      .filter(item => /^(?:Q|S)\s*\d{1,3}[.):]?/i.test(item.str.trim()))
+      .map(item => item.x)
+      .sort((a, b) => a - b);
+    if (markerXs.length < 4) return sourceLines;
+    let splitAt = -1;
+    let largestGap = 0;
+    for (let j = 1; j < markerXs.length; j++) {
+      const gap = markerXs[j] - markerXs[j - 1];
+      if (gap > largestGap) {
+        largestGap = gap;
+        splitAt = (markerXs[j] + markerXs[j - 1]) / 2;
+      }
+    }
+    const leftMarkers = markerXs.filter(x => x < splitAt).length;
+    const rightMarkers = markerXs.length - leftMarkers;
+    if (largestGap >= 70 && leftMarkers >= 2 && rightMarkers >= 2) {
+      const leftLines = sourceLines
+        .map(line => ({ ...line, items: line.items.filter(item => item.x < splitAt) }))
+        .filter(line => line.items.length);
+      const rightLines = sourceLines
+        .map(line => ({ ...line, items: line.items.filter(item => item.x >= splitAt) }))
+        .filter(line => line.items.length);
+      return [...leftLines, ...rightLines];
+    }
+    return sourceLines;
+  };
+  // A section heading can begin halfway down the final question page. Treat it
+  // as a horizontal band boundary so S1/S2 below it are not emitted before
+  // Q96-Q100 in the upper-right column.
+  const solutionDivider = lines.findIndex(line => line.items.some(item => /^Solutions?$/i.test(item.str.trim())));
+  const orderedLines = solutionDivider >= 0
+    ? [
+        ...orderColumns(lines.slice(0, solutionDivider)),
+        lines[solutionDivider],
+        ...orderColumns(lines.slice(solutionDivider + 1)),
+      ]
+    : orderColumns(lines);
+
   let fullPageText = "";
 
-  for (const line of lines) {
+  for (const line of orderedLines) {
     // Sort items horizontally within the line
     line.items.sort((a, b) => a.x - b.x);
 
@@ -110,7 +176,16 @@ export function extractTextWithMathPreservation(textContent) {
 
       // 2. Detect superscript exponent (higher Y by 3-12pt and smaller height)
       const isSuper = (cur.y - line.baseY >= 2.8) && (cur.y - line.baseY <= 14);
-      const isDigitOrFrac = /^[0-9\+\-\/\(\)]+$/.test(cur.str.trim());
+      const isDigitOrFrac = /^[0-9?\+\-\/\(\)]+$/.test(cur.str.trim());
+
+      // A small 3 immediately to the upper left of √ is the cube-root index.
+      if (cur.str.trim() === '3' && cur.h < 9 && isSuper && next?.str.startsWith('√') &&
+        next.x - (cur.x + cur.w) < 6) {
+        lineText += '∛';
+        next.str = next.str.slice(1);
+        i++;
+        continue;
+      }
 
       if (isSuper && isDigitOrFrac && lineText.length > 0 && !lineText.endsWith(" ") && !lineText.endsWith("\n")) {
         const trimmed = cur.str.trim();
@@ -140,7 +215,7 @@ export function extractTextWithMathPreservation(textContent) {
       i++;
     }
 
-    const trimmedLine = lineText.trim();
+    const trimmedLine = lineText.trim().replace(/(∛\d+)\.\s+(\d+)/g, '$1.$2');
     if (trimmedLine) {
       fullPageText += trimmedLine + "\n";
     }

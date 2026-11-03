@@ -15,7 +15,8 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+  const suppliedKey = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const apiKey = suppliedKey || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: "GEMINI_API_KEY is not configured in environment variables." });
   }

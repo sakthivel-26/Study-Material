@@ -53,7 +53,7 @@ export default function RealExamRunner({ test, onClose }) {
   const parsedSections = Array.from(new Set(rawQuestions.map(q => q.section || "General")));
   const defaultSectionsList = parsedSections.length > 0 ? parsedSections : ["General"];
 
-  const sectionsConfig = Array.isArray(test?.sectionsConfig) && test.sectionsConfig.length > 0
+  const configuredSections = Array.isArray(test?.sectionsConfig) && test.sectionsConfig.length > 0
     ? test.sectionsConfig
     : defaultSectionsList.map((secName) => {
         const qCount = rawQuestions.filter(q => (q.section || "General") === secName).length || 1;
@@ -65,6 +65,15 @@ export default function RealExamRunner({ test, onClose }) {
           questionCount: qCount
         };
       });
+
+  const requestedMinutes = Number.parseInt(String(test?.time || ''), 10) || Number(test?.durationMinutes) || 0;
+  const configuredMinutes = configuredSections.reduce((sum, sec) => sum + (Number(sec.durationMinutes) || 0), 0);
+  const sectionsConfig = requestedMinutes > 0 && configuredMinutes !== requestedMinutes
+    ? configuredSections.map((sec, index) => ({ ...sec,
+        durationMinutes: index === configuredSections.length - 1
+          ? Math.max(1, requestedMinutes - Math.floor(requestedMinutes / configuredSections.length) * index)
+          : Math.max(1, Math.floor(requestedMinutes / configuredSections.length)) }))
+    : configuredSections;
 
   // Group questions by section
   const sectionQuestionsMap = {};
@@ -156,6 +165,10 @@ export default function RealExamRunner({ test, onClose }) {
   // Timers:
   // Track sectional timer for current section
   const [sectionTimeLeft, setSectionTimeLeft] = useState(() => (currentSection.durationMinutes || 20) * 60);
+  const sectionDeadlineRef = useRef(null);
+  const examStartedAtRef = useRef(null);
+  const submittedRef = useRef(false);
+  const wasPausedRef = useRef(false);
   const [isPaused, setIsPaused] = useState(false);
   const [showSectionSubmitConfirm, setShowSectionSubmitConfirm] = useState(false);
   const [showSectionInfoModal, setShowSectionInfoModal] = useState(null);
@@ -178,25 +191,31 @@ export default function RealExamRunner({ test, onClose }) {
   useEffect(() => {
     if (screenPhase === "exam") {
       const durationSecs = (currentSection.durationMinutes || 20) * 60;
+      if (!examStartedAtRef.current) examStartedAtRef.current = Date.now();
+      sectionDeadlineRef.current = Date.now() + durationSecs * 1000;
       setSectionTimeLeft(durationSecs);
       setCurrentQIndexInSection(0);
     }
   }, [currentSectionIndex, screenPhase]);
 
+  useEffect(() => {
+    if (screenPhase !== 'exam') return;
+    if (isPaused) wasPausedRef.current = true;
+    else if (wasPausedRef.current) {
+      sectionDeadlineRef.current = Date.now() + sectionTimeLeft * 1000;
+      wasPausedRef.current = false;
+    }
+  }, [isPaused, screenPhase]);
+
   // Section countdown interval (re-starts reliably when section changes or resumes from pause)
   useEffect(() => {
     if (screenPhase !== "exam" || isPaused) return;
 
-    const timer = setInterval(() => {
-      setSectionTimeLeft(prev => {
-        if (prev <= 1) {
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
+    if (!sectionDeadlineRef.current) sectionDeadlineRef.current = Date.now() + sectionTimeLeft * 1000;
+    const updateRemaining = () => setSectionTimeLeft(Math.max(0, Math.ceil((sectionDeadlineRef.current - Date.now()) / 1000)));
+    const timer = setInterval(updateRemaining, 500);
+    document.addEventListener('visibilitychange', updateRemaining);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', updateRemaining); };
   }, [screenPhase, isPaused, currentSectionIndex]);
 
   // Handle section countdown expiry (Auto-switch to next section or auto-submit on last section)
@@ -214,6 +233,7 @@ export default function RealExamRunner({ test, onClose }) {
         setCurrentSectionIndex(nextIdx);
         setCurrentQIndexInSection(0);
         setSectionTimeLeft((nextSec.durationMinutes || 20) * 60);
+        sectionDeadlineRef.current = Date.now() + (nextSec.durationMinutes || 20) * 60_000;
       } else {
         pushToast("⏰ Examination time completed! Auto-submitting all answers...");
         calculateFinalResults(answersRef.current);
@@ -281,11 +301,9 @@ export default function RealExamRunner({ test, onClose }) {
   // ---------------------------------------------------------
   const handleSelectOption = (optIndex) => {
     if (screenPhase !== "exam" || isPaused) return;
-    setAnswers(prev => {
-      const next = { ...prev, [activeQuestion.id]: optIndex };
-      answersRef.current = next;
-      return next;
-    });
+    const nextAnswers = { ...answersRef.current, [activeQuestion.id]: optIndex };
+    answersRef.current = nextAnswers;
+    setAnswers(nextAnswers);
     // Immediately mark as answered (or answered & marked for review) so palette updates and response is saved
     setStatus(prev => {
       const cur = prev[activeQuestion.id];
@@ -298,12 +316,10 @@ export default function RealExamRunner({ test, onClose }) {
 
   const handleClearResponse = () => {
     if (screenPhase !== "exam" || isPaused) return;
-    setAnswers(prev => {
-      const next = { ...prev };
-      delete next[activeQuestion.id];
-      answersRef.current = next;
-      return next;
-    });
+    const nextAnswers = { ...answersRef.current };
+    delete nextAnswers[activeQuestion.id];
+    answersRef.current = nextAnswers;
+    setAnswers(nextAnswers);
     setStatus(prev => {
       const next = { ...prev, [activeQuestion.id]: "not_answered" };
       statusRef.current = next;
@@ -377,6 +393,7 @@ export default function RealExamRunner({ test, onClose }) {
       setCurrentSectionIndex(nextIdx);
       setCurrentQIndexInSection(0);
       setSectionTimeLeft((nextSec.durationMinutes || 20) * 60);
+      sectionDeadlineRef.current = Date.now() + (nextSec.durationMinutes || 20) * 60_000;
       pushToast(`Now starting section: ${nextSec.name}`);
     } else {
       // Final submission of entire test with latest answers
@@ -385,7 +402,10 @@ export default function RealExamRunner({ test, onClose }) {
   };
 
   const calculateFinalResults = (providedAnswers = null) => {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
     const activeAnswers = providedAnswers || answersRef.current || answers;
+    const elapsedSeconds = Math.max(1, Math.round((Date.now() - (examStartedAtRef.current || Date.now())) / 1000));
     let totalScore = 0;
     let totalCorrect = 0;
     let totalIncorrect = 0;
@@ -393,7 +413,7 @@ export default function RealExamRunner({ test, onClose }) {
 
     const allQuestions = rawQuestionsRef.current?.length > 0 ? rawQuestionsRef.current : rawQuestions;
     const totalQs = allQuestions.length || 1;
-    const totalDurationSecs = (Number(test?.durationMinutes) || 60) * 60;
+    const totalDurationSecs = sectionsConfig.reduce((sum, sec) => sum + (Number(sec.durationMinutes) || 0), 0) * 60;
     const configs = sectionsConfigRef.current || sectionsConfig;
     const qMap = sectionQuestionsMapRef.current || sectionQuestionsMap;
 
@@ -431,7 +451,9 @@ export default function RealExamRunner({ test, onClose }) {
         correct: secCorrect,
         incorrect: secIncorrect,
         unattempted: secUnattempted,
-        timeTaken: (sec.durationMinutes || 20) + " Mins",
+        timeTaken: configs.length === 1
+          ? `${String(Math.floor(elapsedSeconds / 60)).padStart(2, '0')}:${String(elapsedSeconds % 60).padStart(2, '0')}`
+          : (sec.durationMinutes || 20) + " Mins",
         cutoff: secCutoff,
         score: Math.max(0, secScore),
         percentage: secPercentage,
@@ -454,14 +476,14 @@ export default function RealExamRunner({ test, onClose }) {
       testId: test?.id || ("test_" + Date.now()),
       testTitle: test?.title || "IBPS Clerk Mock Test",
       category: test?.category || "Banking",
-      startedAt: new Date(Date.now() - (totalDurationSecs - sectionTimeLeft) * 1000).toLocaleString("en-IN", {
+      startedAt: new Date(examStartedAtRef.current || Date.now()).toLocaleString("en-IN", {
         month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
       }),
       completedAt: now.toLocaleString("en-IN", {
         month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
       }),
       totalDurationSeconds: totalDurationSecs,
-      timeSpentSeconds: Math.max(1, totalDurationSecs - sectionTimeLeft),
+      timeSpentSeconds: elapsedSeconds,
       totalMarks: totalQs,
       cutoffMarks: finalCutoff,
       score: finalScore,
@@ -1340,6 +1362,9 @@ export default function RealExamRunner({ test, onClose }) {
         attempt={resultsData}
         initialTab="overview"
         onRetake={() => {
+          submittedRef.current = false;
+          examStartedAtRef.current = null;
+          sectionDeadlineRef.current = null;
           setScreenPhase("instructions");
           setAnswers({});
           setStatus({});
@@ -1362,6 +1387,9 @@ export default function RealExamRunner({ test, onClose }) {
         attempt={resultsData}
         initialTab="solution"
         onRetake={() => {
+          submittedRef.current = false;
+          examStartedAtRef.current = null;
+          sectionDeadlineRef.current = null;
           setScreenPhase("instructions");
           setAnswers({});
           setStatus({});

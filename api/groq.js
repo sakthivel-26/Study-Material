@@ -13,19 +13,20 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const apiKey = process.env.GROQ_API_KEY || process.env.VITE_GROQ_API_KEY;
+  const suppliedKey = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const apiKey = suppliedKey || process.env.GROQ_API_KEY || process.env.VITE_GROQ_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: "GROQ_API_KEY is not configured in environment variables." });
   }
 
   try {
-    const { model, messages, temperature = 0.1, max_tokens = 800, response_format } = req.body || {};
+    const { model, messages, temperature = 0.1, max_tokens = 4096, response_format } = req.body || {};
 
     const payload = {
       model: model || "llama-3.3-70b-versatile",
       messages: messages || [],
       temperature,
-      max_tokens: Math.min(Number(max_tokens) || 800, 800), // Enforce safe token limit for Groq
+      max_tokens: Math.min(Math.max(Number(max_tokens) || 4096, 1), 4096),
     };
 
     if (response_format) {

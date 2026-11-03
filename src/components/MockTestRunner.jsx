@@ -24,19 +24,20 @@ export default function MockTestRunner({ test, onClose }) {
         if (!Array.isArray(opts) || opts.length === 0) {
           opts = ["Option A", "Option B", "Option C", "Option D"];
         }
-        const finalLetter = q.ai_verified_answer || q.source_answer || "A";
-        const ansIndex = Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65);
-        const sol = q.solutionText || q.explanation || q.verification_explanation || "Verified answer.";
+        const finalLetter = q.ai_verified_answer || q.source_answer || "";
+        const ansIndex = finalLetter ? Math.max(0, finalLetter.toUpperCase().charCodeAt(0) - 65) : null;
+        const sol = q.solutionText || q.explanation || q.verification_explanation || "";
         return {
           id: q.id || `q_${idx}`,
           question: q.question_text || q.question || `Question ${idx + 1}`,
           options: opts,
-          correctAnswerIndex: ansIndex < opts.length ? ansIndex : 0,
+          correctAnswerIndex: ansIndex !== null && ansIndex < opts.length ? ansIndex : null,
           explanation: sol,
           solutionText: sol,
           section: q.section || "General",
           passage: q.passage || "",
           imageUrl: q.imageUrl || q.image || q.chartUrl || q.img || "",
+          imageUrls: q.imageUrls || q.chartImageUrls || [],
           solutionImageUrl: q.solutionImageUrl || ""
         };
       })
@@ -45,6 +46,8 @@ export default function MockTestRunner({ test, onClose }) {
   const minutes = minutesFromTime || Number(test?.durationMinutes) || 30;
   const totalDurationSeconds = Math.max(1, minutes) * 60;
   const [timeLeft, setTimeLeft] = useState(totalDurationSeconds);
+  const deadlineRef = useRef(Date.now() + totalDurationSeconds * 1000);
+  const submittedRef = useRef(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [direction, setDirection] = useState(1);
   const [answers, setAnswers] = useState({}); // { [qId]: optionIndex }
@@ -293,11 +296,11 @@ export default function MockTestRunner({ test, onClose }) {
       handleSubmitTest(answersRef.current);
       return;
     }
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => Math.max(0, prev - 1));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [timeLeft, viewState]);
+    const updateRemaining = () => setTimeLeft(Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000)));
+    const timer = setInterval(updateRemaining, 500);
+    document.addEventListener('visibilitychange', updateRemaining);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', updateRemaining); };
+  }, [viewState, timeLeft === 0]);
 
   // Mark visited
   useEffect(() => {
@@ -310,22 +313,18 @@ export default function MockTestRunner({ test, onClose }) {
 
   const selectOption = (optIndex) => {
     if (viewState !== "test") return;
-    setAnswers((prev) => {
-      const next = { ...prev, [currentQ.id]: optIndex };
-      answersRef.current = next;
-      return next;
-    });
+    const nextAnswers = { ...answersRef.current, [currentQ.id]: optIndex };
+    answersRef.current = nextAnswers;
+    setAnswers(nextAnswers);
     setStatus((prev) => ({ ...prev, [currentQ.id]: "answered" }));
   };
 
   const clearResponse = () => {
     if (viewState !== "test") return;
-    setAnswers((prev) => {
-      const copy = { ...prev };
-      delete copy[currentQ.id];
-      answersRef.current = copy;
-      return copy;
-    });
+    const nextAnswers = { ...answersRef.current };
+    delete nextAnswers[currentQ.id];
+    answersRef.current = nextAnswers;
+    setAnswers(nextAnswers);
     setStatus((prev) => ({ ...prev, [currentQ.id]: "not_answered" }));
   };
 
@@ -361,6 +360,8 @@ export default function MockTestRunner({ test, onClose }) {
   };
 
   const handleSubmitTest = (providedAnswers = null) => {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
     setConfirmSubmit(false);
     const activeAnswers = providedAnswers || answersRef.current || answers;
     const allQuestions = questionsRef.current?.length > 0 ? questionsRef.current : questions;
@@ -529,6 +530,9 @@ export default function MockTestRunner({ test, onClose }) {
         attempt={results}
         initialTab="overview"
         onRetake={() => {
+          submittedRef.current = false;
+          deadlineRef.current = Date.now() + totalDurationSeconds * 1000;
+          answersRef.current = {};
           setViewState("test");
           setTimeLeft(totalDurationSeconds);
           setAnswers({});
@@ -791,11 +795,12 @@ export default function MockTestRunner({ test, onClose }) {
                       {showSolutionAccordion && (
                         <div className="mt-4 space-y-3">
                           <BeginnerSolutionView
-                            explanation={currentQ.solutionText || currentQ.explanation || `Correct Option is (${String.fromCharCode(65 + (currentQ.correctAnswerIndex || 0))})`}
+                            explanation={currentQ.solutionText || currentQ.explanation || (Number.isInteger(currentQ.correctAnswerIndex) ? `The paper marks option ${String.fromCharCode(65 + currentQ.correctAnswerIndex)} as correct. A worked solution was not provided in the PDF.` : 'A worked solution is not available yet. Review this question before publishing.')}
                             correctAnswerIndex={currentQ.correctAnswerIndex}
                             options={currentQ.options}
                             question={currentQ.question}
                             passage={currentQ.passage}
+                            section={currentQ.section}
                             compact={true}
                           />
                           {currentQ.solutionImageUrl && (

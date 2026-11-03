@@ -13,6 +13,7 @@
     "firebase": "^10.14.1",
     "framer-motion": "^11.11.9",
     "lucide-react": "^0.454.0",
+    "mammoth": "^1.11.0",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^6.2.108",
     "razorpay": "^2.9.8",

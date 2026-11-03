@@ -139,7 +139,8 @@ export default function BeginnerSolutionView({
   options = [],
   compact = false,
   question = "",
-  passage = ""
+  passage = "",
+  section = ""
 }) {
   const steps = parseExplanationSteps(explanation);
   const correctOptLetter = correctAnswerIndex != null && correctAnswerIndex >= 0
@@ -173,7 +174,7 @@ export default function BeginnerSolutionView({
       <DirectionDiagramView text={fullDirectionSource} compact={compact} />
 
       {/* Visual Venn Diagram for Syllogism Questions */}
-      <SyllogismDiagramView text={fullDirectionSource} compact={compact} />
+      {/reasoning/i.test(section) && <SyllogismDiagramView text={fullDirectionSource} compact={compact} />}
 
       {/* Structured Steps for Beginners */}
       <div className="space-y-2.5">

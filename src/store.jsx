@@ -633,9 +633,10 @@ export function AppProvider({ children }) {
     if (!testAttempts || testAttempts.length === 0) return null;
     const currentUid = user?.id || null;
     return testAttempts.find(a => {
-      if (currentUid && a.userId && a.userId !== currentUid) return false;
+      if (currentUid && a.userId !== currentUid) return false;
+      if (!currentUid && a.userId && a.userId !== 'guest') return false;
       if (testId != null && a.testId != null && String(a.testId) === String(testId)) return true;
-      if (testTitle && a.testTitle) {
+      if ((testId == null || a.testId == null) && testTitle && a.testTitle) {
         const t1 = String(a.testTitle).toLowerCase().replace(/[^a-z0-9]/g, "");
         const t2 = String(testTitle).toLowerCase().replace(/[^a-z0-9]/g, "");
         if (t1 === t2 || (t1.length > 6 && (t2.includes(t1) || t1.includes(t2)))) return true;
@@ -648,9 +649,10 @@ export function AppProvider({ children }) {
     if (!testAttempts || testAttempts.length === 0) return [];
     const currentUid = user?.id || null;
     return testAttempts.filter(a => {
-      if (currentUid && a.userId && a.userId !== currentUid) return false;
+      if (currentUid && a.userId !== currentUid) return false;
+      if (!currentUid && a.userId && a.userId !== 'guest') return false;
       if (testId != null && a.testId != null && String(a.testId) === String(testId)) return true;
-      if (testTitle && a.testTitle) {
+      if ((testId == null || a.testId == null) && testTitle && a.testTitle) {
         const t1 = String(a.testTitle).toLowerCase().replace(/[^a-z0-9]/g, "");
         const t2 = String(testTitle).toLowerCase().replace(/[^a-z0-9]/g, "");
         if (t1 === t2 || (t1.length > 6 && (t2.includes(t1) || t1.includes(t2)))) return true;

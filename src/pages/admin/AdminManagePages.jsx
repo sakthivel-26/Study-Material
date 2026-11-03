@@ -1,3 +1,4 @@
+import { mergeExtractedQuestions } from "../../utils/questionStructure.js";
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -11,14 +12,13 @@ import PageHeader from "../../components/PageHeader.jsx";
 import { useApp } from "../../store.jsx";
 import { CATEGORIES, COURSE_PROGRESS } from "../../data.js";
 import { Badge, ProgressBar } from "../../components/ui.jsx";
-import { verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findBestMatchingChartPage, isDIQuestion, sanitizeDIPassageAndExplanation, convertTextTableToMarkdown, isolateQuestionsAndSolutions, extractPassagesAndRanges } from "../../utils/aiTestGenerator.js";
+import { parseUploadedQuestions, cleanPdfOption, verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findMatchingChartPages, isDIQuestion, sanitizeDIPassageAndExplanation, convertTextTableToMarkdown, isolateQuestionsAndSolutions, extractPassagesAndRanges } from "../../utils/aiTestGenerator.js";
 import { extractTextWithMathPreservation } from "../../utils/pdfParser.js";
 import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
 import { formatStudentJoinDate } from "../../utils/studentDate.js";
 import { sortTestsByRecent } from "../../utils/testSorting.js";
 import DirectionDiagramView from "../../components/DirectionDiagramView.jsx";
-import SyllogismDiagramView from "../../components/SyllogismDiagramView.jsx";
 
 /* ---------------------------- Create Mock Test ---------------------------- */
 import CategoryGrid from "../../components/CategoryGrid.jsx";
@@ -630,7 +630,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   const [extractionStartTime, setExtractionStartTime] = useState(null);
   const [isFullPreview, setIsFullPreview] = useState(false);
   const [showKeyModal, setShowKeyModal] = useState(false);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENROUTER_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY") || "");
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("VITE_HUGGINGFACE_API_KEY") || localStorage.getItem("VITE_GEMINI_API_KEY") || localStorage.getItem("VITE_GROQ_API_KEY") || localStorage.getItem("VITE_OPENROUTER_API_KEY") || localStorage.getItem("VITE_OPENAI_API_KEY") || "");
+  const [huggingFaceModel, setHuggingFaceModel] = useState(() => localStorage.getItem("VITE_HUGGINGFACE_MODEL") || "");
   const [openRouterModel, setOpenRouterModel] = useState(() => localStorage.getItem("VITE_OPENROUTER_MODEL") || "nvidia/nemotron-4-340b-instruct:free");
   const [keyType, setKeyType] = useState(() => localStorage.getItem("LLM_PROVIDER_TYPE") || "gemini");
   const [pdfExtractionMethod, setPdfExtractionMethod] = useState("ai"); // "ai" | "regex"
@@ -651,6 +652,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
   const saveLLMKey = () => {
     if (!apiKey.trim()) {
+      localStorage.removeItem("VITE_HUGGINGFACE_API_KEY");
       localStorage.removeItem("VITE_GEMINI_API_KEY");
       localStorage.removeItem("GEMINI_API_KEY");
       localStorage.removeItem("VITE_GROQ_API_KEY");
@@ -678,6 +680,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
     } else if (keyType === "deepseek") {
       localStorage.setItem("VITE_DEEPSEEK_API_KEY", apiKey.trim());
       localStorage.setItem("DEEPSEEK_API_KEY", apiKey.trim());
+    } else if (keyType === "huggingface") {
+      localStorage.setItem("VITE_HUGGINGFACE_API_KEY", apiKey.trim());
+      localStorage.setItem("VITE_HUGGINGFACE_MODEL", huggingFaceModel.trim());
     } else if (keyType === "openrouter") {
       localStorage.setItem("VITE_OPENROUTER_API_KEY", apiKey.trim());
       localStorage.setItem("OPENROUTER_API_KEY", apiKey.trim());
@@ -1088,8 +1093,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         return;
       }
 
-      const finalLetter = approvalStatus?.editedAnswer ?? q.ai_verified_answer ?? q.source_answer ?? "A";
-      const ansIndex = getAnswerIndex(finalLetter);
+      const finalLetter = approvalStatus?.editedAnswer ?? q.ai_verified_answer ?? q.source_answer ?? "";
+      const ansIndex = finalLetter ? getAnswerIndex(finalLetter) : null;
 
       // Merge options (whether array or object)
       let optsArray = [];
@@ -1109,24 +1114,35 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       }
 
       const rawPassage = approvalStatus?.passage ?? (q.passage || "");
-      const rawExplanation = approvalStatus?.solutionText ?? (q.solutionText || q.explanation || q.verification_explanation || "Verified by teacher.");
+      const rawExplanation = approvalStatus?.solutionText ?? (q.solutionText || q.explanation || q.verification_explanation || "");
       const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(rawPassage, rawExplanation, q);
+      const imageUrls = approvalStatus?.chartImageUrls || approvalStatus?.imageUrls || q.chartImageUrls || q.imageUrls ||
+        [approvalStatus?.chartImageUrl ?? approvalStatus?.imageUrl ?? q.chartImageUrl ?? q.imageUrl].filter(Boolean);
 
       finalQuestions.push({
         id: `pdf_q_${Date.now()}_${idx}`,
         section: approvalStatus?.section || q.section || f.subject || "General",
         passage: cleanPassage,
-        imageUrl: approvalStatus?.chartImageUrl ?? approvalStatus?.imageUrl ?? (q.chartImageUrl || q.imageUrl || ""),
+        imageUrl: imageUrls[0] || "",
+        imageUrls,
         solutionImageUrl: approvalStatus?.solutionImageUrl ?? (q.solutionImageUrl || ""),
         question: approvalStatus?.questionText ?? (q.question_text || q.question || `Question ${idx + 1}`),
         options: optsArray,
-        correctAnswerIndex: ansIndex < optsArray.length ? ansIndex : 0,
+        correctAnswerIndex: ansIndex !== null && ansIndex < optsArray.length ? ansIndex : null,
+        source_answer: finalLetter,
+        needs_review: !finalLetter || !cleanExplanation,
         explanation: cleanExplanation
       });
     });
 
     if (finalQuestions.length === 0) {
       pushToast("Cannot publish test with 0 questions. Please approve at least 1 question.");
+      return;
+    }
+
+    const unanswered = finalQuestions.filter(q => q.correctAnswerIndex === null);
+    if (unanswered.length) {
+      pushToast(`Review required: ${unanswered.length} questions do not have a verified answer.`);
       return;
     }
 
@@ -1137,17 +1153,17 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       // Compress all base64 diagrams to ensure lightweight, fast payload (< 200 KB)
       const compressedQuestions = await Promise.all(
         finalQuestions.map(async (q) => {
-          let compressedImg = q.imageUrl;
-          if (compressedImg && compressedImg.startsWith("data:image")) {
-            compressedImg = await compressBase64Image(compressedImg, 650, 0.68);
-          }
+          const compressedImages = await Promise.all((q.imageUrls || []).map(async image =>
+            image && image.startsWith("data:image") ? compressBase64Image(image, 650, 0.68) : image
+          ));
           let compressedSolImg = q.solutionImageUrl;
           if (compressedSolImg && compressedSolImg.startsWith("data:image")) {
             compressedSolImg = await compressBase64Image(compressedSolImg, 650, 0.68);
           }
           return {
             ...q,
-            imageUrl: compressedImg || "",
+            imageUrl: compressedImages[0] || "",
+            imageUrls: compressedImages,
             solutionImageUrl: compressedSolImg || ""
           };
         })
@@ -1165,10 +1181,12 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       const uniqueSections = Object.keys(secCounts);
       const isBankTest = (f.category || generatedTest.category || "").toLowerCase().includes("bank") || compressedQuestions.length >= 60;
       
-      const computedSectionsConfig = uniqueSections.map(secName => {
+      const computedSectionsConfig = uniqueSections.map((secName, secIndex) => {
         let dur = 20;
         if (compressedQuestions.length <= 40) {
-          dur = 20;
+          const requested = Math.max(uniqueSections.length, parseInt(f.time || generatedTest.time, 10) || 20);
+          const base = Math.floor(requested / uniqueSections.length);
+          dur = secIndex === uniqueSections.length - 1 ? requested - base * secIndex : base;
         } else if (compressedQuestions.length >= 80) {
           dur = 20; // 3 x 20 mins = 60 mins for Bank PO / Clerk 100 Qs
         } else {
@@ -1393,345 +1411,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   };
 
 
-  const parseQuestionsFromPDFText = (fullText, defaultSection = "General", targetCount = 100) => {
-    if (!fullText || !fullText.trim()) return [];
-
-    const cleanText = fullText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
-    // 1. ISOLATE QUESTIONS TEXT & SOLUTIONS TEXT USING ROBUST ENGINE
-    const { 
-      questionsText, 
-      solutionsText, 
-      solutionsMap: robustSolMap, 
-      leadingPassage, 
-      passageRanges: robustPassageRanges 
-    } = isolateQuestionsAndSolutions(cleanText);
-    const detailedSolText = solutionsText;
-
-    // 2. EXTRACT ANSWER KEY MAP (e.g. 1. d.) 2401, 2. d) 248, 6.d, 11. b, 16. (Option A), 81. a)
-    const answerKeyMap = {};
-    const ansKeyRegex = /(?:^|\n)\s*(\d{1,3})\s*[\.\)]\s*(?:\(?\s*(?:Option\s*)?([A-Ea-e])\b|\.([A-Ea-e])\b)/gi;
-    let km;
-    while ((km = ansKeyRegex.exec(solutionsText || cleanText)) !== null) {
-      const qNum = parseInt(km[1], 10);
-      let ansVal = (km[2] || km[3]).toUpperCase();
-      if (/^[1-5]$/.test(ansVal)) {
-        ansVal = String.fromCharCode(64 + parseInt(ansVal, 10)); // 1->A, 2->B, etc.
-      }
-      if (qNum >= 1 && qNum <= 250 && !answerKeyMap[qNum]) {
-        answerKeyMap[qNum] = ansVal;
-      }
-    }
-
-    // 3. EXTRACT DETAILED SOLUTIONS MAP (e.g. "1. d.) 2401 \n Solution: ...")
-    const solutionsMap = {};
-    const textForSolutions = detailedSolText || solutionsText;
-    if (textForSolutions) {
-      const solSplitRegex = /(?:^|\n)\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*(?:[\.\)\:\-]\s*|\s{2,})/g;
-      const solMatches = [];
-      let sm;
-      while ((sm = solSplitRegex.exec(textForSolutions)) !== null) {
-        solMatches.push({ qNum: parseInt(sm[1], 10), index: sm.index, matchLen: sm[0].length });
-      }
-      for (let i = 0; i < solMatches.length; i++) {
-        const cur = solMatches[i];
-        const nextIndex = (i < solMatches.length - 1) ? solMatches[i + 1].index : textForSolutions.length;
-        let block = textForSolutions.substring(cur.index + cur.matchLen, nextIndex).trim();
-        block = block
-          .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, '')
-          .replace(/IBPS PO Pre held on [^\n]+/gi, '')
-          .trim();
-        if (block && cur.qNum >= 1 && cur.qNum <= 250) {
-          // Prefer richer/longer explanations (e.g. full working steps over a 1-letter answer key match)
-          if (!solutionsMap[cur.qNum] || block.length > solutionsMap[cur.qNum].length) {
-            solutionsMap[cur.qNum] = formatMathText(block);
-          }
-        }
-      }
-    }
-
-    // 4. DETECT SECTION MARKERS IN TEXT (Require standalone line header so subject names in questions like "English" aren't confused)
-    const sectionMarkers = [];
-    const secRegex = /(?:^|\n)\s*(?:(?:SECTION|TEST\s+OF|PART)\s*[-–:]?\s*[A-C1-3IVX0-9]*\s*[:–-]?\s*)?(ENGLISH(?:\s+LANGUAGE)?|GENERAL\s+ENGLISH|REASONING(?:\s+ABILITY)?|LOGICAL\s+REASONING|GENERAL\s+INTELLIGENCE(?:\s*&\s*REASONING)?|QUANTITATIVE\s+APTITUDE|NUMERICAL\s+ABILITY|MATHEMATICS|QUANTS?|GENERAL\s+AWARENESS|CURRENT\s+AFFAIRS|BANKING\s+AWARENESS)\s*(?:\n|$)/gi;
-    let secMatch;
-    while ((secMatch = secRegex.exec(questionsText)) !== null) {
-      const rawName = secMatch[1].toUpperCase();
-      let canon = "General";
-      if (rawName.includes("ENGLISH")) canon = "English Language";
-      else if (rawName.includes("REASONING") || rawName.includes("INTELLIGENCE")) canon = "Reasoning Ability";
-      else if (rawName.includes("QUANT") || rawName.includes("NUMERICAL") || rawName.includes("MATH")) canon = "Quantitative Aptitude";
-      else if (rawName.includes("AWARENESS") || rawName.includes("AFFAIRS")) canon = "General Awareness";
-      sectionMarkers.push({ index: secMatch.index, name: canon });
-    }
-
-    const getSectionAtCharIndex = (charIdx) => {
-      if (sectionMarkers.length === 0) return null;
-      let active = null;
-      for (const marker of sectionMarkers) {
-        if (marker.index <= charIdx) {
-          active = marker.name;
-        }
-      }
-      return active;
-    };
-
-    // Helper: Content-based section classification for Indian Bank Exams
-    const inferSectionFromBankContent = (qText, passage, qIndex) => {
-      const qNum = typeof qIndex === "number" ? qIndex + 1 : null;
-      // 1. Standard 100-Question Bank Exam structure
-      if (qNum && qNum <= 100) {
-        if (qNum <= 35) return "Quantitative Aptitude";
-        if (qNum <= 65) return "English Language";
-        return "Reasoning Ability";
-      }
-
-      const combined = `${passage || ""} ${qText || ""}`.toLowerCase();
-      // 2. Reasoning indicators (Check first so puzzles/syllogisms/relations/schedules are NEVER misclassified as English)
-      if (/(?:puzzle|seating arrangement|seated|sitting|circular table|square table|linear row|parallel rows|facing\s+(?:centre|center|outside|north|south)|floor|flat|box|boxes placed|blood relation|father|mother|brother|sister|son|daughter|uncle|aunt|nephew|niece|spouse|married to|related to\b|syllogism|only a few|some books are|statements?:|conclusions?:|does not follow|neither nor|either or|inequalit|[A-Z]\s*[><≥≤=]\s*[A-Z]|coding[\s-]?decoding|written as\b|coded as\b|code language|direction sense|\bdirection |\b(?:north|south|east|west|northeast|northwest|southeast|southwest)\b|walks \d+[\s]?m|shortest distance|pythagoras|alphabet series|alphanumeric|vowels?|consonants?|meaningful word|how many such pairs|letters of the word|rank|order and ranking|alike in a certain way|does not belong|odd one out|machine input|input[\s-]output|step [I|V|X\d]+|who sits|sits second|sits third|sits immediate|extreme end|how many persons|immediate left|immediate right|scheduled starting from|exams?\s+(?:maths|science|history|economics|english|hindi)|scheduled on (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))/i.test(combined)) {
-        return "Reasoning Ability";
-      }
-      // 3. Quants indicators
-      if (/(?:data interpretation|\bdi\b|bar graph|bar chart|pie chart|line graph|tabular|table shows|caselet|simplification|approximation|(?:(?:\+|\-|\*|\/|=)\s*\?|\?\s*(?:\+|\-|\*|\/|=)|(?:√|sqrt)\s*\?|\(\s*\?\s*\)\s*[²³]|\?\s*%\s*of)|≈|number series|missing number|wrong number|quadratic equation|profit and loss|simple interest|compound interest|time and work|pipes and cistern|speed time|downstream|upstream|ratio and proportion|mixture|alligation|mensuration|perimeter|cylinder|cone|probability|visitors|total students|boys and girls|average of|find the value of|percentage of|ratio of)/i.test(combined)) {
-        return "Quantitative Aptitude";
-      }
-      // 4. English indicators (Strict English keywords, never standalone 'passage')
-      if (/(?:reading comprehension|author|antonym|synonym|closest in meaning|opposite in meaning|grammatical|grammatically|spelt|misspelt|phrase replacement|cloze|para[\s-]?jumble|rearrange the following sentences|first sentence after rearrangement|error|spotting error|sentence correction|bold word|underlined phrase|idiom|idiomatic|vocabulary|fill in the blank)/i.test(combined)) {
-        return "English Language";
-      }
-      return "General";
-    };
-
-    // 5. EXTRACT SHARED PASSAGES / DIRECTIONS (e.g. Directions 1-5, Directions 16-20, Directions 36-40, etc.)
-    const passageRanges = [];
-    const dirGlobalRegex = /(?:Directions?\s*(?:\([^\)]+\)|for\s+questions?\s*\d+[\s\w–—-]+)?[\:\s]*|Read the following[^\:\n]*[\:\.\n]|Study the following[^\:\n]*[\:\.\n]|The table shows[^\:\n]*[\:\.\n]|The following table[^\:\n]*[\:\.\n]|Rearrange the following six sentences[^\:\n]*[\:\.\n])([\s\S]*?)(?=(?:\n\s*(?:Q(?:uestion)?\.?\s*)?\d{1,3}[\.\)\:\-]\s*)|$)/gi;
-    let dm;
-    while ((dm = dirGlobalRegex.exec(questionsText)) !== null) {
-      const fullDirBlock = dm[0].trim();
-      const rangeMatch = fullDirBlock.match(/(?:Q(?:uestion)?s?[\:\s\.]*|\(\s*Q?\.?\s*|\b(?:questions?|nos?|q)\.?\s*)?(\d{1,3})\s*(?:-|to|–|—)\s*(\d{1,3})/i);
-      if (rangeMatch) {
-        const startNum = parseInt(rangeMatch[1], 10);
-        const endNum = parseInt(rangeMatch[2], 10);
-        if (!isNaN(startNum) && !isNaN(endNum) && endNum >= startNum && (endNum - startNum) <= 15) {
-          passageRanges.push({ startNum, endNum, passage: convertTextTableToMarkdown(fullDirBlock) });
-        }
-      }
-    }
-
-    // 6. DETECT PAGE MARKERS FROM TEXT
-    const pageMarkers = [];
-    const pageRegex = /--- Page (\d+) ---/g;
-    let pm;
-    while ((pm = pageRegex.exec(cleanText)) !== null) {
-      pageMarkers.push({ pageNum: parseInt(pm[1], 10), index: pm.index });
-    }
-    const getPageNumAtCharIndex = (charIdx) => {
-      if (pageMarkers.length === 0) return 1;
-      let pNum = 1;
-      for (const m of pageMarkers) {
-        if (m.index <= charIdx) pNum = m.pageNum;
-      }
-      return pNum;
-    };
-
-    // Robust option parser: handles both newline-preceded options and inline options
-    const parseOptionsFromBlock = (block) => {
-      const nlOptRegex = /(?:^|\n)\s*(?:\(?([A-Ea-e1-5])[\)\.\:\-\]]|\(([A-Ea-e1-5])\))\s*(.*?)(?=(?:\n\s*(?:\(?[A-Ea-e1-5][\)\.\:\-\]]|\([A-Ea-e1-5]\)))|$)/gi;
-      let optMatches = [...block.matchAll(nlOptRegex)];
-
-      if (optMatches.length < 3) {
-        const inlineOptRegex = /(?:(?:\s{2,}|\s)(?:\(?([A-Ea-e1-5])[\)\.\:\-\]]|\(([A-Ea-e1-5])\)))\s*(.*?)(?=(?:\s+(?:\(?[A-Ea-e1-5][\)\.\:\-\]]|\([A-Ea-e1-5]\)))|$)/gi;
-        const inMatches = [...block.matchAll(inlineOptRegex)];
-        if (inMatches.length >= 3) {
-          optMatches = inMatches;
-        }
-      }
-
-      let options = {};
-      let questionText = block;
-
-      if (optMatches.length >= 2) {
-        const firstOptIndex = optMatches[0].index;
-        questionText = block.substring(0, firstOptIndex).trim();
-
-        optMatches.forEach(m => {
-          let key = (m[1] || m[2]).toUpperCase();
-          if (/^[1-5]$/.test(key)) {
-            key = String.fromCharCode(64 + parseInt(key, 10));
-          }
-          const val = (m[3] || "").trim();
-          if (!options[key] && val) {
-            options[key] = formatMathText(val.replace(/^[\)\.\:\-\]]\s*/, ''));
-          }
-        });
-      }
-
-      return { questionText: formatMathText(questionText), options };
-    };
-
-    // 7. LOCATE QUESTIONS SEQUENTIALLY (1 to N)
-    const qSplitRegex = /(?:^|\n)\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*[\.\)]\s*(?!\d)/g;
-    const rawQPositions = [];
-    let qm;
-    while ((qm = qSplitRegex.exec(questionsText)) !== null) {
-      rawQPositions.push({
-        num: parseInt(qm[1], 10),
-        index: qm.index,
-        matchLen: qm[0].length
-      });
-    }
-
-    // Filter to ensure monotonic/sequential question positions (1 to N)
-    // Avoids sub-numbered puzzle rules like "(1) Person A... (2) Person B..."
-    const qPositions = [];
-    let expected = 1;
-    for (let i = 0; i < rawQPositions.length; i++) {
-      const cur = rawQPositions[i];
-      if (cur.num === expected) {
-        qPositions.push(cur);
-        expected++;
-      } else if (cur.num > expected && cur.num <= expected + 2) {
-        qPositions.push(cur);
-        expected = cur.num + 1;
-      }
-    }
-
-    let questions = [];
-
-    if (qPositions.length >= 5) {
-      for (let i = 0; i < qPositions.length; i++) {
-        const cur = qPositions[i];
-        const nextIndex = (i < qPositions.length - 1) ? qPositions[i + 1].index : questionsText.length;
-        const block = questionsText.substring(cur.index + cur.matchLen, nextIndex).trim();
-        if (block.length < 3) continue;
-
-        let { questionText, options } = parseOptionsFromBlock(block);
-
-        // Clean headers/footers watermarks
-        questionText = questionText
-          .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, '')
-          .replace(/IBPS PO Pre held on [^\n]+/gi, '')
-          .trim();
-
-        // For Cloze Tests (e.g. blank 44, 45, etc.) where the question text is empty
-        if (!questionText) {
-          questionText = `Select the appropriate word for blank (${cur.num}) in the passage:`;
-        }
-
-        // Check if question has inline answer (e.g. "Ans. (c)" or "Answer: B")
-        let inlineAns = null;
-        const inlineAnsMatch = block.match(/(?:Ans(?:wer)?[\:\s\.\-]+|\(?Ans\)?\s*[\:\.\-]?\s*)(?:\(?([A-Ea-e1-5])\)?)/i);
-        if (inlineAnsMatch) {
-          let letVal = inlineAnsMatch[1].toUpperCase();
-          if (/^[1-5]$/.test(letVal)) letVal = String.fromCharCode(64 + parseInt(letVal, 10));
-          inlineAns = letVal;
-          questionText = questionText.replace(/(?:Ans(?:wer)?[\:\s\.\-]+|\(?Ans\)?\s*[\:\.\-]?\s*)\(?([A-Ea-e1-5])\)?[\s\S]*$/i, '').trim();
-        }
-
-        // Link shared passage / directions if question number falls in a range
-        let linkedPassage = "";
-        const matchedRange = passageRanges.find(r => cur.num >= r.startNum && cur.num <= r.endNum);
-        if (matchedRange) {
-          linkedPassage = matchedRange.passage
-            .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, '')
-            .replace(/IBPS PO Pre held on [^\n]+/gi, '')
-            .trim();
-        }
-
-        // Determine Section: Prioritize detected header over general fallback
-        const contentSec = inferSectionFromBankContent(questionText, linkedPassage, questions.length);
-        const sectionFromHeader = getSectionAtCharIndex(cur.index);
-        let finalSection = sectionFromHeader || contentSec || defaultSection;
-
-        // Determine Page Number
-        const qPageNum = getPageNumAtCharIndex(cur.index);
-
-        // Ensure all 5 options (A, B, C, D, E) are populated
-        const finalOptions = { ...options };
-        ["A", "B", "C", "D", "E"].forEach(k => {
-          if (!finalOptions[k] || !finalOptions[k].trim()) {
-            finalOptions[k] = `Option ${k}`;
-          }
-        });
-
-        // Determine correct answer: Answer Key > Inline Answer > 'A'
-        const correctLetter = answerKeyMap[cur.num] || inlineAns || "A";
-        const correctIdx = Math.max(0, correctLetter.charCodeAt(0) - 65);
-
-        // Determine explanation: Solutions map > descriptive text
-        const solText = solutionsMap[cur.num] || `Verified correct answer: Option ${correctLetter}. Detailed step-by-step working from exam solutions.`;
-
-        questions.push({
-          id: `pdf_q_${Date.now()}_${questions.length}`,
-          questionNumber: cur.num,
-          page_number: qPageNum,
-          chart_page_number: qPageNum,
-          section: finalSection,
-          passage: linkedPassage,
-          question: questionText || `Question ${cur.num}`,
-          question_text: questionText || `Question ${cur.num}`,
-          options: finalOptions,
-          correctAnswerIndex: correctIdx < 5 ? correctIdx : 0,
-          source_answer: correctLetter,
-          explanation: solText,
-          solutionText: solText,
-        });
-      }
-    }
-
-    // 8. FALLBACK: If sequential parser found fewer than 5 questions, use flexible block splitter
-    if (questions.length < 5) {
-      const rawBlocks = questionsText.split(/(?:^|\n|\s)(?:Q(?:uestion)?[\s\.-]*\d+|\d+[\)\.\:\-]|(?:\(\d+\)))\s+/gi).map(b => b.trim()).filter(Boolean);
-      for (let i = 0; i < rawBlocks.length; i++) {
-        const block = rawBlocks[i];
-        if (block.length < 5) continue;
-        let { questionText, options } = parseOptionsFromBlock(block);
-        const qNum = i + 1;
-        const finalOptions = { ...options };
-        ["A", "B", "C", "D", "E"].forEach(k => {
-          if (!finalOptions[k] || !finalOptions[k].trim()) {
-            finalOptions[k] = `Option ${k}`;
-          }
-        });
-        const correctLetter = answerKeyMap[qNum] || "A";
-        const correctIdx = Math.max(0, correctLetter.charCodeAt(0) - 65);
-        const finalSection = inferSectionFromBankContent(questionText, "", i);
-        const fallbackSol = solutionsMap[qNum] || `Verified correct answer: Option ${correctLetter}.`;
-
-        questions.push({
-          id: `pdf_q_${Date.now()}_${i}`,
-          questionNumber: qNum,
-          section: finalSection,
-          passage: "",
-          question: questionText || `Question ${qNum}`,
-          question_text: questionText || `Question ${qNum}`,
-          options: finalOptions,
-          correctAnswerIndex: correctIdx < 5 ? correctIdx : 0,
-          source_answer: correctLetter,
-          explanation: fallbackSol,
-          solutionText: fallbackSol,
-        });
-      }
-    }
-
-    // Propagate linked passage to upcoming questions in the same 5-question block
-    let activePassage = "";
-    let activePassageEnd = 0;
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i];
-      if (q.passage && q.passage.length > 25) {
-        activePassage = q.passage;
-        activePassageEnd = (q.questionNumber || (i + 1)) + 4;
-      } else if (activePassage && (q.questionNumber || (i + 1)) <= activePassageEnd) {
-        q.passage = activePassage;
-      } else {
-        activePassage = "";
-      }
-    }
-
-    return questions.slice(0, 200);
-  };
-
-
+  const parseQuestionsFromPDFText = parseUploadedQuestions;
 
   const handlePDFUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -1757,16 +1437,13 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       let fullText = "";
 
       if (isPDF) {
-        // Dynamically load PDF.js to avoid Vite worker bundling issues
+        // Load the installed PDF.js package locally. The previous CDN script
+        // could spend 60-90 seconds waiting on the network before parsing even
+        // began, which made small PDFs appear slow.
         if (!window.pdfjsLib) {
-          await new Promise((resolve, reject) => {
-            const script = document.createElement("script");
-            script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
-            script.onload = resolve;
-            script.onerror = reject;
-            document.body.appendChild(script);
-          });
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+          window.pdfjsLib = await import("pdfjs-dist/build/pdf.mjs");
+          const workerModule = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
         }
         const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         const pageIndices = Array.from({ length: pdf.numPages }, (_, i) => i + 1);
@@ -1774,16 +1451,18 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
           const pageText = extractTextWithMathPreservation(textContent);
-          return { pageNum: i, text: pageText, page };
+          return { pageNum: i, text: pageText, textContent, page };
         }));
         pagesData.sort((a, b) => a.pageNum - b.pageNum);
         fullText = pagesData.map(p => `\n--- Page ${p.pageNum} ---\n${p.text}`).join("\n");
 
-        const diRegex = /(?:directions?\s*\(?\s*q?\.?\s*\d+|study the following|refer to the|pie[\s-]?chart|bar[\s-]?graph|bar[\s-]?chart|line[\s-]?graph|table|tabular|data interpretation|histogram|given below|graph)/i;
+        const diRegex = /(?:pie[\s-]?chart|bar[\s-]?(?:graph|chart)|line[\s-]?graph|data interpretation|histogram|tabular|(?:following|given)\s+table|table\s+(?:showing|shows|given|below)|(?:study|refer to)\s+the\s+(?:following\s+)?(?:table|chart|graph))/i;
         const qRegex = /(?:\b[1-9]\d*[\.\)]|\b(?:Q(?:uestion)?[\s\.\d]+)|(?:[A-Ea-e][\.\)]\s*[\w\d]+))/i;
         const promoRegex = /(?:1\s*lakh\+|aspirants|achievers|download app|join us|smartkeeda|testzone|test series|toppers|subscribe|install app|coupon|selected aspirants)/i;
         const isScannedOnly = fullText.trim().length < 300;
+        const isMathQuiz = /(?:simplification|approximation)\s+(?:quiz|questions?|test)/i.test(fullText.slice(0, 2500));
         const pageImagesArr = [];
+        const questionEquationImages = new Map();
 
         // Render pages with DI charts & tables for smart cropping (or all pages if scanned / vision enabled)
         setPdfPageInfo(`Scanning ${pdf.numPages} pages for questions, DI charts, and tables...`);
@@ -1799,22 +1478,65 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
           // Skip pure ad cover posters
           if (isPromo && !isScannedOnly) continue;
 
-          // Render canvas for all pages with content to ensure all charts/tables/graphs are captured
-          if (!isPromo || hasDI || enableVisionAI || isScannedOnly) {
+          // Text extraction is already complete. Rendering every page used to be
+          // the largest local bottleneck, so only capture pages that can actually
+          // need vision: explicit DI/chart pages or low-text scanned pages when
+          // the admin enabled Vision AI.
+          const isLowTextScan = p.text.trim().length < 120;
+          const hasMathNotation = /(?:√|∛|[²³⁴⁵⁶⁷⁸⁹]|\d\s*\^\s*\d|\bapproximation\b|\bsimplification\b)/i.test(p.text);
+          const shouldCapturePage = hasDI || hasMathNotation || (isMathQuiz && hasQ) || (enableVisionAI && (isScannedOnly || isLowTextScan));
+          if (shouldCapturePage) {
             try {
-              const viewport = p.page.getViewport({ scale: 1.5 });
+              const viewport = p.page.getViewport({ scale: 1.2 });
               const canvas = document.createElement("canvas");
               canvas.width = viewport.width;
               canvas.height = viewport.height;
               const ctx = canvas.getContext("2d");
               await p.page.render({ canvasContext: ctx, viewport }).promise;
 
+              if (hasMathNotation || isMathQuiz) {
+                const items = p.textContent.items.filter(item => item.str?.trim()).map(item => ({
+                  text: item.str.trim().normalize('NFKC'),
+                  x: viewport.convertToViewportPoint(item.transform[4], item.transform[5])[0],
+                  y: viewport.convertToViewportPoint(item.transform[4], item.transform[5])[1],
+                  height: item.height || 0
+                }));
+                const markers = items.filter(item => item.x < viewport.width * 0.09 && /^0*\d{1,3}[.)]?$/.test(item.text))
+                  .map(item => ({ ...item, number: Number(item.text.match(/\d+/)?.[0]) }))
+                  .filter(item => item.number >= 1 && item.number <= 200)
+                  .sort((a, b) => a.y - b.y);
+                for (let markerIndex = 0; markerIndex < markers.length; markerIndex++) {
+                  const marker = markers[markerIndex];
+                  const nextY = markers[markerIndex + 1]?.y ?? viewport.height;
+                  const firstOption = items.filter(item => item.y > marker.y + 8 && item.y < nextY &&
+                    item.x < viewport.width * 0.12 && /^A[.):](?:\s|$)/i.test(item.text))
+                    .sort((a, b) => a.y - b.y)[0];
+                  const questionItems = items.filter(item => item.y >= marker.y - 18 &&
+                    item.y < (firstOption?.y ?? nextY) - 2 && item !== marker);
+                  const questionText = questionItems.map(item => item.text).join(' ');
+                  const hasStackedMath = questionItems.some(item => item.height > 0 && item.height <= 11 &&
+                    /^[\d?+\-/()]+$/.test(item.text) && item.x > marker.x + 15);
+                  const rootCount = (questionText.match(/[√∛]/g) || []).length;
+                  const needsOriginalImage = hasStackedMath || rootCount >= 2 ||
+                    /\b\d+\s*\/\s*\d+\b/.test(questionText) || /∛/.test(questionText);
+                  if (!needsOriginalImage) continue;
+                  const top = Math.max(0, Math.floor(marker.y - 20));
+                  const bottom = Math.min(canvas.height, Math.ceil((firstOption?.y ?? nextY) - 5));
+                  if (bottom - top < 18 || bottom - top > canvas.height * 0.4) continue;
+                  const equationCanvas = document.createElement('canvas');
+                  equationCanvas.width = canvas.width;
+                  equationCanvas.height = bottom - top;
+                  equationCanvas.getContext('2d').drawImage(canvas, 0, top, canvas.width, bottom - top, 0, 0, canvas.width, bottom - top);
+                  questionEquationImages.set(`${p.pageNum}:${marker.number}`, equationCanvas.toDataURL('image/jpeg', 0.88));
+                }
+              }
+
               // Automatic smart diagram cropper:
               // Isolates the chart/diagram area between the directions header and bottom questions
               let finalCanvas = canvas;
-              if (hasDI) {
+              if (hasDI || isLowTextScan) {
                 try {
-                  const textContent = await p.page.getTextContent();
+                  const textContent = p.textContent;
                   let headerBottomY = 0;
                   let questionTopY = viewport.height;
 
@@ -1842,18 +1564,54 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                     }
                   }
 
-                  if (questionTopY >= viewport.height || questionTopY <= headerBottomY) {
+                  // Anchor the crop to the DI set itself. A page can contain
+                  // earlier arithmetic questions above the table; those must
+                  // never become the table's lower crop boundary.
+                  const positioned = textContent.items.filter(item => item.str?.trim()).map(item => ({
+                    text: item.str.trim(),
+                    x: viewport.convertToViewportPoint(item.transform[4], item.transform[5])[0],
+                    y: viewport.convertToViewportPoint(item.transform[4], item.transform[5])[1],
+                  }));
+                  const diHeaders = positioned.filter((item, index) =>
+                    /^direc[ \t]*tions?\s*\(/i.test(item.text) &&
+                    /(?:table|chart|graph|data interpretation|number of|visitors|accounts|sales|production)/i.test(
+                      positioned.slice(index + 1, index + 5).map(next => next.text).join(' ')
+                    )
+                  );
+                  const diHeader = diHeaders[0];
+                  if (diHeader) {
+                    const firstQuestionNumber = diHeader.text.match(/\(\s*0*(\d{1,3})\s*(?:-|–|—|to|\))/i)?.[1];
+                    const firstQuestionMarker = firstQuestionNumber
+                      ? new RegExp(`^(?:Q(?:uestion)?\\s*)?0*${firstQuestionNumber}[.):]?$`, 'i')
+                      : /^(?:Q(?:uestion)?\s*)?0*\d{1,2}[.):]$/i;
+                    const followingQuestion = positioned
+                      .filter(item => item.y > diHeader.y + 15 && item.x < viewport.width * 0.55 &&
+                        firstQuestionMarker.test(item.text))
+                      .sort((a, b) => a.y - b.y)[0];
+                    if (followingQuestion && followingQuestion.y - diHeader.y > 45) {
+                      headerBottomY = Math.max(0, diHeader.y - 12);
+                      questionTopY = followingQuestion.y - 12;
+                    } else {
+                      // Preserve the whole page for manual cropping when the
+                      // chart cannot be bounded confidently.
+                      questionTopY = 0;
+                    }
+                  } else if (hasDI) {
+                    questionTopY = 0;
+                  }
+
+                  if (questionTopY >= viewport.height || (questionTopY > 0 && questionTopY <= headerBottomY)) {
                     questionTopY = viewport.height * 0.92;
                   }
                   if (headerBottomY <= 0) {
-                    headerBottomY = viewport.height * 0.22;
+                    headerBottomY = isLowTextScan ? 0 : viewport.height * 0.22;
                   }
 
                   const searchTop = Math.max(0, Math.floor(headerBottomY));
                   const searchBottom = Math.min(canvas.height, Math.ceil(questionTopY));
                   const searchH = searchBottom - searchTop;
 
-                  if (searchH > 50) {
+                  if (questionTopY > 0 && searchH > 50) {
                     const imgData = ctx.getImageData(0, searchTop, canvas.width, searchH);
                     const pixels = imgData.data;
                     let minX = canvas.width, maxX = 0, minY = searchH, maxY = 0;
@@ -1898,8 +1656,10 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                 }
               }
 
-              const base64 = finalCanvas.toDataURL("image/jpeg", 0.90).split(",")[1];
-              const fullPageBase64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+              const base64 = finalCanvas.toDataURL("image/jpeg", 0.78).split(",")[1];
+              const fullPageBase64 = finalCanvas === canvas
+                ? base64
+                : canvas.toDataURL("image/jpeg", 0.72).split(",")[1];
 
               pageImagesArr.push({
                 pageNum: p.pageNum,
@@ -1907,6 +1667,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                 base64,
                 fullBase64: fullPageBase64,
                 mimeType: "image/jpeg",
+                hasDI,
+                hasVisual: true,
                 isPromo: isPromo
               });
             } catch (renderErr) {
@@ -1916,6 +1678,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
         }
 
         window.__pdfPageImages__ = pageImagesArr;
+        window.__pdfQuestionImages__ = questionEquationImages;
         if (pageImagesArr.length > 0) {
           setExtractionProgress(`${pdf.numPages} pages scanned · ${fullText.length.toLocaleString()} chars · ${pageImagesArr.length} pages captured for DI charts & tables`);
         } else {
@@ -1942,6 +1705,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       let llmSuccess = false;
 
       const offlineQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 200);
+      setExtractionProgress(`${offlineQuestions.length} questions found locally · AI is enriching only the required batches`);
 
       try {
         if (pdfExtractionMethod === "ai") {
@@ -1953,55 +1717,21 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
               timeLimit: f.time,
               title: f.title,
               onProgress: (done, total) => {
-                if (window.__pdfPageImages__ && window.__pdfPageImages__.length > 0 && done < window.__pdfPageImages__.length) {
+                if (enableVisionAI && window.__pdfPageImages__ && window.__pdfPageImages__.length > 0 && done < window.__pdfPageImages__.length) {
                   setPdfPageInfo(`🖼️ Vision AI scanning charts/tables (Page ${done}/${total})...`);
                 } else {
                   setPdfPageInfo(`🤖 AI Model extracting questions (Chunk ${done}/${total})...`);
                 }
               },
               signal: abortControllerRef.current.signal,
-              pageImages: isPDF ? (window.__pdfPageImages__ || []) : [],
+              // Local chart screenshots are always retained for attachment,
+              // but remote vision is opt-in because it is the slowest stage.
+              pageImages: isPDF && enableVisionAI ? (window.__pdfPageImages__ || []) : [],
             });
             if (aiResult && aiResult.rawExtractedQuestions && aiResult.rawExtractedQuestions.length > 0) {
               const aiQs = aiResult.rawExtractedQuestions;
-              // If AI extracted a different count (e.g. partial set or extra puzzle clues), or full paper has >= 90 questions,
-              // anchor on the sequential offline paper structure and enhance every question with AI solutions!
-              if (offlineQuestions.length > 0 && (offlineQuestions.length >= 90 || offlineQuestions.length !== aiQs.length)) {
-                console.log(`[Extraction] Aligning ${aiQs.length} AI question enhancements to ${offlineQuestions.length} paper questions!`);
-                const merged = [...offlineQuestions];
-                aiQs.forEach((aiQ, idx) => {
-                  const qNum = aiQ.questionNumber || (idx + 1);
-                  const targetIdx = merged.findIndex(oq => (oq.questionNumber || (merged.indexOf(oq) + 1)) === qNum);
-                  if (targetIdx !== -1) {
-                    const assignedSec = merged[targetIdx].section || inferSectionFromBankContent(merged[targetIdx].question, merged[targetIdx].passage, targetIdx);
-                    merged[targetIdx] = {
-                      ...merged[targetIdx],
-                      ...aiQ,
-                      section: assignedSec,
-                      options: (aiQ.options && Object.keys(aiQ.options).length >= 4) ? aiQ.options : merged[targetIdx].options,
-                      explanation: aiQ.explanation || merged[targetIdx].explanation,
-                      solutionText: aiQ.solutionText || aiQ.explanation || merged[targetIdx].solutionText || merged[targetIdx].explanation
-                    };
-                  }
-                });
-                extractedQuestions = merged;
-                llmSuccess = true;
-                pushToast(`✅ Extracted all ${merged.length} questions (${aiQs.length} AI-enhanced + ${merged.length - aiQs.length} structured)!`);
-              } else {
-                extractedQuestions = aiQs.map((aiQ, idx) => {
-                  const qNum = aiQ.questionNumber || (idx + 1);
-                  const matchedOffline = offlineQuestions.find(oq => (oq.questionNumber || (offlineQuestions.indexOf(oq) + 1)) === qNum);
-                  const exp = aiQ.explanation || matchedOffline?.explanation || "";
-                  const assignedSec = matchedOffline?.section || inferSectionFromBankContent(aiQ.question, aiQ.passage, idx);
-                  return {
-                    ...aiQ,
-                    section: assignedSec || aiQ.section,
-                    explanation: exp,
-                    solutionText: aiQ.solutionText || exp
-                  };
-                });
-                llmSuccess = true;
-              }
+              extractedQuestions = mergeExtractedQuestions(offlineQuestions, aiQs);
+              llmSuccess = true;
             } else {
               extractedQuestions = offlineQuestions;
             }
@@ -2027,6 +1757,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       }
 
       setF(prev => ({ ...prev, questions: extractedQuestions.length }));
+      const reviewCount = extractedQuestions.filter(q => q.needs_review).length;
+      if (reviewCount) pushToast(`${reviewCount} questions need answer or solution review before publishing.`);
 
       if (extractedQuestions.length === 0) {
         throw new Error("NO_QUESTIONS_FOUND: Could not extract any questions from the uploaded PDF.");
@@ -2054,31 +1786,38 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
       const finalQuestions = [];
       result.rawExtractedQuestions.forEach((q, idx) => {
-          const finalLetter = q.source_answer ?? "A";
-          const ansIndex = getAnswerIndex(finalLetter);
+          const finalLetter = q.source_answer || "";
+          const ansIndex = finalLetter ? getAnswerIndex(finalLetter) : null;
           const optKeys = Object.keys(q.options || {}).sort();
           const optionsArray = optKeys.length > 0 
-            ? optKeys.map(k => q.options[k]) 
+            ? optKeys.map(k => cleanPdfOption(q.options[k]))
             : ["Option A", "Option B", "Option C", "Option D", "Option E"];
 
-          let chartImg = q.chartImageUrl || q.imageUrl || "";
+          let chartImgs = q.chartImageUrls || q.imageUrls || [];
+          if (!Array.isArray(chartImgs)) chartImgs = [];
+          if (chartImgs.length === 0 && (q.chartImageUrl || q.imageUrl)) {
+            chartImgs = [q.chartImageUrl || q.imageUrl];
+          }
+          if (chartImgs.length === 0 && /quantitative/i.test(q.section || '') && /[√∛²³⁴⁵⁶⁷⁸⁹÷×^=]|approximation|simplification/i.test(q.question || q.question_text || '')) {
+            const equationImage = window.__pdfQuestionImages__?.get(`${q.page_number}:${q.questionNumber}`);
+            if (equationImage) chartImgs = [equationImage];
+          }
 
           // Attach diagram if this is a Quantitative Aptitude DI question
           if (isDIQuestion(q)) {
-            if (!chartImg && window.__pdfPageImages__ && window.__pdfPageImages__.length > 0) {
-              const matched = findBestMatchingChartPage(q, window.__pdfPageImages__);
-              if (matched) {
-                chartImg = "data:" + (matched.mimeType || "image/jpeg") + ";base64," + (matched.base64 || matched.fullBase64);
-              }
+            if (chartImgs.length === 0 && window.__pdfPageImages__ && window.__pdfPageImages__.length > 0) {
+              chartImgs = findMatchingChartPages(q, window.__pdfPageImages__).map(matched =>
+                "data:" + (matched.mimeType || "image/jpeg") + ";base64," + (matched.base64 || matched.fullBase64)
+              );
             }
 
             // Inherit chart if consecutive questions share the same DI passage / set
-            if (!chartImg && lastDIChart && q.passage && (q.passage === lastDIPassage || lastDIPassage.includes(q.passage.slice(0, 30)))) {
-              chartImg = lastDIChart;
+            if (chartImgs.length === 0 && lastDIChart && q.passage && (q.passage === lastDIPassage || lastDIPassage.includes(q.passage.slice(0, 30)))) {
+              chartImgs = Array.isArray(lastDIChart) ? lastDIChart : [lastDIChart];
             }
 
-            if (chartImg) {
-              lastDIChart = chartImg;
+            if (chartImgs.length) {
+              lastDIChart = chartImgs;
               lastDIPassage = q.passage || "";
             }
           } else {
@@ -2086,12 +1825,14 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             lastDIPassage = "";
           }
 
-          const expText = q.solutionText || q.explanation || "Verification pending.";
-          const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(q.passage || "", expText, q);
+          const expText = q.solutionText || q.explanation || "";
+          const { cleanPassage, cleanExplanation } = sanitizeDIPassageAndExplanation(q.passage || "", expText, q.question || q.question_text || "");
 
           // Update q directly so rawExtractedQuestions retains the chart and clean passage
-          q.chartImageUrl = chartImg;
-          q.imageUrl = chartImg;
+          q.chartImageUrls = chartImgs;
+          q.imageUrls = chartImgs;
+          q.chartImageUrl = chartImgs[0] || "";
+          q.imageUrl = chartImgs[0] || "";
           q.passage = cleanPassage;
           q.explanation = cleanExplanation;
           q.solutionText = cleanExplanation;
@@ -2102,11 +1843,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             passage: cleanPassage,
             question: q.question_text || `Question ${idx + 1}`,
             options: optionsArray,
-            correctAnswerIndex: ansIndex < optionsArray.length ? ansIndex : 0,
+            correctAnswerIndex: ansIndex !== null && ansIndex < optionsArray.length ? ansIndex : null,
+            needs_review: q.needs_review || ansIndex === null,
+            source_answer: finalLetter,
+            questionNumber: q.questionNumber,
             explanation: cleanExplanation,
             solutionText: cleanExplanation,
-            imageUrl: chartImg,
-            chartImageUrl: chartImg,
+            imageUrl: chartImgs[0] || "",
+            imageUrls: chartImgs,
+            chartImageUrl: chartImgs[0] || "",
+            chartImageUrls: chartImgs,
           });
       });
 
@@ -2118,10 +1864,12 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       });
       const uniqueSections = Object.keys(secCounts);
       const isBankTest = (f.category || "").toLowerCase().includes("bank") || finalQuestions.length >= 60;
-      const computedSectionsConfig = uniqueSections.map(secName => {
+      const computedSectionsConfig = uniqueSections.map((secName, secIndex) => {
         let dur = 20;
         if (finalQuestions.length <= 40) {
-          dur = 20;
+          const requested = Math.max(uniqueSections.length, parseInt(f.time, 10) || 20);
+          const base = Math.floor(requested / uniqueSections.length);
+          dur = secIndex === uniqueSections.length - 1 ? requested - base * secIndex : base;
         } else if (finalQuestions.length >= 80) {
           dur = 20; // 3 x 20 mins = 60 mins for 100 Qs Bank Prelims
         } else {
@@ -2270,25 +2018,22 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
   };
 
   const openImageCropper = (qIdx, imgIdx, currentUrl) => {
-    let fullSrc = currentUrl;
-    if (window.__pdfPageImages__ && window.__pdfPageImages__.length > 0) {
-      const q = (generatedTest?.rawExtractedQuestions || [])[qIdx] || {};
-      const matched = findBestMatchingChartPage(q, window.__pdfPageImages__);
-      if (matched && matched.fullBase64) {
-        fullSrc = "data:" + (matched.mimeType || "image/jpeg") + ";base64," + matched.fullBase64;
-      }
-    }
-
     setCropperModal({
       qIdx,
       imgIdx,
-      src: fullSrc,
+      src: currentUrl,
       currentUrl: currentUrl,
       cropTop: 20,
       cropBottom: 25,
       cropLeft: 0,
       cropRight: 0,
     });
+  };
+
+  const openPdfPageCropper = (qIdx, pageImage) => {
+    const fullSrc = "data:" + (pageImage.mimeType || "image/jpeg") + ";base64," + (pageImage.fullBase64 || pageImage.base64);
+    setCropperModal({ qIdx, imgIdx: 0, src: fullSrc, currentUrl: fullSrc,
+      cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0 });
   };
 
   const editQuestionSection = (idx, sectionName) => {
@@ -2728,7 +2473,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                 ) : pdfStatus === "done" ? (
                   <div className="space-y-2">
                     <CheckCircle2 size={40} className="mx-auto text-emerald-600" />
-                    <p className="font-bold text-emerald-900 text-sm">✅ {generatedTest?.questions} questions extracted with AI</p>
+                    <p className="font-bold text-emerald-900 text-sm">✅ {generatedTest?.questions} questions extracted with {pdfExtractionMethod === "ai" ? "AI" : "the offline parser"}</p>
                     <p className="text-xs text-emerald-700 font-semibold">Mock Test Ready</p>
                     <p className="text-xs text-emerald-600 font-bold mt-1">Click to upload a different PDF or Word document</p>
                   </div>
@@ -3475,10 +3220,10 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                             <div>
                               <div className="flex items-center justify-between mb-1">
                                 <label className="text-[11px] font-bold text-ink-muted block">
-                                  📊 DI Chart / Table / Graph Diagram:
+                                  {isDIQuestion(approvedQuestions[idx] || q) ? '📊 DI Chart / Table / Graph Diagram:' : '🖼️ Original PDF Question Image:'}
                                 </label>
                                 <span className="text-[10px] bg-brand-50 text-brand-700 font-bold px-2 py-0.5 rounded border border-brand-200">
-                                  Data Interpretation
+                                  {isDIQuestion(approvedQuestions[idx] || q) ? 'Data Interpretation' : 'Math notation reference'}
                                 </span>
                               </div>
                             
@@ -3487,16 +3232,14 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                   <div key={imgIdx} className="relative w-full max-w-sm group">
                                     <img src={url} alt="Chart" className="max-h-52 rounded-lg border border-black/10 object-contain bg-white w-full" />
                                     <div className="absolute top-1.5 right-1.5 flex items-center gap-1.5">
-                                      {isDIQuestion(approvedQuestions[idx] || q) && (
                                       <button
                                         type="button"
                                         onClick={() => openImageCropper(idx, imgIdx, url)}
                                         className="bg-brand-600 hover:bg-brand-700 text-white text-[10px] px-2.5 py-1 rounded-lg font-bold shadow-md flex items-center gap-1 transition-colors"
-                                        title="Crop only the diagram/chart area"
+                                        title="Adjust the question image crop"
                                       >
-                                        <span>✂️ Crop Diagram</span>
+                                        <span>✂️ Crop Image</span>
                                       </button>
-                                      )}
                                       <button
                                         type="button"
                                         onClick={() => removeChartImage(idx, imgIdx)}
@@ -3515,15 +3258,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                                     <button
                                       key={pIdx}
                                       type="button"
-                                      onClick={() => {
-                                        const dataUrl = "data:" + (pImg.mimeType || "image/jpeg") + ";base64," + (pImg.base64 || pImg.fullBase64);
-                                        replaceChartImage(idx, 0, dataUrl);
-                                        pushToast(`Attached Page ${pImg.pageNum} diagram to Question ${idx + 1}`);
-                                      }}
+                                      onClick={() => openPdfPageCropper(idx, pImg)}
                                       className="text-[10px] bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 px-2 py-0.5 rounded font-semibold transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
-                                      title={`Attach Page ${pImg.pageNum} diagram to Question ${idx + 1}`}
+                                      title={`Open full Page ${pImg.pageNum} and crop the chart or equation`}
                                     >
-                                      <span>Page {pImg.pageNum}</span>
+                                      <span>✂️ Crop Page {pImg.pageNum}</span>
                                     </button>
                                   ))}
                                 </div>
@@ -3534,10 +3273,16 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                         // For mini questions without an image, show only a subtle attach option
                         return (
-                          <div className="flex items-center justify-between py-1 text-[11px] text-ink-muted bg-black/[0.02] px-3 py-1.5 rounded-lg border border-black/5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap py-1 text-[11px] text-ink-muted bg-black/[0.02] px-3 py-1.5 rounded-lg border border-black/5">
                             <span className="text-slate-500 font-medium">
-                              {isDIQuestion(q) ? "📊 Data Interpretation (No diagram attached)" : "🧩 Text Question (No diagram needed)"}
+                              {isDIQuestion(q) ? "📊 Data Interpretation (No diagram attached)" : "No image attached"}
                             </span>
+                            {window.__pdfPageImages__?.filter(pImg => pImg.pageNum === q.page_number || pImg.pageNum === q.passage_page_number).map(pImg => (
+                              <button key={pImg.pageNum} type="button" onClick={() => openPdfPageCropper(idx, pImg)}
+                                className="text-[10px] font-bold text-brand-600 hover:underline">
+                                ✂️ Crop PDF Page {pImg.pageNum}
+                              </button>
+                            ))}
                             <label className="text-[10px] font-bold text-brand-600 hover:text-brand-700 cursor-pointer flex items-center gap-1 hover:underline">
                               + Attach Diagram (Optional)
                               <input
@@ -3728,8 +3473,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       {/* Direction Sense Visual Diagram Preview */}
                       <DirectionDiagramView text={`${approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "")} ${approvedQuestions[idx]?.questionText ?? q.question_text ?? ""} ${approvedQuestions[idx]?.passage ?? (q.passage || "")}`} compact={true} />
 
-                      {/* Syllogism Venn Diagram Preview */}
-                      <SyllogismDiagramView text={`${approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "")} ${approvedQuestions[idx]?.questionText ?? q.question_text ?? ""} ${approvedQuestions[idx]?.passage ?? (q.passage || "")}`} compact={true} />
                     </div>
                   );
                 })}
@@ -4502,7 +4245,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             </div>
 
             <p className="text-xs text-ink-muted leading-relaxed">
-              Select your preferred AI provider below and enter your API key to enable 100% accurate PDF question extraction and AI mock generation.
+              Select your preferred AI provider below and enter your API key to enable AI-assisted PDF question extraction and AI mock generation.
             </p>
 
             <div className="space-y-4">
@@ -4517,12 +4260,14 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                   <option value="groq">Groq / Gemma-7B (Ultra-fast LLM Inference)</option>
                   <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
                   <option value="deepseek">DeepSeek API (DeepSeek-R1 / Chat)</option>
+                  <option value="huggingface">Hugging Face Inference Providers</option>
                   <option value="openrouter">OpenRouter (Any Custom Model!)</option>
                 </select>
               </div>
 
               <div>
                 <label className="text-xs font-bold text-ink-soft mb-1.5 block">
+                  {keyType === "huggingface" && "Hugging Face token (hf_...)"}
                   {keyType === "gemini" && "Google Gemini API Key (AIzaSy...)"}
                   {keyType === "groq" && "Groq / Gemma API Key (gsk_...)"}
                   {keyType === "openai" && "OpenAI API Key (sk-proj-...)"}
@@ -4539,6 +4284,12 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                 <p className="text-[11px] text-ink-faint mt-1">Key is stored securely in your local browser storage for AI calls.</p>
               </div>
 
+              {keyType === "huggingface" && (
+                <div>
+                  <label className="text-xs font-bold" htmlFor="hf-model">Hugging Face model ID</label>
+                  <input id="hf-model" className="input font-mono text-xs" value={huggingFaceModel} onChange={e => setHuggingFaceModel(e.target.value)} placeholder="Copy the model ID from Hugging Face Inference Providers" />
+                </div>
+              )}
               {keyType === "openrouter" && (
                 <div>
                   <label className="text-xs font-bold text-ink-soft mb-1.5 block">
@@ -4897,8 +4648,6 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                         {/* Direction Sense Visual Drawing Preview */}
                         <DirectionDiagramView text={`${q.explanation || ""} ${q.question || ""} ${q.passage || ""}`} compact={true} />
 
-                        {/* Syllogism Venn Diagram Preview */}
-                        <SyllogismDiagramView text={`${q.explanation || ""} ${q.question || ""} ${q.passage || ""}`} compact={true} />
                         
                         {/* Solution Image Upload */}
                         <div className="mt-4 flex items-center gap-2">

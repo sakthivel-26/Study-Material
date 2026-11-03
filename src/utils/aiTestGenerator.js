@@ -1,3 +1,4 @@
+import { questionPositions, mergeExtractedQuestions } from "./questionStructure.js";
 // ------------------------------------------------------------------
 // Multi-LLM Question & Mock Test Generator Engine for KEN IAS Academy.
 // Supports:
@@ -142,47 +143,22 @@ Return ONLY raw valid JSON array of objects without markdown formatting or backt
 };
 
 // 1. Google Gemma-7B Provider (Supports Hugging Face, Groq, NVIDIA NIM, and Local Ollama)
-async function callGemma7B(apiKey, prompt, customEndpoint) {
-  const endpoint = customEndpoint || "https://api-inference.huggingface.co/models/google/gemma-7b-it";
-  const headers = { "Content-Type": "application/json" };
-  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-
-  let body = {};
-  if (endpoint.includes("huggingface")) {
-    body = { inputs: prompt, parameters: { temperature: 0.3, max_new_tokens: 1500 } };
-  } else {
-    body = {
-      model: "google/gemma-7b",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
-    };
-  }
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
+async function callGemma7B(apiKey, prompt) {
+  const model = getEnvKey('VITE_HUGGINGFACE_MODEL') || getEnvKey('HUGGINGFACE_MODEL');
+  if (!model) throw new Error('Set a Hugging Face Inference Providers model ID in AI settings.');
+  const response = await fetch('https://router.huggingface.co/v1/chat/completions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 4096 }),
+    // Free inference providers can queue indefinitely. The source parser keeps
+    // every question safe, so fail over quickly instead of blocking extraction.
+    signal: AbortSignal.timeout(20000),
   });
-
-  if (!response.ok) throw new Error(`Gemma-7B API Error (${response.status}): ${response.statusText}`);
+  if (!response.ok) throw new Error(`Hugging Face API error (${response.status})`);
   const data = await response.json();
-
-  let text = "";
-  if (Array.isArray(data) && data[0]?.generated_text) {
-    text = data[0].generated_text;
-  } else if (data.choices?.[0]?.message?.content) {
-    text = data.choices[0].message.content;
-  } else {
-    text = JSON.stringify(data);
-  }
-
-  // Extract raw JSON array from generated response
-  const jsonStart = text.indexOf("[");
-  const jsonEnd = text.lastIndexOf("]");
-  if (jsonStart !== -1 && jsonEnd !== -1) {
-    return JSON.parse(text.substring(jsonStart, jsonEnd + 1));
-  }
-  return JSON.parse(text);
+  if (data.choices?.[0]?.finish_reason === 'length') throw new Error('Hugging Face response was truncated.');
+  const content = (data.choices?.[0]?.message?.content || '').replace(/```(?:json)?/g, '').trim();
+  const parsed = JSON.parse(content);
+  return Array.isArray(parsed) ? parsed : parsed.questions || [];
 }
 
 // Global Session State for AI Providers
@@ -191,6 +167,7 @@ export const aiSessionState = {
   nvidiaDisabledReason: "",
   modelCooldowns: {}, // modelName -> timestamp ms
   groqCooldownUntil: 0,
+  providerCooldowns: {}, // provider name -> timestamp ms
   providerStats: {
     NVIDIA: 0,
     Gemini: 0,
@@ -353,7 +330,7 @@ async function callGemini(apiKey, prompt) {
       const response = await fetchWith503Retry(() =>
         fetch("/api/gemini", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...(getEnvKey('VITE_GEMINI_API_KEY') ? { Authorization: `Bearer ${getEnvKey('VITE_GEMINI_API_KEY')}` } : {}) },
           body: JSON.stringify({
             model,
             contents: [{ parts: [{ text: prompt }] }],
@@ -373,7 +350,14 @@ async function callGemini(apiKey, prompt) {
 
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
-        throw new Error(`Gemini ${model} error (${response.status}): ${errText || response.statusText}`);
+        const providerError = new Error(`Gemini ${model} error (${response.status}): ${errText || response.statusText}`);
+        // Authentication/proxy configuration failures affect every model, so
+        // trying two more models only adds rate-limiter delays.
+        if ([401, 403, 500, 502].includes(response.status)) {
+          lastErr = providerError;
+          break;
+        }
+        throw providerError;
       }
 
       const data = await response.json();
@@ -623,18 +607,15 @@ async function callNvidia(apiKey, prompt) {
   }
 
   const configuredModel = getEnvKey("VITE_NVIDIA_MODEL") || getEnvKey("NVIDIA_MODEL");
-  const candidateModels = [
-    configuredModel,
-    "nvidia/nemotron-4-340b-instruct",
-    "meta/llama-3.1-70b-instruct",
-    NVIDIA_REASONING_MODEL
-  ].filter(Boolean);
+  // Trying several unavailable models at 50 seconds each made a single
+  // question take minutes. Use the configured model plus one known fallback.
+  const candidateModels = [...new Set([configuredModel, NVIDIA_REASONING_MODEL].filter(Boolean))];
 
   let lastError = null;
   for (const model of candidateModels) {
     if (aiSessionState.nvidiaDisabled) break;
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(new Error("NVIDIA request timed out after 50s")), 50000);
+    const id = setTimeout(() => controller.abort(new Error("NVIDIA request timed out after 25s")), 25000);
 
     try {
       const response = await fetch("/api/nvidia/v1/chat/completions", {
@@ -1601,6 +1582,10 @@ export async function generateAIMockTest({ category, subject, topic, level = "me
 export function convertTextTableToMarkdown(rawText) {
   if (!rawText || typeof rawText !== "string") return rawText;
   if (/\|.*\|/.test(rawText) && /\|\s*[-:]+[-| :]*\|/.test(rawText)) return rawText;
+  // Arithmetic expressions and prose also contain numbers. Only reflow text
+  // that has a visible column delimiter; otherwise keep the source intact and
+  // let the admin attach/crop the PDF image for a diagram or complex table.
+  if (!/[|\t]|\S {2,}\S/.test(rawText)) return rawText;
 
   const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
   if (lines.length < 2) return rawText;
@@ -1623,7 +1608,9 @@ export function convertTextTableToMarkdown(rawText) {
   }
 
   // Allow table formatting even if there is 1 data row (very common in single-row or horizontal DI tables)
-  if (dataRows.length >= 1) {
+  const singleHorizontalTable = dataRows.length === 1 && /\btable\b/i.test(rawText) &&
+    headerLineIndex >= 0 && /[|\t]|\S {2,}\S/.test(lines[headerLineIndex]) && dataRows[0].length >= 3;
+  if ((dataRows.length >= 2 || singleHorizontalTable) && dataRows.every(row => row.length === dataRows[0].length)) {
     const colCount = Math.max(...dataRows.map(r => r.length));
     const headerLine = headerLineIndex >= 0 ? lines[headerLineIndex] : null;
     const introLines = headerLineIndex >= 0 ? lines.slice(0, headerLineIndex) : [];
@@ -1681,15 +1668,43 @@ export function convertTextTableToMarkdown(rawText) {
   return rawText;
 }
 
-export function inferSectionFromContent(questionText = "", passageText = "", questionNumber = null) {
-  // If sequential question number is known in a standard 100Q Indian Bank exam
-  if (typeof questionNumber === "number" && questionNumber > 0 && questionNumber <= 100) {
-    if (questionNumber <= 35) return "Quantitative Aptitude";
-    if (questionNumber <= 65) return "English Language";
-    return "Reasoning Ability";
+function formatSolvedArrangementContext(rawText) {
+  const converted = convertTextTableToMarkdown(rawText);
+  if (/\|.*\|/.test(converted) && /\|\s*---/.test(converted)) return converted;
+
+  const lines = String(rawText || '').split('\n').map(line => line.trim()).filter(Boolean);
+  if (lines.length < 2) return converted;
+
+  const tokenRows = lines.map(line => line.split(/\s{2,}|\t+|\s+/).filter(Boolean));
+  // Vertical stack arrangements are commonly printed as `Box`, then one box
+  // name per line from top to bottom.
+  if (/^(?:box|person|seat|floor|position)$/i.test(lines[0]) && tokenRows.slice(1).every(row => row.length === 1)) {
+    const values = tokenRows.slice(1).map(row => row[0]);
+    const rows = values.map((value, index) => {
+      const position = index === 0 ? 'Top (1)' : index === values.length - 1 ? `Bottom (${values.length})` : String(index + 1);
+      return `| ${position} | ${value} |`;
+    });
+    return `| Position | ${lines[0]} |\n| --- | --- |\n${rows.join('\n')}`;
   }
 
-  const text = `${passageText || ""} ${questionText || ""}`.toLowerCase();
+  // Text-only solved tables (Month/Person, Floor/Resident, etc.) may contain
+  // no digits, so the generic numeric DI converter intentionally ignores them.
+  const width = tokenRows[0].length;
+  if (width >= 2 && tokenRows.slice(1).every(row => row.length === width)) {
+    return `| ${tokenRows[0].join(' | ')} |\n| ${tokenRows[0].map(() => '---').join(' | ')} |\n` +
+      tokenRows.slice(1).map(row => `| ${row.join(' | ')} |`).join('\n');
+  }
+
+  return converted;
+}
+
+export function inferSectionFromContent(questionText = "", passageText = "", questionNumber = null) {
+  const text = `${passageText || ""} ${questionText || ""}`.replace(/^\s*direc[ \t]*tions?[^\n]*\n?/i, '').toLowerCase();
+  if (/(?:read(?:ing)?\s+(?:the\s+following\s+)?passage|according to the passage|author of the passage|word in the passage|most appropriate title|tone of the passage|paragraph\s+above|comprehension)/i.test(text)) return "English Language";
+  if (/(?:statements?\s*:.*conclusions?\s*:|only\s+a\s+few\s+\w+\s+are|(?:all|some|no)\s+\w+\s+are\s+\w+|syllogism)/is.test(text)) return "Reasoning Ability";
+  if (/(?:\b(?:point|person)\s+[A-Z]\b.{0,100}\b(?:north|south|east|west|left|right)\b|\b\d+\s*(?:m|metres?|meters?)\b.{0,100}\b(?:turns?|walks?|moves?|right|left|north|south|east|west)\b|shortest\s+distance\s+between\s+points?)/i.test(text)) return "Reasoning Ability";
+  if (/(?:√|∛|[²³⁴⁵⁶⁷⁸⁹]|\b\d+(?:\.\d+)?\s*%\s*of\b|\b(?:simplif(?:y|ication)|approximation)\b)/i.test(questionText)) return "Quantitative Aptitude";
+  if (/\d[\s\S]{0,100}[+×÷=−][\s\S]{0,100}[\d?]/.test(questionText)) return "Quantitative Aptitude";
   
   // 1. Reasoning indicators (Check first so puzzles/syllogisms/relations/schedules mentioning "English" or "passage" are NEVER misclassified as English)
   if (
@@ -1727,42 +1742,51 @@ export function extractPassagesAndRanges(text) {
   const passageRanges = [];
 
   // 1. Explicit directions blocks with question ranges
-  const dirRegex = /(?:Directions?\s*(?:\([^\)]+\)|for\s+questions?\s*\d+[\s\w–—-]+)?[\:\s]*|Read the following[^\:\n]*[\:\.\n]|Study the following[^\:\n]*[\:\.\n]|The table shows[^\:\n]*[\:\.\n]|The following table[^\:\n]*[\:\.\n]|Rearrange the following[^\:\n]*[\:\.\n])([\s\S]*?)(?=(?:\n\s*(?:Q(?:uestion)?\.?\s*)?\d{1,3}[\.\)\:\-]\s*)|$)/gi;
-
-  let dm;
-  while ((dm = dirRegex.exec(clean)) !== null) {
-    const fullBlock = dm[0].trim();
-    const rangeMatch = fullBlock.match(/(?:Q(?:uestion)?s?[\:\s\.]*|\(\s*Q?\.?\s*|\b(?:questions?|nos?|q)\.?\s*)?(\d{1,3})\s*(?:-|to|–|—)\s*(\d{1,3})/i);
-    if (rangeMatch) {
-      const startNum = parseInt(rangeMatch[1], 10);
-      const endNum = parseInt(rangeMatch[2], 10);
-      if (!isNaN(startNum) && !isNaN(endNum) && endNum >= startNum && (endNum - startNum) <= 20) {
-        passageRanges.push({ 
-          startNum, 
-          endNum, 
-          passage: convertTextTableToMarkdown(fullBlock) 
-        });
-      }
+  const positions = questionPositions(clean);
+  const headers = [...clean.matchAll(/(?:^|\n)[ \t]*Direc[ \t]*tions?[^\n]*?(\d{1,3})\s*(?:-|to|–|—)\s*(\d{1,3})[^\n]*/gi)];
+  for (const header of headers) {
+    const startNum = Number(header[1]), endNum = Number(header[2]);
+    const firstQuestion = positions.find(p => p.index > header.index && p.num >= startNum && p.num <= endNum);
+    if (firstQuestion && endNum >= startNum) {
+      const precedingPages = [...clean.slice(0, header.index).matchAll(/--- Page (\d+) ---/g)];
+      const passage = clean.slice(header.index, firstQuestion.index)
+        .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, '')
+        .replace(/--- Page \d+ ---/g, '')
+        .replace(/IBPS PO Pre held on [^\n]+/gi, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      passageRanges.push({
+        startNum,
+        endNum,
+        pageNumber: precedingPages.length ? Number(precedingPages.at(-1)[1]) : null,
+        passage
+      });
     }
   }
 
-  // 2. Detect leading passage / directions before Question 1
-  const firstQMatch = clean.match(/(?:^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*1\s*[\.\)\:\-]\s*|\(1\)\s*)(?=\s*\S)/i);
-  let leadingPassage = "";
-  if (firstQMatch && firstQMatch.index >= 30) {
-    const preText = clean.substring(0, firstQMatch.index).trim();
-    const sanitizedPre = preText
-      .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, "")
-      .replace(/IBPS PO Pre held on [^\n]+/gi, "")
-      .trim();
-
-    if (sanitizedPre.length >= 30 && !sanitizedPre.toLowerCase().startsWith("page ") && !sanitizedPre.toLowerCase().includes("all rights reserved")) {
-      leadingPassage = convertTextTableToMarkdown(sanitizedPre);
-      if (!passageRanges.some(r => r.startNum === 1)) {
-        passageRanges.unshift({ startNum: 1, endNum: 5, passage: leadingPassage });
-      }
-    }
+  // Some papers print a shared puzzle or reading passage under an unnumbered
+  // `Directions:` / `Read the following passage:` heading. Attach the text
+  // before its first question to the nearby set, stopping at the next heading.
+  const unnumbered = [...clean.matchAll(/(?:^|\n)[ \t]*(?:Directions?[ \t]*:|Read the following passage\b|Study the following information\b)[^\n]*/gi)];
+  for (let i = 0; i < unnumbered.length; i++) {
+    const header = unnumbered[i];
+    const first = positions.find(p => p.index > header.index);
+    if (!first || passageRanges.some(r => first.num >= r.startNum && first.num <= r.endNum)) continue;
+    const nextHeading = Math.min(
+      unnumbered[i + 1]?.index ?? clean.length,
+      ...headers.filter(h => h.index > header.index).map(h => h.index)
+    );
+    const passage = clean.slice(header.index, first.index)
+      .replace(/--- Page \d+ ---/g, '').replace(/\n{3,}/g, '\n\n').trim();
+    if (passage.length < 45 || /^(?:Directions?\s*:)?\s*(?:answer|solve) the following (?:questions|arithmetic)/i.test(passage)) continue;
+    const inSet = positions.filter(p => p.index >= first.index && p.index < nextHeading).slice(0, 6);
+    if (!inSet.length) continue;
+    const pages = [...clean.slice(0, header.index).matchAll(/--- Page (\d+) ---/g)];
+    passageRanges.push({ startNum: first.num, endNum: inSet.at(-1).num,
+      pageNumber: pages.length ? Number(pages.at(-1)[1]) : null, passage });
   }
+
+  const leadingPassage = passageRanges.find(r => r.startNum === 1)?.passage || "";
 
   return { passageRanges, leadingPassage };
 }
@@ -1785,12 +1809,24 @@ export function isolateQuestionsAndSolutions(fullText) {
   const cleanText = fullText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
   // Comprehensive solution headers common in Indian competitive exams
-  const solHeaderRegex = /(?:^|\n)\s*(?:[-=~_*#]{2,}\s*)?(?:ANSWERS?\s*(?:&|AND|\/|\+)\s*SOLUTIONS?|SOLUTIONS?\s*(?:&|AND|\/|\+)\s*ANSWERS?|ANSWERS?\s*(?:&|AND|\/|\+|WITH)\s*EXPLANATIONS?|SOLUTIONS?\s*(?:&|AND|\/|\+|WITH)\s*EXPLANATIONS?|HINTS?\s*(?:&|AND|\/|\+)\s*SOLUTIONS?|HINTS?\s*(?:&|AND|\/|\+)\s*EXPLANATIONS?|DETAILED\s*(?:SOLUTIONS?|EXPLANATIONS?)|COMMON\s*EXPLANATIONS?|ANSWERS?\s*(?:KEY|SHEET|KEYS)|ANSWER\s+KEY|SOLUTIONS?\s*:|ANSWERS?\s*:|EXPLANATIONS?\s*:|HINTS?\s*:|(?:^|\n)\s*(?:ANSWERS?|SOLUTIONS?|EXPLANATIONS?|HINTS?)\s*(?:\n|$))(?:\s*[-=~_*#]{2,})?/gi;
+  // Singular `Explanation:` / `Solution:` lines often appear directly after
+  // one question. They are inline metadata, not the beginning of a global
+  // solutions section. Colon-style section headers must therefore be plural;
+  // a singular heading is still accepted when it occupies a line by itself.
+  const solHeaderRegex = /(?:^|\n)[ \t]*(?:[-=~_*#]{2,}[ \t]*)?(?:ANSWERS?[ \t]*(?:&|AND|\/|\+)[ \t]*SOLUTIONS?|SOLUTIONS?[ \t]*(?:&|AND|\/|\+)[ \t]*ANSWERS?|(?:ANSWERS?|SOLUTIONS?)[ \t]*(?:&|AND|\/|\+|WITH)[ \t]*EXPLANATIONS?|HINTS?[ \t]*(?:&|AND|\/|\+)[ \t]*(?:SOLUTIONS?|EXPLANATIONS?)|DETAILED[ \t]*(?:SOLUTIONS?|EXPLANATIONS?)|COMMON[ \t]*EXPLANATIONS?|ANSWERS?[ \t]*(?:KEY|SHEET|KEYS)|ANSWER[ \t]+KEY|(?:ANSWERS?|SOLUTIONS?|EXPLANATIONS?|HINTS?)[ \t]*:?[ \t]*(?=\n|$))(?:[ \t]*[-=~_*#]{2,})?/gi;
 
   let splitIndex = -1;
+  let trustedStandaloneHeader = false;
   let m;
-  while ((m = solHeaderRegex.exec(cleanText)) !== null) {
-    if (m.index >= 80) {
+  // Prefer an unambiguous standalone section heading. Many banking PDFs use
+  // exactly `Solution` on its own line before S1, S2, ... entries.
+  const standaloneHeader = /(?:^|\n)[ \t]*(?:COMMON[ \t]+EXPLANATIONS?|SOLUTIONS?|ANSWERS?|EXPLANATIONS?|HINTS?|ANSWER[ \t]+KEY)[ \t]*:?[ \t]*(?=\n|$)/i.exec(cleanText);
+  if (standaloneHeader && questionPositions(cleanText.slice(0, standaloneHeader.index)).length > 0) {
+    splitIndex = standaloneHeader.index;
+    trustedStandaloneHeader = true;
+  }
+  while (splitIndex === -1 && (m = solHeaderRegex.exec(cleanText)) !== null) {
+    if (questionPositions(cleanText.slice(0, m.index)).length > 0) {
       splitIndex = m.index;
       break;
     }
@@ -1816,7 +1852,7 @@ export function isolateQuestionsAndSolutions(fullText) {
       if (lastNum >= 3 && num === 1) {
         const candidateAfter = cleanText.substring(match.index);
         const hasSolIndicators = /(?:ans(?:wer)?[\:\s\.\-]|hence\s+option|correct\s+option|^\s*\d{1,3}\s*[\.\)]\s*\(?[A-Ea-e]\)?\s+|\boption\s+[A-Ea-e]\b)/im.test(candidateAfter.slice(0, 300)) ||
-          !candidateAfter.slice(0, 400).includes("(c)");
+          false;
         if (hasSolIndicators) {
           splitIndex = match.index;
           break;
@@ -1839,7 +1875,7 @@ export function isolateQuestionsAndSolutions(fullText) {
     const numberedHeaders = (candidateSolutions.match(/(?:^|\n)\s*(?:(?:question|ques|q)\s*[\.:\-]?\s*)?(?:\(?\s*\d{1,3}\s*[\.\)\:\-]\s*|\(\d{1,3}\)\s*)(?=\s*\S)/gi) || []).length;
 
     // In a real question set, there are >= 3 options per numbered question. In solutions, options are absent or scarce.
-    if (hasSolutionMarkers || candidateOptionsCount < numberedHeaders * 2.5 || numberedHeaders === 0) {
+    if (trustedStandaloneHeader || numberedHeaders === 0 || candidateOptionsCount < numberedHeaders * 2.5) {
       questionsText = candidateQuestions;
       solutionsText = candidateSolutions;
       console.log(`[AI] Cleanly separated questions (${questionsText.length} chars) from solutions (${solutionsText.length} chars) at char ${splitIndex}`);
@@ -1849,15 +1885,56 @@ export function isolateQuestionsAndSolutions(fullText) {
   // Parse solutions / explanations map from solutionsText
   const solutionsMap = {};
   if (solutionsText) {
+    // Compact answer-key grids often contain Q01 C / Q11 C / Q21 B on one
+    // visual line. They provide verified source answers, not explanations.
+    for (const key of solutionsText.matchAll(/\bQ\s*0*(\d{1,3})\s*[.):-]?\s+([A-E])\b/gi)) {
+      solutionsMap[Number(key[1])] = { answerLetter: key[2].toUpperCase(), explanation: '' };
+    }
     // 1. Detect Common Explanation (e.g. puzzle arrangement or table)
     let commonExplanation = "";
-    const ceMatch = solutionsText.match(/(?:Common\s+Explanation[^\n]*\n)([\s\S]*?)(?=(?:\n\s*(?:Q(?:uestion)?\.?\s*)?\d{1,3}[\.\)\:\-]\s*)|$)/i);
+    const ceMatch = solutionsText.match(/(?:Common\s+Explanations?[^\n]*\n)([\s\S]*?)(?=(?:\n\s*Answers?\s*:)|(?:\n\s*(?:Q(?:uestion)?\.?\s*)?\d{1,3}[\.\)\:\-]\s*)|$)/i);
     if (ceMatch) {
-      commonExplanation = ceMatch[1].trim();
+      commonExplanation = ceMatch[1]
+        .replace(/(?:^|\n)\s*(?:Join us|www\.|https?:\/\/|SBI\s*\|\s*RBI)[^\n]*/gi, '')
+        .replace(/--- Page \d+ ---/g, '').trim();
+      const tableHeaders = [...commonExplanation.matchAll(/(?:^|\n)\s*Years?\s+Persons?\s*(?=\n)/gi)];
+      const finalSchedule = tableHeaders.length ? commonExplanation.slice(tableHeaders.at(-1).index) : '';
+      const rows = [...finalSchedule.matchAll(/(?:^|\n)\s*(\d{4})\s+([A-Z])\s*(?=\n|$)/g)];
+      if (rows.length >= 3) {
+        const table = `| Year | Person |\n| --- | --- |\n${rows.map(row => `| ${row[1]} | ${row[2]} |`).join('\n')}`;
+        commonExplanation = `${commonExplanation}\n\n### Solved Arrangement\n${table}`;
+      }
     }
 
-    // 2. Parse individual question solutions: "1. (A) ...", "1. Answer: A ...", "Q.1 ...", etc.
-    const solItemRegex = /(?:^|\n)\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*[\.\)\:\-]\s*(?!\d)/g;
+    // Capture solved arrangements printed once before a puzzle range, such as
+    // `Directions (66-70):` followed by a Box/Person table and then S66-S70.
+    const solvedRangeContexts = [];
+    const solvedRangeHeader = /(?:^|\n)[ \t]*Direc[ \t]*tions?[ \t]*\([ \t]*(\d{1,3})[ \t]*(?:-|to|–|—)[ \t]*(\d{1,3})[ \t]*\)[^\n]*\n/gi;
+    let rangeMatch;
+    while ((rangeMatch = solvedRangeHeader.exec(solutionsText)) !== null) {
+      const startNum = Number(rangeMatch[1]);
+      const endNum = Number(rangeMatch[2]);
+      const afterHeader = solutionsText.slice(solvedRangeHeader.lastIndex);
+      const firstSolution = afterHeader.search(new RegExp(`(?:^|\\n)[ \\t]*S[ \\t]*0*${startNum}[ \\t]*[.):\\-]`, "i"));
+      if (firstSolution < 0) continue;
+      const rawContext = afterHeader.slice(0, firstSolution)
+        .replace(/--- Page \d+ ---/g, "")
+        .replace(/www\.[^\s]+/gi, "")
+        .trim();
+      if (rawContext.length >= 3) {
+        solvedRangeContexts.push({ startNum, endNum, context: formatSolvedArrangementContext(rawContext) });
+      }
+    }
+
+    // 2. Parse individual question solutions: "1. (A) ...", "S1. Ans.(A)",
+    // "1. Answer: A ...", "Q.1 ...", etc.
+    // In two-column PDFs a watermark/page label can share the visual line with
+    // `S34. Ans.(e)`. The S-number marker is still unambiguous, so it need not
+    // be the first token on the reconstructed line.
+    const usesSPrefixedSolutions = /\bS[ \t]*0*1[ \t]*[.):\-][ \t]*Ans/.test(solutionsText);
+    const solItemRegex = usesSPrefixedSolutions
+      ? /\bS[ \t]*(\d{1,3})[ \t]*[.):\-][ \t]*(?=Ans\b)/g
+      : /(?:^|\n)\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*[\.\)\:\-]\s*(?!\d)/gi;
     const solMatches = [];
     let sm;
     while ((sm = solItemRegex.exec(solutionsText)) !== null) {
@@ -1871,19 +1948,36 @@ export function isolateQuestionsAndSolutions(fullText) {
 
       // Extract correct answer letter if present: e.g. "(A)", "Option A", "Ans. (a)", "Hence option A", "a) ...", "A. ..."
       let ansLetter = "";
-      const ansMatch = expBody.match(/(?:(?:Ans(?:wer)?[\:\s\.\-]+|\(?Ans\)?\s*[\:\.\-]?\s*|\bOption\s*|Hence\s+option\s*)\(?([A-Ea-e])\)?|^\(?([A-Ea-e])\)[\.\s\:]|^([A-Ea-e])[\.\)\:\s])/i);
+      const ansMatch = expBody.match(/(?:(?:Ans(?:wer)?[\:\s\.\-]+|\(?Ans\)?\s*[\:\.\-]?\s*|\bOption\s*|Hence\s+option\s*)\(?([A-Ea-e])\)?|^\(?([A-Ea-e])\)[\.\s\:]|^([A-Ea-e])(?:[\.\)\:\s]|$))/i);
       if (ansMatch) {
         ansLetter = (ansMatch[1] || ansMatch[2] || ansMatch[3]).toUpperCase();
       }
 
-      let fullExp = expBody;
-      if (commonExplanation && !fullExp.toLowerCase().includes("common explanation")) {
+      let fullExp = expBody
+        .replace(/^\s*Ans(?:wer)?\s*[.:\-]?\s*\(?[A-Ea-e]\)?\s*/i, '')
+        .replace(/^\s*Sol(?:ution)?\s*[.:\-]?\s*/i, '')
+        .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, '')
+        .replace(/--- Page \d+ ---/g, '')
+        .replace(/IBPS PO Pre held on [^\n]+/gi, '')
+        .replace(/(?:^|\n)\s*(?:Join us|www\.|https?:\/\/|SBI\s*\|\s*RBI)[^\n]*/gi, '')
+        .trim();
+      // A Directions block printed between S77 and S78 belongs to the next
+      // puzzle set, not to S77's explanation.
+      const nextDirectionsIndex = fullExp.search(/(?:^|\n)[ \t]*Direc[ \t]*tions?[ \t]*\(/i);
+      if (nextDirectionsIndex >= 0) fullExp = fullExp.slice(0, nextDirectionsIndex).trim();
+      fullExp = fullExp.replace(/(?:^|\n)[ \t]*\d{1,3}[ \t]*$/g, '').trim();
+      if (/^(?:the logic is|solution|explanation)[ \t]*:?[ \t]*$/i.test(fullExp)) fullExp = '';
+      const solvedRange = solvedRangeContexts.find(r => cur.qNum >= r.startNum && cur.qNum <= r.endNum);
+      if (solvedRange?.context) {
+        fullExp = `### Solved Arrangement\n${solvedRange.context}${fullExp ? `\n\n${fullExp}` : ''}`.trim();
+      }
+      if (commonExplanation && !fullExp.includes('### Common Explanation')) {
         fullExp = `### Common Explanation\n${commonExplanation}\n\n${fullExp}`.trim();
       }
 
       solutionsMap[cur.qNum] = {
         explanation: fullExp,
-        answerLetter: ansLetter
+        answerLetter: ansLetter || solutionsMap[cur.qNum]?.answerLetter || ''
       };
     }
   }
@@ -1909,6 +2003,7 @@ CRITICAL SHARED PASSAGE & DIRECTIONS MANDATE (PUZZLES, SEATING ARRANGEMENT, READ
 - Questions 1, 2, 3, 4, 5 in the set MUST ALL have the exact same full passage text in their "passage" property!
 - NEVER leave "passage" blank or empty for questions 2, 3, 4, 5. Students need to read the passage on every question card while answering!
 - If the text chunk begins with a Directions/Passage block before Question 1, that is the shared passage for the following questions.
+- The passage field must contain ONLY the common directions, paragraph, clues, or source table. NEVER include the individual Q-numbered question stem, its options, the answer, or the solution in passage.
 
 CRITICAL MATHEMATICAL NOTATION RULES:
 - PRESERVE ALL POWERS AND ROOTS PRECISELY:
@@ -1917,7 +2012,7 @@ CRITICAL MATHEMATICAL NOTATION RULES:
   * Higher powers: ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
   * Fractional exponents: write as ^(1/2), ^(1/3), ^(2/3), etc. (e.g. (1681)^(1/2) + (4094)^(1/3) = ?)
   * NEVER drop fractional powers or carets! (1681)^(1/2) must NEVER become (1681)^.
-  * If the raw text contains a dangling caret like (1681)^ or (4094)^ due to PDF OCR artifact, deduce and restore the mathematical power: 1681 is 41² so power is (1/2), 4096 is 16³ so power is (1/3).
+  * If the raw text contains a dangling caret like (1681)^ or (4094)^ due to PDF OCR artifact, preserve the source and flag it for review. Never guess a missing mathematical symbol.
 - PRESERVE ALL FRACTIONS PRECISELY:
   * Mixed fractions: use vulgar fractions where possible (e.g. 22 ⅓ % of 435.1) or write as 22 1/3 %. NEVER omit the fraction!
   * Vertical/standalone fractions: write as 11/7, 3/4, etc. (e.g. - 11/7 of 1734.68). NEVER drop "11/7" to leave just "- of 1734.68"!
@@ -1925,7 +2020,7 @@ CRITICAL MATHEMATICAL NOTATION RULES:
 
 STEP-BY-STEP SOLUTION & DIAGRAM MANDATE:
 - For the "explanation" field of EVERY question, you MUST provide a detailed step-by-step solution:
-  * Reasoning Puzzles & Seating Arrangements: Provide step-by-step deductive logic AND include the complete final solved markdown table (e.g. | Person | Floor / Position | Attribute | ...) so students see the complete solved matrix!
+  * Reasoning Puzzles & Seating Arrangements: Solve the shared puzzle once, provide step-by-step deductive logic, then add a "### Solved Arrangement" heading followed by the complete final markdown table (e.g. | Person | Floor / Position | Attribute | ...). Include that same solved table in every question belonging to the set.
   * Direction Sense: Detail each step of the journey with exact distances and cardinal directions (e.g. "Starts at Point A, walks 10m North to Point B, turns right and walks 5m East to Point C...") so the diagram generator can draw the exact path.
   * Syllogisms: Explicitly list the statements ("Statements: All A are B. Some B are C.") and conclusions ("Conclusions: I. Some A are C. II. No A is C.") with step-by-step Venn circle analysis and deduction.
   * Quantitative Aptitude (Simplification, Approximation, Series, DI):
@@ -1935,11 +2030,7 @@ STEP-BY-STEP SOLUTION & DIAGRAM MANDATE:
     Step 3: Clear statement of the correct option and final value.
   * English Language: State the grammatical rule, error correction, or context-based justification.
 
-BANK EXAM 3-SECTION MANDATE:
-Categorize each question into one of the 3 standard Bank sections:
-- If question number is between 1 and 35: "Quantitative Aptitude" (Data Interpretation, Simplification, Approximation, Number Series, Quadratic Equations, Arithmetic)
-- If question number is between 36 and 65: "English Language" (Reading Comprehension, Para Jumbles, Cloze Test, Error Spotting, Fillers, Sentence Improvement)
-- If question number is between 66 and 100: "Reasoning Ability" (Puzzles, Seating Arrangements, Syllogisms, Inequalities, Coding-Decoding, Blood Relations, Direction Sense, Scheduling)
+SECTION RULE: Use the source section heading, then the question and shared passage content. Never infer the section from question number.
 
 FORMAT:
 {
@@ -2017,12 +2108,13 @@ async function callGroq(apiKey, prompt) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(getEnvKey('VITE_GROQ_API_KEY') ? { Authorization: `Bearer ${getEnvKey('VITE_GROQ_API_KEY')}` } : {}),
         },
         body: JSON.stringify({
           model: model,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.1,
-          max_tokens: 750, // Strict limit <= 800 to prevent Groq OTPM 1000 exhaustion
+          max_tokens: 4096,
         }),
       });
 
@@ -2040,6 +2132,10 @@ async function callGroq(apiKey, prompt) {
         if (response.status === 401) {
           throw new Error(`Groq Auth Error (401): ${errText}`);
         }
+        if ([403, 500, 502].includes(response.status)) {
+          lastErr = new Error(`Groq API Error (${response.status}): ${errText || response.statusText}`);
+          break;
+        }
         console.warn(`[AI] Groq model ${model} returned ${response.status}, trying next model...`);
         lastErr = new Error(`Groq API Error (${response.status}): ${errText || response.statusText}`);
         continue;
@@ -2047,6 +2143,7 @@ async function callGroq(apiKey, prompt) {
 
       const data = await response.json();
       const choice = data.choices?.[0];
+      if (choice?.finish_reason === 'length') throw new Error('Groq response was truncated; the question needs another provider.');
 
       const text = choice?.message?.content || choice?.message?.reasoning_content || "{}";
       const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -2091,22 +2188,33 @@ async function callGroq(apiKey, prompt) {
 }
 
 async function callLLMChain(prompt) {
+  const key = name => getEnvKey(`VITE_${name}_API_KEY`) || getEnvKey(`${name}_API_KEY`);
   const providers = [];
-  if (!aiSessionState.nvidiaDisabled) {
-    providers.push({ name: "NVIDIA", fn: () => callNvidia("", prompt) });
-  }
-  providers.push({ name: "Gemini", fn: () => callGemini("", prompt) });
-  providers.push({ name: "Groq",   fn: () => callGroq("", prompt) });
+  if (key('HUGGINGFACE') || getEnvKey('HF_TOKEN')) providers.push({ name: 'huggingface', fn: () => callGemma7B(key('HUGGINGFACE') || getEnvKey('HF_TOKEN'), prompt) });
+  if (key('OPENROUTER')) providers.push({ name: 'openrouter', fn: () => callOpenRouter(key('OPENROUTER'), prompt, getEnvKey('VITE_OPENROUTER_MODEL') || 'openrouter/free') });
+  if (key('OPENAI')) providers.push({ name: 'openai', fn: () => callOpenAI(key('OPENAI'), prompt) });
+  if (key('DEEPSEEK')) providers.push({ name: 'deepseek', fn: () => callDeepSeek(key('DEEPSEEK'), prompt) });
+  // Server-side keys are supported by these proxy endpoints.
+  if (!aiSessionState.nvidiaDisabled) providers.push({ name: 'nvidia', fn: () => callNvidia('', prompt) });
+  providers.push({ name: 'gemini', fn: () => callGemini('', prompt) });
+  providers.push({ name: 'groq', fn: () => callGroq('', prompt) });
+  const preferred = getEnvKey('LLM_PROVIDER_TYPE');
+  providers.sort((a, b) => Number(b.name === preferred) - Number(a.name === preferred));
 
   let lastError = null;
   for (let i = 0; i < providers.length; i++) {
     const { name, fn } = providers[i];
+    if ((aiSessionState.providerCooldowns[name] || 0) > Date.now()) continue;
     try {
       const result = await fn();
       if (i > 0) console.log(`[AI] ✅ ${name} succeeded as fallback in chain.`);
       return result;
     } catch (err) {
       lastError = err;
+      // Do not make every parallel batch wait on the same unavailable free
+      // provider. A later upload can try it again after this short cooldown.
+      const longFailure = /(?:timeout|timed out|401|403|404|not configured|invalid api|fetch failed)/i.test(err.message || "");
+      aiSessionState.providerCooldowns[name] = Date.now() + (longFailure ? 5 * 60_000 : 60_000);
       const nextProvider = providers[i + 1]?.name;
       if (nextProvider) {
         console.warn(`[AI] ${name} failed in chain: ${err.message}. Falling back to ${nextProvider}...`);
@@ -2143,34 +2251,10 @@ function chunkText(text, maxLen = 12000) {
 // Keep each LLM request aligned to complete questions. Character-only chunks can
 // split a question from its options, which was the main reason questions vanished.
 function chunkQuestions(text, maxQuestions = 6, maxChars = 5000) {
-  // First, find true sequential question positions (1 to N) to avoid splitting on sub-numbered
-  // puzzle clues like (1)-(13) or table ratios like "3 : 2"
-  const qSplitRegex = /(?:^|\n)\s*(?:Q(?:uestion)?\.?\s*)?(\d{1,3})\s*[\.\)]\s*(?!\d)/g;
-  const rawQPositions = [];
-  let qm;
-  while ((qm = qSplitRegex.exec(text)) !== null) {
-    rawQPositions.push({
-      num: parseInt(qm[1], 10),
-      index: qm.index,
-      matchLen: qm[0].length
-    });
-  }
-
-  const qPositions = [];
-  let expected = 1;
-  for (let i = 0; i < rawQPositions.length; i++) {
-    const cur = rawQPositions[i];
-    if (cur.num === expected) {
-      qPositions.push(cur);
-      expected++;
-    } else if (cur.num > expected && cur.num <= expected + 2) {
-      qPositions.push(cur);
-      expected = cur.num + 1;
-    }
-  }
+  const qPositions = questionPositions(text);
 
   // If sequential parser found at least 5 questions, chunk strictly along true question boundaries!
-  if (qPositions.length >= 5) {
+  if (qPositions.length > 0) {
     const prefix = text.slice(0, qPositions[0].index).trim();
     const blocks = qPositions.map((pos, index) => {
       const nextIndex = index + 1 < qPositions.length ? qPositions[index + 1].index : text.length;
@@ -2236,64 +2320,83 @@ function chunkQuestions(text, maxQuestions = 6, maxChars = 5000) {
   return chunks;
 }
 
-function regexExtractQuestions(pdfText, category) {
-  const { questionsText, solutionsMap, leadingPassage, passageRanges } = isolateQuestionsAndSolutions(pdfText);
-  const cleanText = questionsText.replace(/\r\n/g, "\n");
-  const qRegex = /(?:^|\s)(?:Ques|Question|Q)[\s\.]*\d+\s*[\.\)]\s+|(?:^|\s)\d+\s*[\.\)]\s+(?=[A-Z])/i;
-  const rawBlocks = cleanText.split(qRegex).filter(b => b.trim().length > 10);
-  const uniqueQuestions = [];
+export function cleanPdfOption(value) {
+  let text = String(value ?? '').trim();
+  // Publishers stamp their site name beside the final option. PDF text
+  // extraction may join it directly to the answer, without even a space.
+  const watermark = text.search(/(?:https?:\/\/|www\.)[a-z0-9.-]+\.[a-z]{2,}/i);
+  if (watermark > 0) text = text.slice(0, watermark);
+  return text.replace(/(?:\s*[-|•]?\s*(?:downloaded from|visit us at|page\s+\d+\s+of\s+\d+)[^\n]*)$/i, '').trim();
+}
 
-  for (let i = 0; i < rawBlocks.length; i++) {
-    const block = rawBlocks[i];
-    let qText = block;
-    let options = ["Option A", "Option B", "Option C", "Option D", "Option E"];
-    const optRegex = /(?:\s|^)\(([a-eA-E])\)\s+|(?:\s|^)([a-eA-E])\)\s+|(?:\s|^)([a-eA-E])\.\s+/g;
-    const matches = [...block.matchAll(optRegex)];
-
-    if (matches.length >= 2) {
-      const firstOptIndex = matches[0].index;
-      qText = block.substring(0, firstOptIndex).trim();
-      const optValues = [];
-      for (let j = 0; j < matches.length; j++) {
-        const start = matches[j].index + matches[j][0].length;
-        const end = j + 1 < matches.length ? matches[j + 1].index : block.length;
-        optValues.push(block.substring(start, end).replace(/\n/g, ' ').trim());
-      }
-      options = [];
-      for (let k = 0; k < Math.min(optValues.length, 5); k++) {
-        options.push(optValues[k] || `Option ${String.fromCharCode(65 + k)}`);
-      }
-      while (options.length < 5) {
-        options.push(`Option ${String.fromCharCode(65 + options.length)}`);
-      }
-    }
-    qText = qText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-    if (qText.length > 10 && matches.length > 0) {
-      const qNum = uniqueQuestions.length + 1;
-      const matchedRange = passageRanges.find(r => qNum >= r.startNum && qNum <= r.endNum);
-      const qPassage = matchedRange?.passage || (qNum <= 5 ? leadingPassage : "");
-      const solEntry = solutionsMap[qNum];
-      const correctLetter = solEntry?.answerLetter || "A";
-      const correctIdx = Math.max(0, correctLetter.charCodeAt(0) - 65);
-
-      uniqueQuestions.push({
-        id: `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
-        questionNumber: qNum,
-        question: qText,
-        question_text: qText,
-        options: options,
-        correctAnswerIndex: correctIdx < 5 ? correctIdx : 0,
-        source_answer: correctLetter,
-        passage: qPassage,
-        section: category || "General",
-        explanation: solEntry?.explanation || "",
-        solutionText: solEntry?.explanation || "",
-        imageUrl: ""
+export function parseUploadedQuestions(pdfText, defaultSection = "General") {
+  const { questionsText, solutionsMap, passageRanges } = isolateQuestionsAndSolutions(pdfText);
+  const positions = questionPositions(questionsText);
+  const sectionRanges = [...questionsText.matchAll(/(Quantitative Aptitude|Numerical Ability|Reasoning Ability|English Language)\s+QUESTIONS?\s*0*(\d{1,3})\s*[-–—]\s*0*(\d{1,3})/gi)].map(m => ({
+    section: /quantitative|numerical/i.test(m[1]) ? 'Quantitative Aptitude' : /reasoning/i.test(m[1]) ? 'Reasoning Ability' : 'English Language',
+    start: Number(m[2]), end: Number(m[3]),
+  }));
+  return positions.map((pos, i) => {
+    let block = questionsText.slice(pos.index + pos.matchLen, positions[i + 1]?.index ?? questionsText.length).trim();
+    // Following directions/section headers belong to the next set, never option E.
+    block = block.split(/\n[ \t]*(?:Directions?\b|Correct Answers?\s*:|Answer Key\b|Join us\b|(?:English Language|Reasoning Ability|Quantitative Aptitude|Numerical Ability)\s*(?:\n|$))/i)[0].trim();
+    block = block
+      .replace(/www\.BankExamsToday\.Com\s+Page\s+\d+/gi, '')
+      .replace(/--- Page \d+ ---/g, '')
+      .replace(/IBPS PO Pre held on [^\n]+/gi, '')
+      .trim();
+    const inlineSolution = block.match(/\n[ \t]*(?:Solution|Explanation|Ans(?:wer)?)[.:][ \t]*([\s\S]*)/i);
+    const printedAnswer = block.match(/(?:^|\n)[ \t]*Correct[ \t]+Option[ \t]*[-:.][ \t]*\(?([A-E])\)?/i);
+    const answerBoundary = printedAnswer?.index ?? inlineSolution?.index ?? block.length;
+    const optionText = block.slice(0, answerBoundary);
+    const optionMatches = [...optionText.matchAll(/(?:^|\s)(?:\(([a-e1-5])\)|([a-e1-5])[).:])[ \t]*/gim)];
+    const options = {};
+    optionMatches.forEach((m, j) => {
+      const rawLabel = (m[1] || m[2]).toUpperCase();
+      const label = /[1-5]/.test(rawLabel) ? String.fromCharCode(64 + Number(rawLabel)) : rawLabel;
+      if (!options[label]) options[label] = cleanPdfOption(optionText.slice(m.index + m[0].length, optionMatches[j + 1]?.index ?? optionText.length));
+    });
+    let question = block.slice(0, optionMatches[0]?.index ?? block.length).trim().replace(/^[.):\-]+\s*/, '');
+    const inlineAnswer = (printedAnswer?.[1] || block.match(/(?:Ans(?:wer)?)[.: \t-]+\(?([A-E])\)?/i)?.[1])?.toUpperCase();
+    const solution = solutionsMap[pos.num];
+    const sourceAnswer = solution?.answerLetter || inlineAnswer || '';
+    const passageRange = passageRanges.find(r => pos.num >= r.startNum && pos.num <= r.endNum);
+    const rawPassage = passageRange?.passage || '';
+    const passage = /(?:solve the following arithmetic|answer the following arithmetic|simplif(?:y|ication)|approximation)\b/i.test(rawPassage)
+      && !/(?:table|chart|graph|data|following information)/i.test(rawPassage)
+      ? '' : rawPassage;
+    // Some reasoning sets print one shared A-E conclusion legend in the
+    // Directions block and no options below each individual question.
+    if (Object.keys(options).length < 3 && passage) {
+      const sharedMatches = [...passage.matchAll(/(?:^|\s)(?:\(([a-e])\)|([a-e])[).:])[ \t]*/gim)];
+      sharedMatches.forEach((m, j) => {
+        const label = (m[1] || m[2]).toUpperCase();
+        const value = passage.slice(m.index + m[0].length, sharedMatches[j + 1]?.index ?? passage.length).trim();
+        if (value && !options[label]) options[label] = value;
       });
     }
-  }
-  return uniqueQuestions;
+    const before = questionsText.slice(0, pos.index);
+    const headers = [...before.matchAll(/(?:^|\n)[ \t]*(English(?: Language)?|Reasoning(?: Ability)?|Logical Reasoning|Quantitative Aptitude|Numerical Ability|General Awareness)[ \t]*(?=\n|$)/gi)];
+    const header = headers.at(-1)?.[1] || '';
+    const inferredSection = inferSectionFromContent(question, passage);
+    const printedRange = sectionRanges.find(r => pos.num >= r.start && pos.num <= r.end);
+    const section = inferredSection !== 'General' ? inferredSection : printedRange?.section || (/english/i.test(header) ? 'English Language' : /reasoning/i.test(header) ? 'Reasoning Ability' : /quantitative|numerical/i.test(header) ? 'Quantitative Aptitude' : header || defaultSection);
+    const finalPassage = /what will come in place of (?:the )?question mark|find the value of \?|solve the following (?:simplification|approximation)/i.test(passage)
+      ? '' : section === 'Quantitative Aptitude' && !/(?:table|chart|graph|data|following information)/i.test(passage) && !/\b\d+(?:\.\d+)?\s*(?:accounts?|visitors?|students?|litres?|liters?|km|m)\b/i.test(passage) ? '' : /\btable\b/i.test(passage) ? convertTextTableToMarkdown(passage) : passage;
+    const pages = [...before.matchAll(/--- Page (\d+) ---/g)];
+    const explanation = solution?.explanation || inlineSolution?.[1] || '';
+    return { id: `pdf_q_${Date.now()}_${i}`, questionNumber: pos.num,
+      question: question || `Select the appropriate option for blank (${pos.num}).`, question_text: question,
+      options, passage: finalPassage, passage_page_number: passageRange?.pageNumber || null,
+      section: section === 'General' ? defaultSection : section,
+      page_number: pages.length ? Number(pages.at(-1)[1]) : null,
+      source_answer: sourceAnswer, correctAnswerIndex: sourceAnswer ? sourceAnswer.charCodeAt(0) - 65 : null,
+      explanation, solutionText: explanation, needs_review: !sourceAnswer || !explanation,
+    };
+  });
 }
+
+const regexExtractQuestions = parseUploadedQuestions;
 
 /**
  * Ensures that for Caselet / Paragraph-based DI questions, the original text
@@ -2378,7 +2481,7 @@ export function isDIQuestion(q) {
   const content = `${passage} ${qText}`;
 
   // 1. Strict Exclusions: English verbal tests or Reasoning Puzzles MUST NEVER be marked as DI or have chart diagrams attached!
-  if (section.includes("english") || /(?:antonym|synonym|cloze test|para[\s-]?jumble|grammatical|spelt|sentence rearrangement)/i.test(content)) {
+  if (section.includes("english") || section.includes("reasoning") || /(?:antonym|synonym|cloze test|para[\s-]?jumble|grammatical|spelt|sentence rearrangement)/i.test(content)) {
     return false;
   }
   const isReasoningPuzzle = /(?:sitting around|seated around|circular table|facing north|facing south|facing inside|facing outside|facing the centre|facing center|parallel rows|floor puzzle|box puzzle|blood relation|syllogism|statement and conclusion|direction sense|coding[\s-]?decoding|order and ranking)/i.test(content);
@@ -2412,10 +2515,10 @@ export function findBestMatchingChartPage(q, pageImages) {
   if (!isDIQuestion(q)) return null;
 
   // 1. Direct chart_page_number or page_number check if provided and valid
-  const targetPageNum = q.chart_page_number || q.page_number;
+  const targetPageNum = q.chart_page_number;
   if (targetPageNum) {
     const found = pageImages.find(p => p.pageNum === targetPageNum);
-    if (found && !found.isPromo) return found;
+    if (found && !found.isPromo && (found.hasDI || /chart|graph|table/i.test(found.text || ""))) return found;
   }
 
   const passage = (q.passage || "").trim();
@@ -2482,11 +2585,25 @@ export function findBestMatchingChartPage(q, pageImages) {
   }
 
   // Only attach if there is strong, confident evidence this page contains the DI chart
-  if (highestScore >= 30) {
+  if (highestScore >= 80) {
     return bestPage;
   }
 
   return null;
+}
+
+export function findMatchingChartPages(q, pageImages) {
+  if (!isDIQuestion(q) || !Array.isArray(pageImages)) return [];
+  const startPage = Number(q.passage_page_number || q.chart_page_number || 0);
+  if (startPage) {
+    const visualPages = pageImages.filter(page =>
+      page && !page.isPromo && page.hasVisual &&
+      page.pageNum >= startPage && page.pageNum <= startPage + 1
+    );
+    if (visualPages.length) return visualPages;
+  }
+  const best = findBestMatchingChartPage(q, pageImages);
+  return best ? [best] : [];
 }
 
 export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "60 min", title, onProgress, signal, pageImages = [] }) {
@@ -2499,10 +2616,13 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   const nvidiaKey = getEnvKey("VITE_NVIDIA_API_KEY") || getEnvKey("NVIDIA_API_KEY");
   const geminiKey = getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("GEMINI_API_KEY");
   let enrichedText = pdfText;
+  const visionByPage = new Map();
 
   if (pageImages.length > 0 && (nvidiaKey || geminiKey)) {
     // Selectively enrich only DI chart / table pages (max 4) rather than bombarding all 19 pages
-    const diPages = pageImages.filter(p => !p.isPromo && (p.hasDI || /(?:directions?|chart|graph|table|breakup|ratio|sold by|percentage)/i.test(p.text || ""))).slice(0, 4);
+    const diPages = pageImages
+      .filter(p => !p.isPromo && (p.hasDI || /(?:chart|graph|table)/i.test(p.text || "")))
+      .slice(0, 4);
     if (diPages.length > 0) {
       console.log(`[AI Vision] 🖼️ Enriching ${diPages.length} DI chart page(s) with NVIDIA Nemotron Parse (Primary) & Gemini (Secondary)...`);
       if (onProgress) onProgress(0, diPages.length);
@@ -2532,7 +2652,8 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
               }
               if (cleanVisionText.length > 25) {
                 console.log(`[AI Vision] ✅ Page ${pageNum}: Extracted ${cleanVisionText.length} chars (charts/tables detected)`);
-                return `\n\n=== [Page ${pageNum} Vision Extract] ===\n${cleanVisionText}`;
+                visionByPage.set(Number(pageNum), cleanVisionText);
+                return cleanVisionText;
               }
             }
           } catch (err) {
@@ -2545,7 +2666,8 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         if (onProgress) onProgress(Math.min(i + BATCH_SIZE, diPages.length), diPages.length);
       }
       if (visionResults.length > 0) {
-        enrichedText = pdfText + "\n\n" + visionResults.join("\n");
+        // Chart data is passed only to questions from its source page.
+        enrichedText = pdfText;
         console.log(`[AI Vision] 📊 Enriched text: ${enrichedText.length} chars (added ${enrichedText.length - pdfText.length} chars of chart/table data)`);
       }
     }
@@ -2561,7 +2683,23 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   } = isolateQuestionsAndSolutions(enrichedText);
 
   // Compact, question-aligned batches keep every response below provider limits.
-  const chunks = chunkQuestions(questionsOnlyText, 6, 5000);
+  const sourceQuestions = parseUploadedQuestions(pdfText, category);
+  // Three complete questions per request is small enough for detailed banking
+  // solutions while cutting API round trips by roughly two thirds. AI is used
+  // selectively: source answers and full printed solutions remain authoritative,
+  // while incomplete questions and unsolved puzzle sets receive AI enrichment.
+  const allChunks = chunkQuestions(questionsOnlyText, 3, 8000);
+  const needsAI = q => {
+    const optionCount = Array.isArray(q.options) ? q.options.filter(Boolean).length : Object.keys(q.options || {}).length;
+    const puzzleLike = /(?:puzzle|sit|seating|row|floor|box|born|schedule|arrangement)/i.test(`${q.passage || ''} ${q.question || ''}`);
+    const hasSolvedTable = /###\s*Solved Arrangement|\|\s*[^|]+\s*\|\s*[^|]+\s*\|/i.test(q.explanation || '');
+    return q.needs_review || optionCount < 3 || (puzzleLike && !hasSolvedTable);
+  };
+  const chunks = sourceQuestions.length === 0 ? allChunks : allChunks.filter(chunk => {
+    if (chunk.startQ == null || chunk.endQ == null) return true;
+    return sourceQuestions.some(q => q.questionNumber >= chunk.startQ && q.questionNumber <= chunk.endQ && needsAI(q));
+  });
+  console.log(`[AI] Selective enrichment: ${chunks.length}/${allChunks.length} batch(es) require AI.`);
   let allQuestions = [];
   let completedChunks = 0;
 
@@ -2581,15 +2719,10 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
   }
 
   // Create an array of available provider callers: NVIDIA (Primary), Gemini (Secondary), Groq (Fallback)
-  const providerCallers = [];
-  if (!aiSessionState.nvidiaDisabled) {
-    providerCallers.push({ name: "NVIDIA", call: (prompt) => callNvidia("", prompt) });
-  }
-  providerCallers.push({ name: "Gemini", call: (prompt) => callGemini("", prompt) });
-  providerCallers.push({ name: "Groq",   call: (prompt) => callGroq("", prompt) });
+  const providerCallers = [{ name: "Configured provider chain", call: callLLMChain }];
 
   // Concurrency limited to 1-2 to protect Gemini/Groq rate limits
-  const CONCURRENCY = Math.min(providerCallers.length, 2) || 1;
+  const CONCURRENCY = Math.max(1, Math.min(2, chunks.length));
   console.log(`[AI] 🚀 Fast extraction active with ${CONCURRENCY} worker(s) (${providerCallers.map(p => p.name).join(" + ") || "Fallback Chain"})`);
 
   // Each worker gets a preferred provider, with the full chain as fallback
@@ -2627,10 +2760,16 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
 
     let chunkQuestions = [];
-    for (let attempt = 0; attempt < 2; attempt++) {
+    const maxAttempts = 1;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         console.log(`[AI] Chunk ${index + 1}: Requesting ${expectedCount} questions ${startQ && endQ ? `(Q${startQ}-Q${endQ})` : ""} (Worker ${workerIndex}, attempt ${attempt + 1})...`);
-        const prompt = buildExtractionPrompt(chunk, expectedCount, startQ, endQ);
+        const context = passageRanges.filter(r => startQ <= r.endNum && endQ >= r.startNum).map(r => r.passage).join("\n\n");
+        const pageNumber = sourceQuestions.find(q => q.questionNumber === startQ)?.page_number;
+        const chartData = visionByPage.get(Number(pageNumber)) || '';
+        const printedAnswers = sourceQuestions.filter(q => q.questionNumber >= startQ && q.questionNumber <= endQ && q.source_answer)
+          .map(q => `Q${q.questionNumber}: ${q.source_answer}`).join(', ');
+        const prompt = buildExtractionPrompt(`${context}\n\n${chunk}\n\n${printedAnswers ? `Printed answer key (use to check your worked solution; flag contradictions): ${printedAnswers}` : ''}\n\n${chartData ? `Chart data from source page ${pageNumber}:\n${chartData}` : ''}`, expectedCount, startQ, endQ);
         let response = await callWithPreferredProvider(prompt, workerIndex);
         
         let parsedQuestions = Array.isArray(response) ? response : (response.questions || []);
@@ -2645,10 +2784,10 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
           // Normalize options to an array of 5 options
           let opts = [];
           if (Array.isArray(q.options)) {
-            opts = q.options.map(o => String(o || "").trim()).filter(Boolean);
+            opts = q.options.map(o => cleanPdfOption(o)).filter(Boolean);
           } else if (q.options && typeof q.options === "object") {
             const keys = Object.keys(q.options).sort();
-            opts = keys.map(k => String(q.options[k] || "").trim()).filter(Boolean);
+            opts = keys.map(k => cleanPdfOption(q.options[k])).filter(Boolean);
           }
           while (opts.length < 5) {
             opts.push(`Option ${String.fromCharCode(65 + opts.length)}`);
@@ -2660,13 +2799,13 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
           if (typeof ansIdx === "string") {
             if (/^[0-4]$/.test(ansIdx.trim())) ansIdx = parseInt(ansIdx.trim(), 10);
             else if (/^[A-Ea-e]$/.test(ansIdx.trim())) ansIdx = ansIdx.trim().toUpperCase().charCodeAt(0) - 65;
-            else ansIdx = 0;
+            else ansIdx = null;
           }
           if (typeof ansIdx !== "number" || isNaN(ansIdx) || ansIdx < 0 || ansIdx > 4) {
             if (typeof q.source_answer === "string" && /^[A-Ea-e]$/.test(q.source_answer.trim())) {
               ansIdx = q.source_answer.trim().toUpperCase().charCodeAt(0) - 65;
             } else {
-              ansIdx = 0;
+              ansIdx = null;
             }
           }
 
@@ -2682,27 +2821,19 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         }).filter(Boolean);
 
         // Accept >= 4 questions per chunk to eliminate quota-burning retries
-        if (parsedQuestions.length >= expectedCount || parsedQuestions.length >= 4 || (expectedCount <= 3 && parsedQuestions.length >= expectedCount - 1)) {
+        if (parsedQuestions.length >= expectedCount) {
           console.log(`[AI] ✅ Success: ${parsedQuestions.length} questions from Chunk ${index + 1}`);
           chunkQuestions = parsedQuestions;
           break;
-        } else if (attempt === 0 && expectedCount > 3 && parsedQuestions.length < 4) {
-          console.warn(`[AI] Chunk ${index + 1} returned ${parsedQuestions.length}/${expectedCount}; retrying...`);
         } else {
           console.warn(`[AI] Chunk ${index + 1} accepted: ${parsedQuestions.length} questions.`);
           chunkQuestions = parsedQuestions;
           break;
         }
       } catch (err) {
-        if (attempt === 0) {
-          console.log(`[AI] Chunk ${index + 1} failed on its first attempt; retrying...`);
-        } else {
-          console.warn(`[AI] Chunk ${index + 1} extraction failed:`, err.message);
-          if (err.message.includes("401") || err.message.includes("API Key")) {
-            throw err;
-          }
-          break;
-        }
+        console.warn(`[AI] Chunk ${index + 1} extraction failed; keeping local source questions:`, err.message);
+        if (signal?.aborted) throw new Error("Extraction cancelled by user.");
+        break;
       }
     }
 
@@ -2748,6 +2879,31 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     throw extractionError; // Bubble up the reason to the UI popup
   }
 
+  allQuestions = mergeExtractedQuestions(parseUploadedQuestions(pdfText, category), allQuestions);
+  const puzzleSets = passageRanges.filter(range =>
+    /(?:sit|seating|floors?|boxes?|born|arrang|months?|puzzle)/i.test(range.passage) &&
+    !/(?:bar chart|pie chart|line graph|data interpretation)/i.test(range.passage) &&
+    sourceQuestions.some(q => q.questionNumber >= range.startNum && q.questionNumber <= range.endNum && /reasoning/i.test(q.section || ''))
+  );
+  for (const range of puzzleSets) {
+    if (signal?.aborted) throw new Error('Extraction cancelled by user.');
+    const setQuestions = allQuestions.filter(q => q.questionNumber >= range.startNum && q.questionNumber <= range.endNum);
+    if (!setQuestions.length || setQuestions.every(q => /\|\s*[-: ]+\|/.test(q.explanation || ''))) continue;
+    try {
+      const puzzlePrompt = `Solve this competitive-exam reasoning puzzle using ALL shared clues. Return ONLY JSON with keys "steps" and "table". The table must be a complete Markdown table with a header, separator, and one row for each final position/person. Do not invent missing facts; if the arrangement cannot be determined, return an empty table.\n\nShared clues:\n${range.passage}\n\nQuestions and printed answers:\n${setQuestions.map(q => `Q${q.questionNumber}. ${q.question} [answer: ${q.source_answer || 'unknown'}]`).join('\n')}`;
+      const result = await callLLMChain(puzzlePrompt);
+      const table = String(result?.table || '').trim();
+      if (!/^\|.+\|\s*\n\|[\s:|-]+\|/m.test(table) || table.split('\n').filter(line => /^\|.+\|$/.test(line.trim())).length < 4) continue;
+      for (const q of setQuestions) {
+        if (/\|\s*[-: ]+\|/.test(q.explanation || '')) continue;
+        q.explanation = `${q.explanation ? `${q.explanation}\n\n` : ''}${result.steps ? `${result.steps}\n\n` : ''}### Solved Arrangement\n${table}`.trim();
+        q.solutionText = q.explanation;
+        q.needs_review = !q.source_answer;
+      }
+    } catch (error) {
+      console.warn(`[AI] Puzzle table unavailable for Q${range.startNum}-${range.endNum}:`, error.message);
+    }
+  }
   let uniqueQuestions = [];
   const seen = new Set();
 
@@ -2778,23 +2934,24 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
       ? q.options.slice(0, 2).map(o => (o || "").toLowerCase().replace(/^\(?[a-ea-e]\)?[\.\:\-\s]*/, "").replace(/[^\w\s]/g, "").trim()).join("::") 
       : "";
 
-    const dedupeKey = cleanStem.length > 20 ? cleanStem : `${cleanStem}:::${optSignature}`;
+    const dedupeKey = `${q.questionNumber ?? ""}:::${cleanStem}:::${optSignature}:::${q.passage || ""}`;
 
     if (!seen.has(dedupeKey)) {
       seen.add(dedupeKey);
       
       // Automatically detect and attach chart / table images for Quantitative Aptitude DI questions ONLY
       let attachedChartImg = "";
+      let attachedChartImgs = [];
       if (isDIQuestion(q)) {
-        const matchedPage = findBestMatchingChartPage(q, pageImages);
-        if (matchedPage) {
-          attachedChartImg = "data:" + (matchedPage.mimeType || "image/jpeg") + ";base64," + matchedPage.base64;
-        }
+        attachedChartImgs = findMatchingChartPages(q, pageImages).map(matchedPage =>
+          "data:" + (matchedPage.mimeType || "image/jpeg") + ";base64," + (matchedPage.base64 || matchedPage.fullBase64)
+        );
+        attachedChartImg = attachedChartImgs[0] || "";
       }
 
       // Ensure paragraph-based DI has only the raw text paragraph in passage, and solved table in explanation
       const sanitized = sanitizeDIPassageAndExplanation(q.passage, q.explanation, qText);
-      const finalPassage = (q.passage || sanitized.passage || "").trim();
+      const finalPassage = (sanitized.passage || "").trim();
 
       uniqueQuestions.push({
         id: q.id || `pdf_q_${Date.now()}_${uniqueQuestions.length}`,
@@ -2803,14 +2960,17 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
         question_text: qText,
         options: q.options,
         correctAnswerIndex: q.correctAnswerIndex,
-        source_answer: String.fromCharCode(65 + q.correctAnswerIndex),
+        source_answer: q.source_answer || "",
+        page_number: q.page_number,
+        chart_page_number: q.chart_page_number,
         passage: finalPassage,
         section: q.section || inferSectionFromContent(qText, finalPassage, q.questionNumber || (uniqueQuestions.length + 1)) || (category?.includes("Bank") ? "Reasoning Ability" : (category || "General")),
         topic: q.topic || "",
         explanation: sanitized.explanation || q.explanation || "",
         imageUrl: attachedChartImg || "",
+        imageUrls: attachedChartImgs,
         chartImageUrl: attachedChartImg || "",
-        chartImageUrls: attachedChartImg ? [attachedChartImg] : []
+        chartImageUrls: attachedChartImgs
       });
     }
   }
@@ -2823,14 +2983,14 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
 
     // Standard Bank 100-Question section assignment
     const correctSection = inferSectionFromContent(q.question, q.passage, qNum);
-    if (correctSection && correctSection !== "General") {
+    if (correctSection !== "General") {
       q.section = correctSection;
     }
 
     const curP = (q.passage || "").trim();
     if (!curP || curP.length < 25) {
       const matchedRange = passageRanges.find(r => qNum >= r.startNum && qNum <= r.endNum);
-      if (matchedRange && matchedRange.passage) {
+      if (matchedRange && matchedRange.passage && !(/(?:solve the following arithmetic|answer the following arithmetic|simplif(?:y|ication)|approximation)\b/i.test(matchedRange.passage) && !/(?:table|chart|graph|data|following information)/i.test(matchedRange.passage))) {
         q.passage = matchedRange.passage;
       } else if (leadingPassage && i < 5) {
         q.passage = leadingPassage;
@@ -2851,32 +3011,8 @@ export async function generateMockTestFromPDF({ pdfText, category, timeLimit = "
     }
   }
 
-  // Cap to 100 questions if paper was a standard 100-question paper
-  if (uniqueQuestions.length > 100) {
-    uniqueQuestions = uniqueQuestions.slice(0, 100);
-  }
-
-  // 3. Robust group propagation: propagate shared passage across sets of 5 questions (e.g. Puzzle / RC / DI)
-  let currentGroupPassage = "";
-  let currentGroupCount = 0;
-  for (let i = 0; i < uniqueQuestions.length; i++) {
-    const q = uniqueQuestions[i];
-    const rawPassage = (q.passage || "").trim();
-    if (rawPassage && rawPassage.length > 25) {
-      if (rawPassage !== currentGroupPassage) {
-        currentGroupPassage = rawPassage;
-        currentGroupCount = 1;
-      } else {
-        currentGroupCount++;
-      }
-    } else if (currentGroupPassage && currentGroupCount < 5) {
-      q.passage = currentGroupPassage;
-      currentGroupCount++;
-    } else {
-      currentGroupPassage = "";
-      currentGroupCount = 0;
-    }
-  }
+  uniqueQuestions.sort((a, b) => a.questionNumber - b.questionNumber);
+  uniqueQuestions = mergeExtractedQuestions(parseUploadedQuestions(pdfText, category), uniqueQuestions);
 
   if (uniqueQuestions.length === 0) {
     console.warn("AI extraction returned 0 questions. Falling back to regex extraction...");
