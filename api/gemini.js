@@ -42,7 +42,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { model = "gemini-2.0-flash", contents, generationConfig } = req.body || {};
+    const { model = "gemini-flash-latest", contents, generationConfig } = req.body || {};
     if (!contents) {
       return res.status(400).json({ error: "No contents provided in request body" });
     }

@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     const { model, messages, temperature = 0.1, max_tokens = 4096, response_format } = req.body || {};
 
     const payload = {
-      model: model || "llama-3.3-70b-versatile",
+      model: model || "openai/gpt-oss-120b",
       messages: messages || [],
       temperature,
       max_tokens: Math.min(Math.max(Number(max_tokens) || 4096, 1), 4096),

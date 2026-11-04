@@ -20,3 +20,18 @@ for (const [name, handler] of [['gemini', gemini], ['groq', groq]]) {
     } finally { globalThis.fetch = originalFetch; }
   });
 }
+
+test('Groq uses a supported default model when no model is supplied', async () => {
+  const originalFetch = globalThis.fetch;
+  let model;
+  globalThis.fetch = async (_url, options) => {
+    model = JSON.parse(options.body).model;
+    return { status: 200, headers: new Headers(), json: async () => ({ choices: [] }) };
+  };
+  const res = { setHeader() {}, status(status) { this.code = status; return this; }, json(body) { this.body = body; return this; } };
+  try {
+    await groq({ method: 'POST', headers: { authorization: 'Bearer test-admin-key' }, body: { messages: [{ role: 'user', content: 'test' }] } }, res);
+    assert.equal(res.code, 200);
+    assert.equal(model, 'openai/gpt-oss-120b');
+  } finally { globalThis.fetch = originalFetch; }
+});

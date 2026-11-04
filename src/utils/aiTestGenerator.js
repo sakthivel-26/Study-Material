@@ -303,14 +303,14 @@ async function compressBase64Image(base64Str, maxDimension = 1500, quality = 0.7
 // 2. Google Gemini API Provider (Serverless /api/gemini with Rate Limiter & Cooldowns)
 async function callGemini(apiKey, prompt) {
   const candidateModels = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
+    getEnvKey("VITE_GEMINI_MODEL"),
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
   ];
 
   let lastErr = null;
 
-  for (const model of candidateModels) {
+  for (const model of [...new Set(candidateModels.filter(Boolean))]) {
     const cooldownUntil = aiSessionState.modelCooldowns[model] || 0;
     if (Date.now() < cooldownUntil) {
       const remainingSecs = Math.ceil((cooldownUntil - Date.now()) / 1000);
@@ -351,6 +351,7 @@ async function callGemini(apiKey, prompt) {
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
         const providerError = new Error(`Gemini ${model} error (${response.status}): ${errText || response.statusText}`);
+        if (response.status === 404) aiSessionState.modelCooldowns[model] = Date.now() + 30 * 60_000;
         // Authentication/proxy configuration failures affect every model, so
         // trying two more models only adds rate-limiter delays.
         if ([401, 403, 500, 502].includes(response.status)) {
@@ -371,9 +372,10 @@ async function callGemini(apiKey, prompt) {
         return parsed;
       }
       const parsed = JSON.parse(cleaned);
-      const resArr = Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
-      aiSessionState.providerStats.Gemini += resArr.length;
-      return resArr;
+      const result = Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest ||
+        (parsed.table !== undefined ? parsed : []);
+      aiSessionState.providerStats.Gemini += Array.isArray(result) ? result.length : 1;
+      return result;
     } catch (err) {
       console.warn(`Gemini model ${model} failed, trying next...`, err.message);
       lastErr = err;
@@ -383,7 +385,7 @@ async function callGemini(apiKey, prompt) {
 }
 
 // 2b. Google Gemini Vision — reads charts, tables, bar graphs from a page image
-const NVIDIA_REASONING_MODEL = "nvidia/nemotron-4-340b-instruct";
+const NVIDIA_REASONING_MODEL = "meta/llama-3.3-70b-instruct";
 const NVIDIA_PARSE_MODEL = "nvidia/nemotron-parse-2.0";
 const NVIDIA_VISION_MODEL = "nvidia/nemotron-parse-2.0";
 const NVIDIA_EMBED_MODEL = "nvidia/nemotron-3.5-embed-1b";
@@ -396,7 +398,7 @@ export async function callGeminiVisionPage(apiKey, base64Image, mimeType = "imag
   if (!base64Image) return null;
   const compressedBase64 = await compressBase64Image(base64Image, 1500, 0.7);
 
-  const candidateModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
+  const candidateModels = [...new Set([getEnvKey("VITE_GEMINI_MODEL"), "gemini-flash-latest", "gemini-2.5-flash"].filter(Boolean))];
 
   const prompt = `You are an expert at reading Indian competitive exam question papers (IBPS, SBI, SSC, TNPSC etc.).
 Look at this PDF page image carefully.
@@ -460,6 +462,7 @@ If no charts/tables/graphs are present, return an empty string.`;
       }
 
       if (!response || !response.ok) {
+        if (response?.status === 404) aiSessionState.modelCooldowns[model] = Date.now() + 30 * 60_000;
         console.warn(`[AI Vision] Model ${model} returned status ${response?.status}`);
         continue;
       }
@@ -614,6 +617,7 @@ async function callNvidia(apiKey, prompt) {
   let lastError = null;
   for (const model of candidateModels) {
     if (aiSessionState.nvidiaDisabled) break;
+    if (Date.now() < (aiSessionState.modelCooldowns[model] || 0)) continue;
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(new Error("NVIDIA request timed out after 25s")), 25000);
 
@@ -635,12 +639,9 @@ async function callNvidia(apiKey, prompt) {
 
       if (response.status === 404) {
         const errBody = await response.text().catch(() => "");
-        if (errBody.includes("Not found for account") || errBody.includes("Function") || response.status === 404) {
-          aiSessionState.nvidiaDisabled = true;
-          aiSessionState.nvidiaDisabledReason = `Model '${model}' not enabled for account (404)`;
-          console.warn(`[AI] ⚠️ NVIDIA disabled for remainder of session: ${aiSessionState.nvidiaDisabledReason}`);
-          throw new Error(aiSessionState.nvidiaDisabledReason);
-        }
+        aiSessionState.modelCooldowns[model] = Date.now() + 30 * 60_000;
+        lastError = new Error(`NVIDIA model '${model}' unavailable (404): ${errBody || response.statusText}`);
+        continue;
       }
 
       if (!response.ok) {
@@ -662,9 +663,10 @@ async function callNvidia(apiKey, prompt) {
         return parsed;
       }
       const parsed = JSON.parse(cleaned);
-      const resArr = Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest || [];
-      aiSessionState.providerStats.NVIDIA += resArr.length;
-      return resArr;
+      const result = Array.isArray(parsed) ? parsed : parsed.questions || parsed.mockTest ||
+        (parsed.table !== undefined ? parsed : []);
+      aiSessionState.providerStats.NVIDIA += Array.isArray(result) ? result.length : 1;
+      return result;
     } catch (err) {
       clearTimeout(id);
       lastError = err;
@@ -2094,15 +2096,15 @@ async function callGroq(apiKey, prompt) {
   }
 
   const configuredModel = getEnvKey("VITE_GROQ_MODEL");
-  const models = [
+  const models = [...new Set([
     configuredModel,
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "gemma2-9b-it"
-  ].filter(Boolean);
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+  ].filter(Boolean))];
 
   let lastErr = null;
   for (const model of models) {
+    if (Date.now() < (aiSessionState.modelCooldowns[model] || 0)) continue;
     try {
       const response = await fetch("/api/groq", {
         method: "POST",
@@ -2137,6 +2139,7 @@ async function callGroq(apiKey, prompt) {
           break;
         }
         console.warn(`[AI] Groq model ${model} returned ${response.status}, trying next model...`);
+        if ([400, 404].includes(response.status)) aiSessionState.modelCooldowns[model] = Date.now() + 30 * 60_000;
         lastErr = new Error(`Groq API Error (${response.status}): ${errText || response.statusText}`);
         continue;
       }
