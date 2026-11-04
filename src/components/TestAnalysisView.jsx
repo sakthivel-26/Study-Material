@@ -681,11 +681,12 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
                     {/* Detailed Beginner Step-by-Step Explanation Box */}
                     <div className="mt-4">
                       <BeginnerSolutionView
-                        explanation={activeSolutionQ?.solutionText || activeSolutionQ?.explanation || "The correct answer has been verified by Ken IAS Academy subject experts."}
+                        explanation={activeSolutionQ?.solutionText || activeSolutionQ?.explanation || "A worked solution is not available for this question."}
                         correctAnswerIndex={activeSolutionQ?.correctAnswerIndex}
                         options={activeSolutionQ?.options}
                         question={activeSolutionQ?.question}
                         passage={activeSolutionQ?.passage}
+                        section={activeSolutionQ?.section}
                       />
                     </div>
 

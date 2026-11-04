@@ -3,6 +3,7 @@ import { BookOpen, CheckCircle2, Lightbulb } from "lucide-react";
 import FormattedPassage from "./FormattedPassage.jsx";
 import DirectionDiagramView from "./DirectionDiagramView.jsx";
 import SyllogismDiagramView from "./SyllogismDiagramView.jsx";
+import PuzzleArrangementView from "./PuzzleArrangementView.jsx";
 import { convertTextTableToMarkdown } from "../utils/aiTestGenerator.js";
 
 export function parseExplanationSteps(rawText) {
@@ -175,6 +176,8 @@ export default function BeginnerSolutionView({
 
       {/* Visual Venn Diagram for Syllogism Questions */}
       {/reasoning/i.test(section) && <SyllogismDiagramView text={fullDirectionSource} compact={compact} />}
+
+      {/reasoning/i.test(section) && <PuzzleArrangementView explanation={explanation} passage={passage} />}
 
       {/* Structured Steps for Beginners */}
       <div className="space-y-2.5">
