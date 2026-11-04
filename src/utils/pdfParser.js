@@ -11,6 +11,13 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const superDigits = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹' };
 const subDigits = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉' };
+const symbolFontGlyphs = {
+  '\uf0b8': '÷', '\uf0b4': '×', '\uf03d': '=', '\uf02b': '+',
+  '\uf02d': '−', '\uf028': '(', '\uf029': ')', '\uf020': ' ',
+  '\uf0e9': '[', '\uf0f9': ']', '\uf0ea': '[', '\uf0fa': ']',
+  '\uf0eb': '[', '\uf0fb': ']',
+};
+const normalizePdfMath = value => value.normalize('NFKC').replace(/[\uf020-\uf0ff]/g, ch => symbolFontGlyphs[ch] || ch);
 
 /**
  * Reconstruct text from PDF.js items while preserving mathematical notation:
@@ -21,6 +28,32 @@ const subDigits = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅',
 export function extractTextWithMathPreservation(textContent) {
   if (!textContent || !textContent.items || textContent.items.length === 0) return "";
 
+  // Split genuine two-column papers before reconstructing visual lines. A
+  // single line can contain Q1 on the left and Q13 on the right; reading it
+  // across the page turns the right question into Q1's options.
+  const questionMarkers = textContent.items.filter(it =>
+    it?.transform && /^(?:(?:Q|S)\s*)?\d{1,3}[.):]$/i.test(String(it.str || '').trim()))
+    .map(it => it.transform[4]).sort((a, b) => a - b);
+  if (questionMarkers.length >= 6) {
+    let largestGap = 0;
+    let gapIndex = -1;
+    for (let i = 1; i < questionMarkers.length; i++) {
+      const gap = questionMarkers[i] - questionMarkers[i - 1];
+      if (gap > largestGap) { largestGap = gap; gapIndex = i; }
+    }
+    if (largestGap >= 90 && gapIndex >= 3 && questionMarkers.length - gapIndex >= 3) {
+      const splitAt = questionMarkers[gapIndex] - 15;
+      // Running footers at the extreme bottom are not part of a question,
+      // including when the final question's options continue on the next page.
+      const contentItems = textContent.items.filter(it =>
+        (it.transform?.[5] ?? 100) >= 35 &&
+        !(/^\(\d{1,3}\)$/.test(String(it.str || '').trim()) && (it.transform?.[5] ?? 0) > 795));
+      const left = contentItems.filter(it => (it.transform?.[4] ?? 0) < splitAt);
+      const right = contentItems.filter(it => (it.transform?.[4] ?? 0) >= splitAt);
+      return `${extractTextWithMathPreservation({ items: left })}\n${extractTextWithMathPreservation({ items: right })}`;
+    }
+  }
+
   const rawItems = textContent.items
     .filter(it => it && typeof it.str === "string" && it.str.length > 0)
     .map(it => {
@@ -30,7 +63,7 @@ export function extractTextWithMathPreservation(textContent) {
       const w = it.width || (it.str.length * 6);
       const h = it.height || Math.abs(transform[0]) || 10;
       return {
-        str: it.str.normalize('NFKC'),
+        str: normalizePdfMath(it.str),
         x,
         y,
         w,

@@ -14,6 +14,7 @@ import { CATEGORIES, COURSE_PROGRESS } from "../../data.js";
 import { Badge, ProgressBar } from "../../components/ui.jsx";
 import { parseUploadedQuestions, cleanPdfOption, verifyQuestionsBackground, generateMockTestFromPDF, generateAIMockTest, findMatchingChartPages, isDIQuestion, sanitizeDIPassageAndExplanation, convertTextTableToMarkdown, isolateQuestionsAndSolutions, extractPassagesAndRanges } from "../../utils/aiTestGenerator.js";
 import { extractTextWithMathPreservation } from "../../utils/pdfParser.js";
+import { solveSimpleEquationQuestion } from "../../utils/simpleMathSolution.js";
 import { setStudentAccess } from "../../auth.jsx";
 import { fsUpdateUserPurchases, fsRemoveUserPurchase, useRealtimeBackend } from "../../backend.js";
 import { formatStudentJoinDate } from "../../utils/studentDate.js";
@@ -1145,6 +1146,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       pushToast(`Review required: ${unanswered.length} questions do not have a verified answer.`);
       return;
     }
+    const unsolved = finalQuestions.filter(q => !q.explanation?.trim() && !q.solutionImageUrl);
+    if (unsolved.length) {
+      pushToast(`Review required: ${unsolved.length} questions need a worked solution or solution image.`);
+      return;
+    }
 
     setIsPublishing(true);
     pushToast("⏳ Compressing diagrams & publishing mock test to Cloud...");
@@ -1501,33 +1507,58 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                   y: viewport.convertToViewportPoint(item.transform[4], item.transform[5])[1],
                   height: item.height || 0
                 }));
-                const markers = items.filter(item => item.x < viewport.width * 0.09 && /^0*\d{1,3}[.)]?$/.test(item.text))
+                const markerCandidates = items.filter(item => /^0*\d{1,3}[.)]?$/.test(item.text))
                   .map(item => ({ ...item, number: Number(item.text.match(/\d+/)?.[0]) }))
-                  .filter(item => item.number >= 1 && item.number <= 200)
-                  .sort((a, b) => a.y - b.y);
-                for (let markerIndex = 0; markerIndex < markers.length; markerIndex++) {
+                  .filter(item => item.number >= 1 && item.number <= 200);
+                const columns = [];
+                for (const marker of markerCandidates) {
+                  let column = columns.find(group => Math.abs(group.x - marker.x) < 22);
+                  if (!column) { column = { x: marker.x, markers: [] }; columns.push(column); }
+                  column.markers.push(marker);
+                }
+                const realColumns = columns.filter(group => {
+                  const ordered = [...group.markers].sort((a, b) => a.y - b.y);
+                  const consecutive = ordered.slice(1).filter((marker, index) =>
+                    marker.number === ordered[index].number + 1).length;
+                  const punctuated = ordered.filter(marker => /[.)]$/.test(marker.text)).length;
+                  return ordered.length >= 3 && (punctuated >= 2 ||
+                    (group.x < viewport.width * 0.09 && consecutive >= 3));
+                }).sort((a, b) => a.x - b.x);
+                for (let columnIndex = 0; columnIndex < realColumns.length; columnIndex++) {
+                  const column = realColumns[columnIndex];
+                  const markers = column.markers.sort((a, b) => a.y - b.y);
+                  const cropLeft = Math.max(0, Math.floor(column.x - 12));
+                  const cropRight = Math.min(canvas.width, Math.ceil((realColumns[columnIndex + 1]?.x ?? canvas.width) - 16));
+                  for (let markerIndex = 0; markerIndex < markers.length; markerIndex++) {
                   const marker = markers[markerIndex];
                   const nextY = markers[markerIndex + 1]?.y ?? viewport.height;
                   const firstOption = items.filter(item => item.y > marker.y + 8 && item.y < nextY &&
-                    item.x < viewport.width * 0.12 && /^A[.):](?:\s|$)/i.test(item.text))
+                    item.x >= cropLeft && item.x < marker.x + 80 && /^A[.):](?:\s|$)/i.test(item.text))
                     .sort((a, b) => a.y - b.y)[0];
                   const questionItems = items.filter(item => item.y >= marker.y - 18 &&
-                    item.y < (firstOption?.y ?? nextY) - 2 && item !== marker);
+                    item.y < (firstOption?.y ?? nextY) - 2 && item.x >= cropLeft &&
+                    item.x < cropRight && item !== marker);
                   const questionText = questionItems.map(item => item.text).join(' ');
-                  const hasStackedMath = questionItems.some(item => item.height > 0 && item.height <= 11 &&
+                  const hasStackedMath = questionItems.some(item => item.height > 0 &&
+                    item.height < marker.height * 0.82 && Math.abs(item.y - marker.y) > 3 &&
                     /^[\d?+\-/()]+$/.test(item.text) && item.x > marker.x + 15);
                   const rootCount = (questionText.match(/[√∛]/g) || []).length;
+                  const hasPossibleVectorRoot = (questionText.match(/\b\d{2,5}\b/g) || []).some(value => {
+                    const number = Number(value);
+                    return number >= 49 && Number.isInteger(Math.sqrt(number));
+                  });
                   const needsOriginalImage = hasStackedMath || rootCount >= 2 ||
-                    /\b\d+\s*\/\s*\d+\b/.test(questionText) || /∛/.test(questionText);
+                    hasPossibleVectorRoot || /\b\d+\s*\/\s*\d+\b/.test(questionText) || /∛/.test(questionText);
                   if (!needsOriginalImage) continue;
                   const top = Math.max(0, Math.floor(marker.y - 20));
                   const bottom = Math.min(canvas.height, Math.ceil((firstOption?.y ?? nextY) - 5));
                   if (bottom - top < 18 || bottom - top > canvas.height * 0.4) continue;
                   const equationCanvas = document.createElement('canvas');
-                  equationCanvas.width = canvas.width;
+                  equationCanvas.width = cropRight - cropLeft;
                   equationCanvas.height = bottom - top;
-                  equationCanvas.getContext('2d').drawImage(canvas, 0, top, canvas.width, bottom - top, 0, 0, canvas.width, bottom - top);
+                  equationCanvas.getContext('2d').drawImage(canvas, cropLeft, top, equationCanvas.width, bottom - top, 0, 0, equationCanvas.width, bottom - top);
                   questionEquationImages.set(`${p.pageNum}:${marker.number}`, equationCanvas.toDataURL('image/jpeg', 0.88));
+                  }
                 }
               }
 
@@ -1704,7 +1735,14 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       let extractedQuestions = [];
       let llmSuccess = false;
 
-      const offlineQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 200);
+      const offlineQuestions = parseQuestionsFromPDFText(fullText, f.subject || "General", 200).map(q => {
+        if (q.source_answer || q.explanation) return q;
+        const solved = solveSimpleEquationQuestion(q);
+        return solved ? { ...q, source_answer: solved.answerLetter,
+          correctAnswerIndex: solved.answerLetter.charCodeAt(0) - 65,
+          explanation: solved.explanation, solutionText: solved.explanation,
+          answer_origin: 'calculated', needs_review: false } : q;
+      });
       setExtractionProgress(`${offlineQuestions.length} questions found locally · AI is enriching only the required batches`);
 
       try {
@@ -1768,6 +1806,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
       const result = {
         title: f.title.trim() || `${f.category} PYQ - ${file.name.replace(".pdf", "")}`,
+        extractionEngine: llmSuccess ? 'AI' : 'offline parser',
         category: f.category,
         subject: f.subject,
         topic: f.topic,
@@ -1901,7 +1940,9 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       setGeneratedTest(draftTest);
       setVerificationProgress("");
       setPdfStatus("done");
-      pushToast(`✅ Mock test extracted successfully! Background verification started.`);
+      pushToast(llmSuccess
+        ? '✅ Questions extracted. Background answer verification started.'
+        : '✅ Questions extracted locally. Review unresolved answers and solutions before publishing.');
       
       // PHASE 3: Background Verification. The offline parser has already
       // produced a usable test; do not make dozens of failing AI calls and
@@ -1909,10 +1950,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
       if (!llmSuccess) {
         const reviewable = result.rawExtractedQuestions.map((q) => ({
           ...q,
-          answer_status: q.source_answer ? "NEEDS_REVIEW" : "NO_SOURCE_ANSWER",
-          review_reason: q.source_answer
-            ? "Answer retained from the PDF. AI verification was skipped."
-            : "No answer key was found in the uploaded PDF.",
+          answer_status: q.answer_origin === 'calculated' ? 'VERIFIED' : q.source_answer ? "NEEDS_REVIEW" : "NO_SOURCE_ANSWER",
+          review_reason: q.answer_origin === 'calculated'
+            ? 'Calculated from the extracted equation and matched to one printed option.'
+            : q.source_answer ? "Answer retained from the PDF. AI verification was skipped."
+              : "No answer key was found in the uploaded PDF.",
         }));
         setGeneratedTest((prev) => prev ? ({ ...prev, rawExtractedQuestions: reviewable }) : prev);
         setVerificationProgress("Offline extraction ready — review answers before publishing");
@@ -2473,7 +2515,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                 ) : pdfStatus === "done" ? (
                   <div className="space-y-2">
                     <CheckCircle2 size={40} className="mx-auto text-emerald-600" />
-                    <p className="font-bold text-emerald-900 text-sm">✅ {generatedTest?.questions} questions extracted with {pdfExtractionMethod === "ai" ? "AI" : "the offline parser"}</p>
+                    <p className="font-bold text-emerald-900 text-sm">✅ {generatedTest?.questions} questions extracted with {generatedTest?.extractionEngine || 'the offline parser'}</p>
                     <p className="text-xs text-emerald-700 font-semibold">Mock Test Ready</p>
                     <p className="text-xs text-emerald-600 font-bold mt-1">Click to upload a different PDF or Word document</p>
                   </div>
@@ -3101,8 +3143,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
               <div className="max-h-[75vh] md:max-h-[850px] overflow-y-auto space-y-4 pr-1">
                 {generatedTest.rawExtractedQuestions?.map((q, idx) => {
-                  const finalAnswerRaw = approvedQuestions[idx]?.editedAnswer ?? q.ai_verified_answer ?? q.source_answer ?? "A";
-                  const finalAnswerIndex = getAnswerIndex(finalAnswerRaw);
+                  const finalAnswerRaw = approvedQuestions[idx]?.editedAnswer ?? q.ai_verified_answer ?? q.source_answer ?? "";
+                  const finalAnswerIndex = finalAnswerRaw ? getAnswerIndex(finalAnswerRaw) : null;
 
                   return (
                     <div key={idx} className="p-4 rounded-xl border-2 border-black/10 bg-slate-50/50 space-y-3 relative">
@@ -3460,8 +3502,11 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
                       {/* Solution Text */}
                       <div className="mt-2">
                         <label className="text-[11px] font-bold text-ink-muted mb-1 block">
-                          Answer / Solution Explanation (Optional):
+                          Answer / Solution Explanation:
                         </label>
+                        {!((approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "")).trim()) && (
+                          <p className="text-[11px] text-amber-700 mb-1">No worked solution was found in this PDF or returned by AI. Verify the equation and answer before publishing.</p>
+                        )}
                         <textarea
                           className="input text-xs min-h-[60px] bg-white border border-black/10"
                           placeholder="Enter solution explanation..."
@@ -3591,8 +3636,8 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
             {/* Scrollable Questions Container */}
             <div className="p-6 overflow-y-auto space-y-5 flex-1 bg-slate-50">
               {generatedTest.rawExtractedQuestions?.map((q, idx) => {
-                const finalAnswerRaw = approvedQuestions[idx]?.editedAnswer ?? q.ai_verified_answer ?? q.source_answer ?? "A";
-                const finalAnswerIndex = getAnswerIndex(finalAnswerRaw);
+                const finalAnswerRaw = approvedQuestions[idx]?.editedAnswer ?? q.ai_verified_answer ?? q.source_answer ?? "";
+                const finalAnswerIndex = finalAnswerRaw ? getAnswerIndex(finalAnswerRaw) : null;
 
                 return (
                   <div key={idx} className="p-5 rounded-2xl border-2 border-black/10 bg-white space-y-4 shadow-sm relative hover:border-brand-200 transition-colors">
@@ -3914,7 +3959,7 @@ export function CreateMockTestPage({ isFreeByDefault = false }) {
 
                       <textarea
                         className="input text-xs min-h-[90px] font-mono leading-relaxed bg-white border border-black/10 p-2.5"
-                        placeholder="Enter detailed step-by-step solution explanation..."
+                        placeholder="No worked solution in this PDF. Enter a verified step-by-step explanation before publishing."
                         value={approvedQuestions[idx]?.solutionText ?? (q.solutionText || q.explanation || "")}
                         onChange={(e) => editSolutionText(idx, e.target.value)}
                       />

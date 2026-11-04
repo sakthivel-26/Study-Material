@@ -9,6 +9,7 @@ export function questionPositions(text) {
   const lineCandidates = [...text.matchAll(marker)].map(m => ({
     num: Number(m[2] || m[3]), index: m.index, matchLen: m[0].length,
     explicitPrefix: Boolean(m[1]),
+    punctuated: /(?:\(\d{1,3}\)|\d{1,3}[.)])$/.test(m[0].trim()),
   }));
   // PDF layout reconstruction can place `Q17.` on the same visual line as the
   // previous question's final option. An explicit Q marker is unambiguous and
@@ -24,6 +25,28 @@ export function questionPositions(text) {
     else allCandidates.push(candidate);
   }
   allCandidates.sort((a, b) => a.index - b.index);
+  // A long numbered worksheet is strongest evidence for its question
+  // boundaries. Bare fraction rows such as "2 4 8" and page numbers such as
+  // "(2)" can otherwise masquerade as questions when they precede A-E options.
+  const printedMarkers = allCandidates.filter(p => p.punctuated && !p.explicitPrefix && p.num >= 1 && p.num <= 200);
+  const letteredWorksheet = (text.match(/(?:^|\s)a\)[ \t]/gim) || []).length >= 20 &&
+    (text.match(/(?:^|\s)b\)[ \t]/gim) || []).length >= 20;
+  if (printedMarkers.length >= 25 && letteredWorksheet && !allCandidates.some(p => p.explicitPrefix)) {
+    const ordered = [];
+    let previousIndex = -1;
+    const maxNumber = Math.min(200, Math.max(...printedMarkers.map(p => p.num)));
+    for (let num = 1; num <= maxNumber; num++) {
+      const next = printedMarkers.find(p => p.num === num + 1 && p.index > previousIndex);
+      const matches = printedMarkers.filter(p => p.num === num && p.index > previousIndex &&
+        (!next || p.index < next.index));
+      if (!matches.length) continue;
+      // A heading like "1. Simplification" may precede the actual "1)".
+      const chosen = matches.at(-1);
+      ordered.push(chosen);
+      previousIndex = chosen.index;
+    }
+    if (ordered.length >= 20) return ordered;
+  }
   // Some PDFs inconsistently preserve the Q prefix (Q5, then 6., 7., Q8).
   // Keep explicit markers authoritative, but recover a bare marker when it is
   // followed by a real A/B/C option set. This avoids losing large stretches of

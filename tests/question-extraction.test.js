@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aiSessionState, parseUploadedQuestions, inferSectionFromContent, extractPassagesAndRanges, convertTextTableToMarkdown, isDIQuestion, findBestMatchingChartPage, findMatchingChartPages, generateMockTestFromPDF } from '../src/utils/aiTestGenerator.js';
+import { aiSessionState, parseUploadedQuestions, cleanPdfOption, inferSectionFromContent, extractPassagesAndRanges, convertTextTableToMarkdown, isDIQuestion, findBestMatchingChartPage, findMatchingChartPages, generateMockTestFromPDF } from '../src/utils/aiTestGenerator.js';
 import { mergeExtractedQuestions, questionPositions } from '../src/utils/questionStructure.js';
 
 const mcq = n => `${n}. What is the correct value?\n(a) ${n}\n(b) ${n + 1}\n(c) ${n + 2}\n(d) ${n + 3}\n(e) ${n + 4}`;
@@ -14,6 +14,21 @@ test('all 100 source questions survive repeated stems and a partial AI result', 
   assert.equal(merged[0].question, 'What is the correct value?');
   assert.equal(merged[0].options.A, '1');
   assert.equal(merged[99].questionNumber, 100);
+});
+
+test('long two-column-style worksheets ignore fraction rows and keep lettered options', () => {
+  const blocks = Array.from({ length: 30 }, (_, i) => {
+    const n = i + 1;
+    return `${n}) ${n === 13 ? '( 5 − 1)² = ?' : `${n} + 2 = ?`}\n${n === 8 ? '4 2 6\n' : ''}a) 4 b) 5 c) 6\nd) 7 e) None of these`;
+  });
+  blocks.splice(0, 0, '1. Simplification');
+  blocks.splice(17, 0, '(2)');
+  const questions = parseUploadedQuestions(blocks.join('\n'), 'Quantitative Aptitude');
+  assert.deepEqual(questions.map(q => q.questionNumber), Array.from({ length: 30 }, (_, i) => i + 1));
+  assert.equal(questions[0].question, '1 + 2 = ?');
+  assert.equal(questions[12].question, '( 5 − 1)² = ?');
+  assert.equal(questions[12].options.A, '4');
+  assert.equal(cleanPdfOption('None of these2'), 'None of these');
 });
 
 test('numbering gaps and Q./parenthesized markers do not stop at question five', () => {

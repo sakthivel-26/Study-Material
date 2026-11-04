@@ -2322,6 +2322,10 @@ function chunkQuestions(text, maxQuestions = 6, maxChars = 5000) {
 
 export function cleanPdfOption(value) {
   let text = String(value ?? '').trim();
+  // A superscript or denominator from the next visual line can be appended
+  // to the publisher's final "None of these" option in math worksheets.
+  const noneOption = text.match(/^(None of (?:these|the above))(?:[\s\d²³⁴⁵⁶⁷⁸⁹]*)$/i);
+  if (noneOption) return noneOption[1];
   // Publishers stamp their site name beside the final option. PDF text
   // extraction may join it directly to the answer, without even a space.
   const watermark = text.search(/(?:https?:\/\/|www\.)[a-z0-9.-]+\.[a-z]{2,}/i);
@@ -2349,7 +2353,9 @@ export function parseUploadedQuestions(pdfText, defaultSection = "General") {
     const printedAnswer = block.match(/(?:^|\n)[ \t]*Correct[ \t]+Option[ \t]*[-:.][ \t]*\(?([A-E])\)?/i);
     const answerBoundary = printedAnswer?.index ?? inlineSolution?.index ?? block.length;
     const optionText = block.slice(0, answerBoundary);
-    const optionMatches = [...optionText.matchAll(/(?:^|\s)(?:\(([a-e1-5])\)|([a-e1-5])[).:])[ \t]*/gim)];
+    const letterOptions = [...optionText.matchAll(/(?:^|\s)(?:\(([a-e])\)|([a-e])[).:])[ \t]*/gim)];
+    const optionMatches = letterOptions.length >= 3 ? letterOptions
+      : [...optionText.matchAll(/(?:^|\s)(?:\(([a-e1-5])\)|([a-e1-5])[).:])[ \t]*/gim)];
     const options = {};
     optionMatches.forEach((m, j) => {
       const rawLabel = (m[1] || m[2]).toUpperCase();
