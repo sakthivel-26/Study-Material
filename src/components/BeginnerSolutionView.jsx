@@ -5,27 +5,23 @@ import DirectionDiagramView from "./DirectionDiagramView.jsx";
 import SyllogismDiagramView from "./SyllogismDiagramView.jsx";
 import PuzzleArrangementView from "./PuzzleArrangementView.jsx";
 import { convertTextTableToMarkdown } from "../utils/aiTestGenerator.js";
-import { formatFinalFloorArrangement } from "../utils/puzzleArrangement.js";
+import { formatFinalFloorArrangement, formatFloorCaseTables } from "../utils/puzzleArrangement.js";
 
 export function parseExplanationSteps(rawText) {
   if (!rawText || typeof rawText !== "string") return [];
   // Ensure any raw text tables in puzzle solutions are formatted to markdown
-  const formattedText = convertTextTableToMarkdown(formatFinalFloorArrangement(rawText.trim()));
+  const formattedText = convertTextTableToMarkdown(formatFloorCaseTables(formatFinalFloorArrangement(rawText.trim())));
   const text = formattedText || rawText.trim();
 
   // 0. Extract Markdown table if present (Puzzles, Seating Arrangements, DI tables)
   const lines = text.split(/\r?\n/);
-  const tableLines = [];
-  const nonTableLines = [];
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.includes("|", 1)) {
-      tableLines.push(trimmed);
-    } else {
-      nonTableLines.push(line);
-    }
-  }
+  const tableStarts = lines.flatMap((line, index) =>
+    /^\s*\|.+\|\s*$/.test(line) && /^\s*\|(?:\s*:?-+:?\s*\|){2,}\s*$/.test(lines[index + 1] || '') ? [index] : []);
+  const tableStart = tableStarts.at(-1) ?? -1;
+  let tableEnd = tableStart;
+  while (tableEnd >= 0 && tableEnd < lines.length && /^\s*\|.+\|\s*$/.test(lines[tableEnd])) tableEnd++;
+  const tableLines = tableStart >= 0 ? lines.slice(tableStart, tableEnd) : [];
+  const nonTableLines = tableStart >= 0 ? [...lines.slice(0, tableStart), ...lines.slice(tableEnd)] : lines;
 
   const tableBlock = tableLines.length > 0 ? tableLines.join("\n") : null;
   const remainingText = nonTableLines

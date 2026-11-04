@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSolvedArrangement, formatFinalFloorArrangement } from '../src/utils/puzzleArrangement.js';
+import { parseSolvedArrangement, formatFinalFloorArrangement, formatFloorCaseTables } from '../src/utils/puzzleArrangement.js';
 
 const solved = 'Step 1: Place A before B.\n### Solved Arrangement\n| Seat | Person |\n| --- | --- |\n| 1 | A |\n| 2 | B |';
 
@@ -30,4 +30,15 @@ test('uses the last complete floor case rather than an eliminated case', () => {
   assert.equal(result.data.length, 9);
   assert.deepEqual(result.data[0], ['9', 'D', 'Lenovo']);
   assert.deepEqual(result.data.at(-1), ['1', 'E', 'Oppo']);
+});
+
+test('formats intermediate Case-1 and Case-2 floor rows without guessing column ownership', () => {
+  const source = 'Inference:\nCase-1 Case-2\nFloor number Persons Mobile phone brands Persons Mobile phonebrands\n9 C\n8\n7\n6\n5\n4 C\n3\n2 Micromax Micromax\n1 E E\nReference: D owns Lenovo.';
+  const result = formatFloorCaseTables(source);
+  assert.match(result, /Case-1 Case-2/);
+  assert.match(result, /\| Floor \| Case entries in source order \|/);
+  assert.match(result, /\| 9 \| C \|/);
+  assert.match(result, /\| 2 \| Micromax Micromax \|/);
+  assert.match(result, /\| 1 \| E E \|/);
+  assert.match(result, /Reference: D owns Lenovo/);
 });

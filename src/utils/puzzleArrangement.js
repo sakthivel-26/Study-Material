@@ -20,6 +20,31 @@ export function formatFinalFloorArrangement(explanation) {
   return `${text.trim()}\n\n### Final Solved Arrangement\n${table}`;
 }
 
+export function formatFloorCaseTables(explanation) {
+  const lines = String(explanation || '').split(/\r?\n/);
+  const output = [];
+  for (let i = 0; i < lines.length;) {
+    const first = lines[i].trim().match(/^(\d{1,2})(?:\s+(.*))?$/);
+    if (!first || !lines.slice(Math.max(0, i - 8), i).some(line => /\bCase-\d+[A-Z]?\b/i.test(line))) {
+      output.push(lines[i++]);
+      continue;
+    }
+    const rows = [];
+    let j = i;
+    while (j < lines.length) {
+      const match = lines[j].trim().match(/^(\d{1,2})(?:\s+(.*))?$/);
+      if (!match || (rows.length && Number(match[1]) !== Number(rows.at(-1)[0]) - 1)) break;
+      rows.push([match[1], (match[2] || '').trim()]);
+      j++;
+    }
+    if (rows.length < 3) { output.push(lines[i++]); continue; }
+    output.push('| Floor | Case entries in source order |', '| --- | --- |',
+      ...rows.map(([floor, entries]) => `| ${floor} | ${entries || '—'} |`));
+    i = j;
+  }
+  return output.join('\n');
+}
+
 export function parseSolvedArrangement(explanation, passage = '') {
   explanation = formatFinalFloorArrangement(explanation);
   const lines = String(explanation || '').split(/\r?\n/);
