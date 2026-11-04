@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSolvedArrangement } from '../src/utils/puzzleArrangement.js';
+import { parseSolvedArrangement, formatFinalFloorArrangement } from '../src/utils/puzzleArrangement.js';
 
 const solved = 'Step 1: Place A before B.\n### Solved Arrangement\n| Seat | Person |\n| --- | --- |\n| 1 | A |\n| 2 | B |';
 
@@ -19,4 +19,15 @@ test('keeps floor and dated month arrangements and refuses unsolved layouts', ()
   assert.equal(parseSolvedArrangement(dates, 'Birth month and date')?.type, 'month');
   assert.equal(parseSolvedArrangement('No solved arrangement', 'People sit in a circle'), null);
   assert.equal(parseSolvedArrangement('| Person | Color |\n| --- | --- |\n| A | Red |\n| B | Blue |', 'People sit in a circle')?.type, 'table');
+});
+
+test('uses the last complete floor case rather than an eliminated case', () => {
+  const explanation = `Case-1 [Eliminated]\n9 C Oppo\n8 G Samsung\n7 D Lenovo\n\nCase-2B\nFloor Mobile\nnumber Persons phone brands\n9 D Lenovo\n8 G Samsung\n7 A Vivo\n6 B MI\n5 F Apple\n4 C Sony\n3 I Microsoft\n2 H Micromax\n1 E Oppo\n\nExplanation: There are 4 floors between D and Sony.`;
+  const formatted = formatFinalFloorArrangement(explanation);
+  assert.match(formatted, /\| Floor \| Person \| Mobile phone brand \|/);
+  const result = parseSolvedArrangement(formatted, 'floor puzzle');
+  assert.equal(result.type, 'floor');
+  assert.equal(result.data.length, 9);
+  assert.deepEqual(result.data[0], ['9', 'D', 'Lenovo']);
+  assert.deepEqual(result.data.at(-1), ['1', 'E', 'Oppo']);
 });

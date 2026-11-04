@@ -5,11 +5,12 @@ import DirectionDiagramView from "./DirectionDiagramView.jsx";
 import SyllogismDiagramView from "./SyllogismDiagramView.jsx";
 import PuzzleArrangementView from "./PuzzleArrangementView.jsx";
 import { convertTextTableToMarkdown } from "../utils/aiTestGenerator.js";
+import { formatFinalFloorArrangement } from "../utils/puzzleArrangement.js";
 
 export function parseExplanationSteps(rawText) {
   if (!rawText || typeof rawText !== "string") return [];
   // Ensure any raw text tables in puzzle solutions are formatted to markdown
-  const formattedText = convertTextTableToMarkdown(rawText.trim());
+  const formattedText = convertTextTableToMarkdown(formatFinalFloorArrangement(rawText.trim()));
   const text = formattedText || rawText.trim();
 
   // 0. Extract Markdown table if present (Puzzles, Seating Arrangements, DI tables)
@@ -143,7 +144,8 @@ export default function BeginnerSolutionView({
   passage = "",
   section = ""
 }) {
-  const steps = parseExplanationSteps(explanation);
+  const formattedExplanation = formatFinalFloorArrangement(explanation);
+  const steps = parseExplanationSteps(formattedExplanation);
   const correctOptLetter = correctAnswerIndex != null && correctAnswerIndex >= 0
     ? String.fromCharCode(65 + correctAnswerIndex)
     : null;
@@ -177,7 +179,7 @@ export default function BeginnerSolutionView({
       {/* Visual Venn Diagram for Syllogism Questions */}
       {/reasoning/i.test(section) && <SyllogismDiagramView text={fullDirectionSource} compact={compact} />}
 
-      {/reasoning/i.test(section) && <PuzzleArrangementView explanation={explanation} passage={passage} />}
+      {/reasoning/i.test(section) && <PuzzleArrangementView explanation={formattedExplanation} passage={passage} />}
 
       {/* Structured Steps for Beginners */}
       <div className="space-y-2.5">
