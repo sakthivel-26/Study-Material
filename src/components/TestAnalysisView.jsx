@@ -621,11 +621,11 @@ export default function TestAnalysisView({ attempt, onRetake, onClose, initialTa
 
                     {/* Passage Context (if any) */}
                     {activeSolutionQ?.passage && (
-                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 font-serif leading-relaxed">
+                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-[15px] text-slate-900 font-bold leading-[1.55]">
                         <p className="font-bold font-sans text-slate-800 mb-1 flex items-center gap-1.5">
                           <BookOpen size={14} className="text-[#1B4F72]" /> Directions &amp; Context:
                         </p>
-                        <FormattedPassage passage={activeSolutionQ.passage} />
+                        <FormattedPassage passage={activeSolutionQ.passage} flowProse />
                       </div>
                     )}
 

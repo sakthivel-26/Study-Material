@@ -173,7 +173,7 @@ export default function BeginnerSolutionView({
       <DirectionDiagramView text={fullDirectionSource} compact={compact} />
 
       {/* Visual Venn Diagram for Syllogism Questions */}
-      {/reasoning/i.test(section) && <SyllogismDiagramView text={fullDirectionSource} compact={compact} />}
+      {/reasoning/i.test(section) && <SyllogismDiagramView text={/\bstatements?\s*:/i.test(question) ? question : `${passage || ""}\n${question || ""}`} explanation={explanation} compact={compact} />}
 
       {/reasoning/i.test(section) && <PuzzleArrangementView explanation={formattedExplanation} passage={passage} />}
 

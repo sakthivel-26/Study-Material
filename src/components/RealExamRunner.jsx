@@ -919,7 +919,7 @@ export default function RealExamRunner({ test, onClose }) {
         <div className="flex-1 flex overflow-hidden relative">
           {/* Left Column: Directions & Context (Passage text + Charts/Tables/Diagrams) */}
           {hasContext && !isDirectionsCollapsed && (
-            <div className="w-[36%] lg:w-[33%] xl:w-[32%] shrink-0 border-r border-slate-300 p-4 md:p-5 overflow-y-auto bg-slate-50/70 space-y-3.5 leading-relaxed transition-all">
+            <div className="w-[36%] lg:w-[33%] xl:w-[32%] shrink-0 border-r border-slate-300 p-4 md:p-5 overflow-y-auto bg-slate-50/70 space-y-3 leading-relaxed transition-all">
               <div className="font-bold text-xs text-slate-800 uppercase tracking-wide border-b border-slate-200 pb-1.5 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <BookOpen size={14} className="text-[#1B4F72]" />
@@ -939,7 +939,8 @@ export default function RealExamRunner({ test, onClose }) {
               {activeQuestion?.passage && (
                 <FormattedPassage
                   passage={activeQuestion.passage}
-                  className={`${contentFontSizeClass} text-slate-800 font-serif leading-relaxed text-xs sm:text-sm`}
+                  flowProse
+                  className="text-[15px] md:text-base text-slate-900 font-bold leading-[1.55]"
                 />
               )}
 
@@ -986,7 +987,7 @@ export default function RealExamRunner({ test, onClose }) {
           )}
 
           {/* Middle Column: Question Prompt & Options Radio List ONLY */}
-          <div className="flex-1 p-5 md:p-6 overflow-y-auto space-y-5">
+          <div className="flex-1 p-4 md:p-5 overflow-y-auto space-y-4">
             {/* Question Header */}
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <h2 className="font-bold text-sm md:text-base text-slate-900">
@@ -1003,7 +1004,7 @@ export default function RealExamRunner({ test, onClose }) {
             </div>
 
             {/* Options Radio List */}
-            <div className="space-y-2.5 pt-2">
+            <div className="space-y-2 pt-1">
               {(activeQuestion.options || []).map((opt, optIdx) => {
                 const isSelected = answers[activeQuestion.id] === optIdx;
                 const letter = String.fromCharCode(65 + optIdx);
@@ -1011,7 +1012,7 @@ export default function RealExamRunner({ test, onClose }) {
                   <label
                     key={optIdx}
                     onClick={() => handleSelectOption(optIdx)}
-                    className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
+                    className={`flex items-start gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer ${
                       isSelected
                         ? "bg-blue-50/70 border-blue-400 font-semibold shadow-xs"
                         : "bg-white border-slate-200 hover:border-slate-300"

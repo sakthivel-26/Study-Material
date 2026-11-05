@@ -1,15 +1,16 @@
 import React, { useMemo, useState } from "react";
 import { CircleDot, CheckCircle2, XCircle, Info, Maximize2, Minimize2, Eye } from "lucide-react";
+import { getSimpleSetLayout, getSetRootCenters } from "../utils/syllogismLayout.js";
 
 /**
  * Normalizes entity name for matching (singular, lowercase)
  */
 function normalizeEntity(name) {
   if (!name) return "";
-  let n = name.trim().toLowerCase();
+  let n = name.trim().toLowerCase().replace(/^(?:an?|the)\s+/, "");
   // Strip trailing 's' or 'es' for simple singularization in entity matching
   if (n.endsWith("ies")) n = n.slice(0, -3) + "y";
-  else if (n.endsWith("es") && !n.endsWith("ses") && !n.endsWith("xes")) n = n.slice(0, -2);
+  else if (/(?:ches|shes|sses|xes|zes|oes)$/.test(n)) n = n.slice(0, -2);
   else if (n.endsWith("s") && !n.endsWith("ss") && !n.endsWith("us") && !n.endsWith("is")) n = n.slice(0, -1);
   return n;
 }
@@ -48,17 +49,18 @@ export function parseSyllogismModel(text) {
   let m;
   while ((m = statementRegex.exec(stmtSection)) !== null) {
     const quant = m[1].toLowerCase().replace(/\s+/g, " ").trim();
-    const subj = m[2].trim().replace(/^(?:the|all|some|few)\s+/i, "");
+    const subj = m[2].trim().replace(/^(?:an?|the|all|some|few)\s+/i, "");
     const copula = m[3].toLowerCase().trim();
-    const pred = m[4].trim().replace(/^(?:the|all|some|few)\s+/i, "");
+    const pred = m[4].trim().replace(/^(?:an?|the|all|some|few)\s+/i, "");
 
     let type = "SOME"; // default
-    if (quant === "all") type = "ALL";
+    if (quant === "all") type = copula.includes("not") ? "ALL_NOT" : "ALL";
     else if (quant === "no") type = "NO";
     else if (quant === "only a few") type = "ONLY_A_FEW";
     else if (copula.includes("not")) type = "SOME_NOT";
 
-    if (subj && pred && subj.length <= 30 && pred.length <= 30) {
+    if (subj && pred && subj.length <= 30 && pred.length <= 30 &&
+        !statements.some(s => s.type === type && s.normSubj === normalizeEntity(subj) && s.normPred === normalizeEntity(pred))) {
       statements.push({
         type,
         subject: subj,
@@ -74,13 +76,13 @@ export function parseSyllogismModel(text) {
 
   // Parse conclusions
   const conclusions = [];
-  const concLineRegex = /(?:(?:[I|V|X\d]+)[\.\)]|\bconclusion\s*[I|V|X\d]*[:\-])\s*([^\n\r]+)/gi;
+  const concLineRegex = /(?:^|\s)(I{1,3}|IV|V|\d+)[\.\)]\s*([\s\S]*?)(?=\s+(?:I{1,3}|IV|V|\d+)[\.\)]\s*|\n|$)/gi;
   let cm;
   while ((cm = concLineRegex.exec(concSection)) !== null) {
-    const rawConc = cm[1].trim();
+    const rawConc = cm[2].trim();
     if (rawConc.length > 5) {
       // Check if explanation indicates this conclusion follows
-      const concNum = cm[0].match(/([I|V|X\d]+)/)?.[1] || "";
+      const concNum = cm[1].toUpperCase();
       const followsPattern = new RegExp(`(?:conclusion\\s*)?${concNum}\\s+(?:does\\s+)?follows?`, "i");
       const notFollowsPattern = new RegExp(`(?:conclusion\\s*)?${concNum}\\s+(?:does\\s+not|doesn't)\\s+follow`, "i");
 
@@ -99,6 +101,7 @@ export function parseSyllogismModel(text) {
         follows = true;
       }
 
+      if (conclusions.some(c => c.num === concNum)) continue;
       conclusions.push({
         num: concNum || `C${conclusions.length + 1}`,
         text: rawConc,
@@ -136,88 +139,60 @@ const PALETTE = [
   { stroke: "#7C3AED", fill: "rgba(124, 58, 237, 0.16)", labelBg: "#EDE9FE", labelColor: "#5B21B6" }, // Purple
 ];
 
-export default function SyllogismDiagramView({ text, compact = false }) {
+export default function SyllogismDiagramView({ text, explanation = "", compact = false }) {
   const model = useMemo(() => parseSyllogismModel(text), [text]);
   const [isExpanded, setIsExpanded] = useState(false);
 
   if (!model) return null;
 
   const { statements, conclusions, entities } = model;
-  const numEntities = entities.length;
-
-  // Compute 2D Circle Layout for Venn Diagram
-  // Width: 560, Height: 280
+  const noRelations = statements.filter(s => s.type === "NO");
+  const simpleLayout = getSimpleSetLayout(statements, entities);
+  const parent = simpleLayout?.parent;
+  const roots = simpleLayout?.roots || [];
   const width = 560;
   const height = 260;
-
-  // We assign centers and radii to each entity based on logical relationships
   const entityLayout = {};
 
-  if (numEntities === 2) {
-    const hasAll = statements.some(s => s.type === "ALL");
-    const hasNo = statements.some(s => s.type === "NO");
-
-    if (hasAll) {
-      // Nested: Inner circle inside outer
-      const allStmt = statements.find(s => s.type === "ALL");
-      entityLayout[allStmt.normSubj] = { cx: 280, cy: 130, r: 52, color: PALETTE[0], isInner: true };
-      entityLayout[allStmt.normPred] = { cx: 280, cy: 130, r: 96, color: PALETTE[1], isOuter: true };
-    } else if (hasNo) {
-      // Disjoint: separate circles
-      entityLayout[entities[0].norm] = { cx: 170, cy: 130, r: 70, color: PALETTE[0] };
-      entityLayout[entities[1].norm] = { cx: 390, cy: 130, r: 70, color: PALETTE[1] };
-    } else {
-      // Overlapping (Some)
-      entityLayout[entities[0].norm] = { cx: 220, cy: 130, r: 75, color: PALETTE[0] };
-      entityLayout[entities[1].norm] = { cx: 340, cy: 130, r: 75, color: PALETTE[1] };
-    }
-  } else if (numEntities === 3) {
-    // 3 entities: check for nested subset (All A are B)
-    const allStmt = statements.find(s => s.type === "ALL");
-    if (allStmt) {
-      // Subj inside Pred
-      entityLayout[allStmt.normSubj] = { cx: 180, cy: 130, r: 42, color: PALETTE[0], isInner: true };
-      entityLayout[allStmt.normPred] = { cx: 190, cy: 130, r: 84, color: PALETTE[1], isOuter: true };
-      const third = entities.find(e => e.norm !== allStmt.normSubj && e.norm !== allStmt.normPred);
-      if (third) {
-        const connectsToPred = statements.some(s => (s.normSubj === third.norm && s.normPred === allStmt.normPred) || (s.normPred === third.norm && s.normSubj === allStmt.normPred));
-        const isDisjoint = statements.some(s => s.type === "NO" && (s.normSubj === third.norm || s.normPred === third.norm));
-        const cx = isDisjoint ? 410 : 330;
-        entityLayout[third.norm] = { cx, cy: 130, r: 72, color: PALETTE[2] };
-      }
-    } else {
-      // Tri-circle Venn layout or chain
-      entityLayout[entities[0].norm] = { cx: 160, cy: 130, r: 68, color: PALETTE[0] };
-      entityLayout[entities[1].norm] = { cx: 280, cy: 130, r: 68, color: PALETTE[1] };
-      entityLayout[entities[2].norm] = { cx: 400, cy: 130, r: 68, color: PALETTE[2] };
-    }
-  } else {
-    // 4+ entities: horizontal layout chain
-    const step = (width - 120) / (numEntities - 1);
-    entities.forEach((ent, idx) => {
-      entityLayout[ent.norm] = {
-        cx: 60 + idx * step,
-        cy: 130,
-        r: Math.min(58, step * 0.65),
-        color: PALETTE[idx % PALETTE.length]
-      };
+  if (simpleLayout) {
+    const rootPositions = getSetRootCenters(roots, statements, parent);
+    const depth = (norm, seen = new Set()) => {
+      if (seen.has(norm)) return -1;
+      const children = [...parent].filter(([, p]) => p === norm).map(([child]) => child);
+      return children.length ? 1 + Math.max(...children.map(child => depth(child, new Set([...seen, norm])))) : 0;
+    };
+    roots.forEach((root, rootIndex) => {
+      const rootDepth = depth(root.norm);
+      if (rootDepth < 0 || rootDepth > 3) return;
+      const descendants = entities.filter(e => {
+        let current = e.norm;
+        const seen = new Set();
+        while (parent.has(current) && !seen.has(current)) {
+          seen.add(current);
+          current = parent.get(current);
+        }
+        return current === root.norm;
+      });
+      descendants.forEach((entity) => {
+        let levels = 0;
+        let current = entity.norm;
+        while (current !== root.norm && levels < 5) {
+          current = parent.get(current);
+          levels++;
+        }
+        const radius = Math.max(25, 90 - levels * 21);
+        entityLayout[entity.norm] = {
+          cx: rootPositions[rootIndex] - levels * 8,
+          cy: 130,
+          r: radius,
+          color: PALETTE[entities.findIndex(e => e.norm === entity.norm) % PALETTE.length],
+          isInner: levels > 0,
+          isOuter: levels === 0
+        };
+      });
     });
   }
-
-  // Ensure all entities have layout coordinates
-  entities.forEach((ent, idx) => {
-    if (!entityLayout[ent.norm]) {
-      entityLayout[ent.norm] = {
-        cx: 80 + idx * 110,
-        cy: 130,
-        r: 55,
-        color: PALETTE[idx % PALETTE.length]
-      };
-    }
-  });
-
-  // Extract disjoint (NO) relation lines to draw connecting crossbars
-  const noRelations = statements.filter(s => s.type === "NO");
+  const showVenn = !!simpleLayout && entities.every(e => entityLayout[e.norm]);
 
   return (
     <div className={`rounded-xl border border-indigo-200/90 bg-white shadow-2xs overflow-hidden transition-all ${compact ? "p-3" : "p-4"}`}>
@@ -228,25 +203,25 @@ export default function SyllogismDiagramView({ text, compact = false }) {
             <CircleDot size={12} />
           </div>
           <span className="font-extrabold text-xs text-indigo-950 uppercase tracking-wider">
-            Syllogism Venn Diagram Solution
+            {showVenn ? "Syllogism Set Diagram" : "Syllogism Relationship Diagram"}
           </span>
           <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-full border border-indigo-200">
             {statements.length} Statement{statements.length > 1 ? "s" : ""}
           </span>
         </div>
 
-        <button
+        {showVenn && <button
           type="button"
           onClick={() => setIsExpanded(!isExpanded)}
           className="text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 flex items-center gap-1 transition-colors cursor-pointer"
         >
           {isExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
           <span>{isExpanded ? "Standard View" : "Enlarge Venn"}</span>
-        </button>
+        </button>}
       </div>
 
       {/* SVG Venn Diagram Container */}
-      <div className={`w-full overflow-x-auto bg-slate-50/70 rounded-xl border border-slate-200/80 p-2 flex items-center justify-center transition-all ${isExpanded ? "min-h-[340px]" : "min-h-[200px]"}`}>
+      {showVenn ? <div className={`w-full overflow-x-auto bg-slate-50/70 rounded-xl border border-slate-200/80 p-2 flex items-center justify-center transition-all ${isExpanded ? "min-h-[340px]" : "min-h-[200px]"}`}>
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className={`w-full h-auto max-w-[560px] select-none ${isExpanded ? "scale-105" : ""}`}
@@ -321,7 +296,7 @@ export default function SyllogismDiagramView({ text, compact = false }) {
                   />
 
                   {/* Entity Label Badge */}
-                  <g transform={`translate(${layout.cx}, ${layout.isInner ? layout.cy + 4 : (layout.isOuter ? layout.cy - layout.r + 18 : layout.cy + layout.r + 14)})`}>
+                  <g transform={`translate(${layout.cx}, ${layout.cy - layout.r + 18})`}>
                     <rect
                       x="-42"
                       y="-11"
@@ -348,7 +323,14 @@ export default function SyllogismDiagramView({ text, compact = false }) {
               );
             })}
         </svg>
-      </div>
+      </div> : <div className="grid sm:grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        {statements.map((statement, index) => (
+          <div key={index} className="rounded-lg border border-indigo-100 bg-white px-3 py-2 text-sm font-semibold text-slate-800">
+            {statement.raw}
+          </div>
+        ))}
+      </div>}
+      {showVenn && <p className="mt-2 text-[11px] text-slate-500">Illustrative set layout. Only the relationships listed below are guaranteed.</p>}
 
       {/* Logical Relationship Summary Cards */}
       <div className="mt-3 flex flex-wrap gap-1.5">
@@ -358,6 +340,9 @@ export default function SyllogismDiagramView({ text, compact = false }) {
           if (st.type === "SOME") {
             badgeBg = "bg-emerald-50 text-emerald-800 border-emerald-200";
             symbol = "∩";
+          } else if (st.type === "SOME_NOT" || st.type === "ALL_NOT") {
+            badgeBg = "bg-amber-50 text-amber-800 border-amber-200";
+            symbol = st.type === "ALL_NOT" ? "⊆ not" : "some outside";
           } else if (st.type === "NO") {
             badgeBg = "bg-rose-50 text-rose-800 border-rose-200";
             symbol = "∦ (Disjoint)";

@@ -112,7 +112,7 @@ export function parsePassageBlocks(passage) {
   return blocks;
 }
 
-export default function FormattedPassage({ passage, className = "" }) {
+export default function FormattedPassage({ passage, className = "", flowProse = false }) {
   if (!passage) return null;
   const blocks = parsePassageBlocks(passage);
 
@@ -121,8 +121,10 @@ export default function FormattedPassage({ passage, className = "" }) {
       {blocks.map((block, bIdx) => {
         if (block.type === "text") {
           return (
-            <p key={bIdx} className="whitespace-pre-line leading-relaxed">
-              {renderMathInline(block.content)}
+            <p key={bIdx} className={`${flowProse ? "whitespace-pre-wrap" : "whitespace-pre-line"} leading-relaxed`}>
+              {renderMathInline(flowProse
+                ? block.content.trim().replace(/([^\n])\n(?!\n)/g, "$1 ").replace(/\n{2,}/g, "\n\n")
+                : block.content)}
             </p>
           );
         }
