@@ -73,7 +73,7 @@ export default function AdmissionPage() {
       <PageHeader
         icon={<GraduationCap size={22} />}
         title="Admissions 2026"
-        subtitle="Apply for Online Live & Offline Classroom Coaching at Shakthi Academy"
+        subtitle="Apply for Online Live & Offline Classroom Coaching at KEN Academy"
       />
 
       <div className="grid lg:grid-cols-12 gap-6">
@@ -251,7 +251,7 @@ export default function AdmissionPage() {
         <div className="lg:col-span-5 space-y-5">
           <div className="card p-6 bg-gradient-to-br from-brand-900 to-brand-700 text-white shadow-lift">
             <span className="inline-block px-3 py-1 rounded-full bg-white/20 text-white text-xs font-bold uppercase tracking-wider mb-3">
-              Why Join Shakthi Academy?
+              Why Join KEN Academy?
             </span>
             <h3 className="text-xl font-extrabold mb-3 leading-tight">
               Tamil Nadu's Trusted Coaching for Government Jobs
@@ -264,10 +264,6 @@ export default function AdmissionPage() {
               <div className="flex items-start gap-2.5">
                 <CheckCircle2 size={18} className="text-emerald-400 shrink-0 mt-0.5" />
                 <span><strong>Both Online &amp; Offline Modes</strong> with dedicated mentor support.</span>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <CheckCircle2 size={18} className="text-emerald-400 shrink-0 mt-0.5" />
-                <span><strong>10,000+ Mock Questions</strong> with real exam pattern &amp; explanations.</span>
               </div>
               <div className="flex items-start gap-2.5">
                 <CheckCircle2 size={18} className="text-emerald-400 shrink-0 mt-0.5" />

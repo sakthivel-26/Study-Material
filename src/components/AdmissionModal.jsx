@@ -133,7 +133,7 @@ export function AdmissionModal() {
                     Admissions Open 2026
                   </span>
                   <h2 className="text-lg font-extrabold text-white leading-tight">
-                    Shakthi Academy Admission Inquiry
+                    KEN Academy Admission Inquiry
                   </h2>
                 </div>
               </div>
